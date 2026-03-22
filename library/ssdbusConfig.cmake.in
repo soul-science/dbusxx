@@ -1,0 +1,4 @@
+@PACKAGE_INIT@  # Insert package initialization code (automatic path processing, etc.)
+
+include("${CMAKE_CURRENT_LIST_DIR}/ssdbusTargets.cmake")  
+# Enable loading of 'ssdbusTargets.cmake' when 'find_mackage(ssdbus)'
