@@ -24,6 +24,30 @@ public:
         sd_bus_error_move(&mRawError, aRawError);
     }
 
+    explicit DbusError(const std::string&& aErrName, const std::string&& aErrMsg)
+        : mRawError(SD_BUS_ERROR_NULL) {
+        int ret = sd_bus_error_set(&mRawError, aErrName.c_str(), aErrMsg.c_str());
+        if (ret < 0) {
+            throw DbusException("Failed to create bus error: ", strerror(-ret));
+        }
+    }
+
+    explicit DbusError(const char* aErrName, const char* aErrMsg)
+        : mRawError(SD_BUS_ERROR_NULL) {
+        int ret = sd_bus_error_set(&mRawError, aErrName, aErrMsg);
+        if (ret < 0) {
+            throw DbusException("Failed to create bus error: ", strerror(-ret));
+        }
+    }
+
+    explicit DbusError(int aErrno)
+        : mRawError(SD_BUS_ERROR_NULL) {
+        int ret = sd_bus_error_set_errno(&mRawError, aErrno);
+        if (ret < 0) {
+            throw DbusException("Failed to create bus error: ", strerror(-ret));
+        }
+    }
+
     DbusError() : mRawError(SD_BUS_ERROR_NULL) {}
 
     ~DbusError() {

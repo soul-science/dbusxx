@@ -14,13 +14,22 @@
 #include "DbusMessage.hpp"
 #include "DbusSlot.hpp"
 #include "DbusArgs.hpp"
+#include "DbusReturnStatus.hpp"
+
+#include <iostream>
 
 namespace SSDbus {
 
-
-
 class DbusSession {
+    using Status = DbusReturnStatus::Status;
 public:
+
+    struct SessionInfo {
+        std::string name;
+        std::string path;
+        std::string interface;
+    };
+
     explicit DbusSession(bool aIsSystem = false) {
         int ret = aIsSystem ? sd_bus_open_system(&mRawBus)
             : sd_bus_open_user(&mRawBus);
@@ -57,15 +66,22 @@ public:
     DbusSession(const DbusSession&) = delete;
     DbusSession& operator=(const DbusSession&) = delete;
 
-    static DbusSession CreateSession(std::string&& aName, bool aIsSystem = false) {
+    static DbusSession CreateSession(SessionInfo&& aInfo, bool aIsSystem = false) {
         DbusSession session(aIsSystem);
-        session.setDbusName(std::forward<std::string>(aName));
+        session.setDbusInfo(std::forward<SessionInfo>(aInfo));
         return session;
     }
 
-    bool setDbusName(const std::string& aName) {
-        int ret = sd_bus_request_name(mRawBus, aName.c_str(), 0);
-        return ret >= 0;
+    DbusReturnStatus setDbusInfo(SessionInfo aInfo) {
+        std::cout << "name:" << aInfo.name << ", path:" << aInfo.path << ", interface:" << aInfo.interface << std::endl;
+        int ret = sd_bus_request_name(mRawBus, aInfo.name.c_str(), 0);
+        if (ret < 0) {
+            std::cout << "sd_bus_request_name failed, reason:" << ret << " " << strerror(-ret) << std::endl;
+            return DbusReturnStatus(Status::FAIL);
+        }
+
+        mInfo = aInfo;
+        return DbusReturnStatus(Status::SUCCESS);
     }
 
     template <typename Cls, typename Ret, typename... Args>
@@ -77,8 +93,21 @@ public:
             Cls* obj = pair->first;
             ClsFuncPtr func = pair->second;
 
-            //! message -> args
-            // return (obj->*func)(aMsg, aErr);
+            //! Parse args from message
+            DbusMessage message(aMsg);
+            std::tuple<Args...> tpl;
+            message.read(tpl);
+
+            //! Apply function
+            Ret res = std::apply(
+                [&](auto&&... aArgs) -> Ret {
+                    return (obj->*func)(std::forward<decltype(aArgs)>(aArgs)...);
+                },
+                tpl
+            );
+
+            //! Response reply
+
             return 1;
         }
     };
@@ -92,9 +121,9 @@ public:
     template<typename Cls, typename Ret, typename... Args>
     std::string getArgsString(Cls* aObj, Ret (Cls::*aFunc)(Args...)) {
         std::string args;
-        
+
         if constexpr (sizeof...(Args)) {
-            (args.append(SSDbus::getSignature<Args>()), ...);
+            (args.append(std::string(1, SSDbus::getSignature<Args>())), ...);
         }
 
         return args;
@@ -102,12 +131,20 @@ public:
 
     template<typename Cls, typename Ret, typename... Args>
     std::string getReturnString(Cls* aObj, Ret (Cls::*aFunc)(Args...)) {
-        return SSDbus::getSignature<Ret>();
+        return std::string(1, SSDbus::getSignature<Ret>());
     }
 
     template<typename Cls, typename Ret, typename... Args>
-    bool registerInterface(const char* aFuncName, Cls* aObj, Ret (Cls::*aFunc)(Args...)) {
+    DbusReturnStatus registerInterface(const char* aFuncName, Cls* aObj, Ret (Cls::*aFunc)(Args...)) {
         using ClsFuncPtr = Ret (Cls::*)(Args...);
+
+        if (mInfo.path.empty() || mInfo.path.empty()) {
+            return DbusReturnStatus(
+                Status::FAIL
+                // DbusError("", "service name or path is empty")
+            );
+        }
+
         auto data = std::make_shared<std::pair<Cls*, ClsFuncPtr>>(aObj, aFunc);
         auto dataPtr = data.get();
 
@@ -115,6 +152,8 @@ public:
         using wrapper = IfaceWrapper<Cls, Ret, Args...>;
         std::string input = getArgsString(aObj, aFunc);
         std::string output = getReturnString(aObj, aFunc);
+
+        std::cout << "input: " << input << ", output:" << output << std::endl;
 
         auto vtable = std::unique_ptr<sd_bus_vtable[]>( new sd_bus_vtable[3] {
             SD_BUS_VTABLE_START(0),
@@ -125,24 +164,25 @@ public:
         sd_bus_vtable* vtablePtr = vtable.get();
         sd_bus_slot* rawSlot { nullptr };
         auto ret = sd_bus_add_object_vtable(
-            mRawBus, &rawSlot, "aServicePath", "aServiceInterface", vtablePtr, dataPtr
+            mRawBus, &rawSlot, mInfo.path.c_str(), mInfo.interface.c_str(), vtablePtr, dataPtr
         );
 
         DbusSlot slot(rawSlot);
         if (ret < 0) {
-            return false;
+            return DbusReturnStatus(
+                Status::FAIL
+                // DbusError("", strerror(-ret))
+            );
         }
 
         mRegisteredMethods[aFuncName] = { std::any(data), std::move(vtable), std::move(slot) };
-        return true;
+        return DbusReturnStatus(Status::SUCCESS);
     }
-    
+
 private:
     sd_bus* mRawBus { nullptr };
 
-    std::string mServiceName;
-
-    std::string mServicePath;
+    SessionInfo mInfo;
 
     std::unordered_map<std::string, MethodInfo> mRegisteredMethods;
 
