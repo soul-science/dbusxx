@@ -8,8 +8,6 @@
 #include <unordered_map>
 #include <vector>
 
-#include <any>
-
 #include "DbusError.hpp"
 #include "DbusMessage.hpp"
 #include "DbusSlot.hpp"
@@ -22,6 +20,15 @@ namespace SSDbus {
 
 class DbusSession {
     using Status = DbusReturnStatus::Status;
+
+    struct MethodInfo {
+        std::string input;
+        std::string output;
+        std::shared_ptr<void> method;
+        std::unique_ptr<sd_bus_vtable[]> vtable;
+        DbusSlot slot;
+    };
+
 public:
 
     struct SessionInfo {
@@ -38,8 +45,12 @@ public:
         }
     }
 
+    explicit DbusSession(sd_bus* aRawBus, bool aIsOwned = false)
+        : mRawBus(aRawBus)
+        , mIsOwned(aIsOwned) {}
+
     ~DbusSession() {
-        if (mRawBus) {
+        if (mRawBus && mIsOwned) {
             sd_bus_unref(mRawBus);
         }
     }
@@ -93,29 +104,47 @@ public:
             Cls* obj = pair->first;
             ClsFuncPtr func = pair->second;
 
-            //! Parse args from message
             DbusMessage message(aMsg);
-            std::tuple<Args...> tpl;
-            message.read(tpl);
+            DbusMessage reply = DbusMessage::createReply(message);
 
-            //! Apply function
-            Ret res = std::apply(
-                [&](auto&&... aArgs) -> Ret {
-                    return (obj->*func)(std::forward<decltype(aArgs)>(aArgs)...);
-                },
-                tpl
-            );
+            if constexpr (sizeof...(Args)) {
+                //! Parse args from message
+                std::tuple<typename ArgTypeAdaptor<Args...>::type> tpl;
+                message.read(tpl);
+
+                //! Apply function
+                if constexpr (std::is_same_v<Ret, void>) {
+                    std::apply(
+                        [&](auto&&... aArgs) -> void {
+                            (obj->*func)(std::forward<decltype(aArgs)>(aArgs)...);
+                        },
+                        tpl
+                    );
+
+                } else {
+                    Ret res = std::apply(
+                        [&](auto&&... aArgs) -> Ret {
+                            return (obj->*func)(std::forward<decltype(aArgs)>(aArgs)...);
+                        },
+                        tpl
+                    );
+
+                    reply.write(res);
+                }
+            } else {
+                //! Apply function
+                if constexpr (std::is_same_v<Ret, void>) {
+                    (obj->*func)();
+                } else {
+                    Ret res = (obj->*func)();
+                    reply.write(res);
+                }
+            }
 
             //! Response reply
-
-            return 1;
+            auto ret = message.getDbus()->sendMessage(reply, message.getSender());
+            return ret ? 1 : -1;
         }
-    };
-
-    struct MethodInfo {
-        std::any method; 
-        std::unique_ptr<sd_bus_vtable[]> vtable;
-        DbusSlot slot;
     };
 
     template<typename Cls, typename Ret, typename... Args>
@@ -148,16 +177,19 @@ public:
         auto data = std::make_shared<std::pair<Cls*, ClsFuncPtr>>(aObj, aFunc);
         auto dataPtr = data.get();
 
+        mRegisteredMethods[aFuncName] = {};
+        auto& info = mRegisteredMethods[aFuncName];
+
+        info.input = getArgsString(aObj, aFunc);
+        info.output = getReturnString(aObj, aFunc);
+
+        std::cout << "input: " << info.input << ", output:" << info.output << std::endl;
+
         //! Create vtable
         using wrapper = IfaceWrapper<Cls, Ret, Args...>;
-        std::string input = getArgsString(aObj, aFunc);
-        std::string output = getReturnString(aObj, aFunc);
-
-        std::cout << "input: " << input << ", output:" << output << std::endl;
-
         auto vtable = std::unique_ptr<sd_bus_vtable[]>( new sd_bus_vtable[3] {
             SD_BUS_VTABLE_START(0),
-            SD_BUS_METHOD(aFuncName, input.c_str(), output.c_str(), &wrapper::call, SD_BUS_VTABLE_UNPRIVILEGED),
+            SD_BUS_METHOD(aFuncName, info.input.c_str(), info.output.c_str(), &wrapper::call, SD_BUS_VTABLE_UNPRIVILEGED),
             SD_BUS_VTABLE_END
         });
 
@@ -169,18 +201,58 @@ public:
 
         DbusSlot slot(rawSlot);
         if (ret < 0) {
+            mRegisteredMethods.erase(aFuncName);
             return DbusReturnStatus(
                 Status::FAIL
                 // DbusError("", strerror(-ret))
             );
         }
 
-        mRegisteredMethods[aFuncName] = { std::any(data), std::move(vtable), std::move(slot) };
+        info.method = data;
+        info.vtable = std::move(vtable);
+        info.slot = std::move(slot);
+
         return DbusReturnStatus(Status::SUCCESS);
+    }
+
+    DbusReturnStatus sendMessage(DbusMessage& aMsg) {
+        return sendMessage(aMsg, aMsg.getSender());
+    }
+
+    DbusReturnStatus sendMessage(DbusMessage& aMsg, const char* aDestination) {
+        if (!mRawBus) {
+            return DbusReturnStatus(Status::FAIL);
+        }
+
+        int ret = sd_bus_send_to(mRawBus, aMsg.getRawPtr(), aDestination, nullptr);
+
+        return DbusReturnStatus(ret >= 0 ? Status::SUCCESS : Status::FAIL);
+    }
+
+    // 处理事件（非阻塞）
+    int process() {
+        return sd_bus_process(mRawBus, nullptr);
+    }
+
+    // 等待事件（阻塞）
+    int wait(uint64_t timeout_usec = UINT64_MAX) {
+        return sd_bus_wait(mRawBus, timeout_usec);
+    }
+
+    // 获取文件描述符（用于集成外部事件循环）
+    int getFd() const {
+        return sd_bus_get_fd(mRawBus);
+    }
+
+    // 刷新（发送所有待发送消息）
+    void flush() {
+        sd_bus_flush(mRawBus);
     }
 
 private:
     sd_bus* mRawBus { nullptr };
+
+    bool mIsOwned { false };
 
     SessionInfo mInfo;
 

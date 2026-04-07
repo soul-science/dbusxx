@@ -98,6 +98,21 @@ constexpr char getSignature() {
     return DbusTypeSignature<std::decay_t<T>>::value;
 }
 
+template<typename T>
+struct ArgTypeAdaptor {
+    using type = T;
+};
+
+template<>
+struct ArgTypeAdaptor<float> {
+    using type = double;
+};
+
+template<>
+struct ArgTypeAdaptor<std::string_view> {
+    using type = const char*;
+};
+
 }
 
 #endif

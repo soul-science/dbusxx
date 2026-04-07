@@ -1,6 +1,7 @@
 #ifndef SSDBUS_DBUS_MESSAGE_HPP
 #define SSDBUS_DBUS_MESSAGE_HPP
 
+#include <memory>
 #include <systemd/sd-bus.h>
 #include <type_traits>
 #include <tuple>
@@ -10,6 +11,9 @@
 #include "DbusArgs.hpp"
 
 namespace SSDbus {
+
+class DbusSession;
+
 class DbusMessage {
     using Status = DbusReturnStatus::Status;
 public:
@@ -57,6 +61,20 @@ public:
     DbusMessage& operator<<(T& aVal) {
         write(aVal);
         return *this;
+    }
+
+    sd_bus_message* getRawPtr() {
+        return mRawMsg;
+    }
+
+    static DbusMessage createReply(DbusMessage& aCallMsg) {
+        sd_bus_message* reply = nullptr;
+        int ret = sd_bus_message_new_method_return(aCallMsg.getRawPtr(), &reply);
+        if (ret < 0) {
+            throw DbusException("createReply failed", strerror(-ret));
+        }
+
+        return DbusMessage(reply, true);
     }
 
     template<typename T>
@@ -112,9 +130,13 @@ public:
             ret = sd_bus_message_append_basic(
                 mRawMsg, DbusTypeSignature<T>::value, aVal.data());
         }
-        else {
+        else if constexpr (std::is_same_v<T, const char*>) {
             ret = sd_bus_message_append_basic(
                 mRawMsg, DbusTypeSignature<T>::value, aVal);
+        }
+        else {
+            ret = sd_bus_message_append_basic(
+                mRawMsg, DbusTypeSignature<T>::value, &aVal);
         }
 
         return DbusReturnStatus(ret >= 0 ? Status::SUCCESS : Status::FAIL);
@@ -128,6 +150,12 @@ public:
         }
 
         return write(aRests...);
+    }
+
+    std::unique_ptr<DbusSession> getDbus();
+
+    const char* getSender() {
+        return sd_bus_message_get_sender(mRawMsg);
     }
 
 private:
