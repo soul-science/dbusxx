@@ -37,7 +37,8 @@ public:
         std::string interface;
     };
 
-    explicit DbusSession(bool aIsSystem = false) {
+    explicit DbusSession(bool aIsSystem = false)
+        : mIsOwned(true) {
         int ret = aIsSystem ? sd_bus_open_system(&mRawBus)
             : sd_bus_open_user(&mRawBus);
         if (ret < 0) {
@@ -50,8 +51,8 @@ public:
         , mIsOwned(aIsOwned) {}
 
     ~DbusSession() {
-        if (mRawBus && mIsOwned) {
-            sd_bus_unref(mRawBus);
+        if (mIsOwned) {
+            close();
         }
     }
 
@@ -250,6 +251,19 @@ public:
     }
 
 private:
+
+    void close() {
+        if (!mRawBus) {
+            return;
+        }
+
+        if (sd_bus_is_open(mRawBus) > 0) {
+            sd_bus_close(mRawBus);
+        }
+
+        mRawBus = sd_bus_unref(mRawBus);
+    }
+
     sd_bus* mRawBus { nullptr };
 
     bool mIsOwned { false };

@@ -5,18 +5,9 @@
 #include <ostream>
 #include <systemd/sd-bus.h>
 #include <string>
-#include <stdexcept>
+#include "RawAdaptor.hpp"
 
 namespace SSDbus {
-
-class DbusException : public std::runtime_error {
-public:
-    explicit DbusException(const std::string& aMsg)
-        : std::runtime_error(aMsg) {}
-
-    explicit DbusException(const std::string& aName, const std::string& msg)
-        : std::runtime_error(aName + ": " + msg) {}
-};
 
 class DbusError {
 public:
