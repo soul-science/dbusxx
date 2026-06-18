@@ -5,7 +5,7 @@
 #include <ostream>
 #include <systemd/sd-bus.h>
 #include <string>
-#include "RawAdaptor.hpp"
+#include "adaptor/RawAdaptor.hpp"
 
 namespace SSDbus {
 
@@ -19,7 +19,7 @@ public:
         : mRawError(SD_BUS_ERROR_NULL) {
         int ret = sd_bus_error_set(&mRawError, aErrName.c_str(), aErrMsg.c_str());
         if (ret < 0) {
-            throw DbusException("Failed to create bus error: ", strerror(-ret));
+            throw Adaptor::DbusException("Failed to create bus error: ", strerror(-ret));
         }
     }
 
@@ -27,7 +27,7 @@ public:
         : mRawError(SD_BUS_ERROR_NULL) {
         int ret = sd_bus_error_set(&mRawError, aErrName, aErrMsg);
         if (ret < 0) {
-            throw DbusException("Failed to create bus error: ", strerror(-ret));
+            throw Adaptor::DbusException("Failed to create bus error: ", strerror(-ret));
         }
     }
 
@@ -35,7 +35,7 @@ public:
         : mRawError(SD_BUS_ERROR_NULL) {
         int ret = sd_bus_error_set_errno(&mRawError, aErrno);
         if (ret < 0) {
-            throw DbusException("Failed to create bus error: ", strerror(-ret));
+            throw Adaptor::DbusException("Failed to create bus error: ", strerror(-ret));
         }
     }
 

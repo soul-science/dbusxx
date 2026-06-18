@@ -36,7 +36,7 @@ public:
         return mErr;
     }
 
-    operator bool() const {
+    explicit operator bool() const {
         return mStatus == Status::SUCCESS;
     }
 

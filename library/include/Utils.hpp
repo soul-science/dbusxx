@@ -11,8 +11,16 @@
 #define SSDBUS_UTILS_HPP
 
 #include <unistd.h>
+#include <string>
 
 namespace SSDbus {
+
+struct ServiceInfo {
+    std::string name;
+    std::string path;
+    std::string interface;
+};
+
 //! Safe read function
 ssize_t __safeRead(int aFd, void* aBuffer, size_t aCount);
 

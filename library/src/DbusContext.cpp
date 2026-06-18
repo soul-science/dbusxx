@@ -13,7 +13,7 @@
 #include <fcntl.h>
 #include <syslog.h>
 
-#include "DbusUtils.hpp"
+#include "Utils.hpp"
 
 namespace SSDbus {
 

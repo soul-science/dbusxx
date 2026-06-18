@@ -11,8 +11,10 @@
 #include <cassert>
 
 namespace SSDbus {
-
+namespace Adaptor {
+using RawBus_ = sd_bus;
 using RawBusPtr = sd_bus*;
+using RawbusMessage_ = sd_bus_message;
 using RawBusMessagePtr = sd_bus_message*;
 using RawBusSlotPtr = sd_bus_slot*;
 using RawBusCredsPtr = sd_bus_creds*;
@@ -22,6 +24,7 @@ using RawBusErrorPtr = sd_bus_error*;
 using RawBusErrorMap = sd_bus_error_map;
 using RawBusEventPtr = sd_event*;
 using RawBusEventSrcPtr = sd_event_source*;
+using RawBusVTable = sd_bus_vtable;
 
 using RawBusMessageHandler = sd_bus_message_handler_t;
 using RawBusPropertyGetter = sd_bus_property_get_t;
@@ -126,6 +129,29 @@ namespace RawBus {
         return ret >= 0;
     }
 
+    void unrefBus(RawBusPtr aBus) {
+        assert(aBus);
+        sd_bus_unref(aBus);
+    }
+
+    void refBus(RawBusPtr aBus) {
+        assert(aBus);
+        sd_bus_ref(aBus);
+    }
+
+    int sendMessage(RawBusPtr aBus, RawBusMessagePtr aMsg) {
+        return sd_bus_send(aBus, aMsg, nullptr);
+    }
+
+    int sendMessage(RawBusPtr aBus, RawBusMessagePtr aMsg, std::string_view aDestination) {
+        return sd_bus_send_to(aBus, aMsg, aDestination.data(), nullptr);
+    }
+
+    int call(RawBusPtr aBus, RawBusMessagePtr aMsg,
+        uint64_t aTimeoutUmsc, RawBusErrorPtr aErr, RawBusMessagePtr& aRep) {
+        return sd_bus_call(aBus, aMsg, aTimeoutUmsc, aErr, &aRep);
+    }
+
     void closeBus(RawBusPtr aBus) {
         assert(aBus);
 
@@ -193,11 +219,11 @@ namespace RawBus {
         return name ? std::string_view(name) : std::string_view();
     }
 
-    bool setUniqueName(RawBusPtr aBus, const char* aName, uint64_t aFlags) {
+    int setUniqueName(RawBusPtr aBus, const char* aName, uint64_t aFlags) {
         assert(aBus);
         assert(aName);
         int ret = sd_bus_request_name(aBus, aName, aFlags);
-        return ret >= 0;
+        return ret;
     }
 
 }
@@ -563,8 +589,18 @@ namespace RawMessage {
         return copy;
     }
 
-}
+    void unrefMessage(RawBusMessagePtr aMsg) {
+        assert(aMsg);
+        sd_bus_message_unref(aMsg);
+    }
 
+    void refMessage(RawBusMessagePtr aMsg) {
+        assert(aMsg);
+        sd_bus_message_ref(aMsg);
+    }
+
+}
+}
 }
 
 #endif

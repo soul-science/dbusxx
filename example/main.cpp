@@ -1,4 +1,4 @@
-#include "DbusSession.hpp"
+#include "Session.hpp"
 #include "DbusEventLoop.hpp"
 
 #include <iostream>
@@ -86,8 +86,8 @@ public:
 };
 
 int main() {
-    SSDbus::DbusSession session(true);
-    session.setDbusInfo(
+    SSDbus::Session session(true);
+    session.setInfo(
         {"com.example.test", "/com/example/test", "com.example.interface"}
     );
 
@@ -136,6 +136,19 @@ int main() {
 
     ret = session.registerInterface("testVoid", &t, &Test::testVoid);
     std::cout << "register testVoid ret=" << static_cast<int>(ret.getStatus()) << std::endl;
+
+
+    //! TODO: 注册匿名函数 
+    // ret = session.registerInterface("anonymousTest", []() -> void {
+    //     return;
+    // });
+
+    session.callSync<void>(
+        "com.sslog.service",
+        "/com/sslog/service",
+        "com.sslog.service.interfaces",
+        "clearAll"
+    );
 
     DbusEventLoop loop(session);
     loop.run();

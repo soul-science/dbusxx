@@ -2,9 +2,7 @@ project(lib)
 
 set(SOURCES
     src/DbusContext.cpp
-    src/DbusManager.cpp
     src/DbusUtils.cpp
-    src/DbusMessage.cpp
 )
 
 add_library(ssdbus SHARED ${SOURCES})

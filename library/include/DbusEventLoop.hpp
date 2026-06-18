@@ -3,16 +3,16 @@
 
 #include <cstdio>
 
-#include "DbusSession.hpp"
+#include "Session.hpp"
 
 namespace SSDbus {
 
 class DbusEventLoop {
-    SSDbus::DbusSession& bus_;
+    SSDbus::Session& bus_;
     bool running_ = false;
     
 public:
-    explicit DbusEventLoop(SSDbus::DbusSession& bus) : bus_(bus) {}
+    explicit DbusEventLoop(SSDbus::Session& bus) : bus_(bus) {}
     
     void run() {
         running_ = true;

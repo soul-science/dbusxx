@@ -3,25 +3,25 @@
 
 #include <systemd/sd-bus.h>
 
-class DbusSlot {
+class Slot {
 public:
-    DbusSlot() = default;
+    Slot() = default;
 
-    explicit DbusSlot(sd_bus_slot* aRawSolt)
+    explicit Slot(sd_bus_slot* aRawSolt)
         : mRawSlot(aRawSolt) {}
 
-    ~DbusSlot() {
+    ~Slot() {
         if (mRawSlot) {
             sd_bus_slot_unref(mRawSlot);
         }
     }
 
-    DbusSlot(DbusSlot&& aOther) noexcept
+    Slot(Slot&& aOther) noexcept
         : mRawSlot(aOther.mRawSlot) {
         aOther.mRawSlot = nullptr;
     }
 
-    DbusSlot& operator=(DbusSlot&& aOther) noexcept {
+    Slot& operator=(Slot&& aOther) noexcept {
         if (this == &aOther) {
             return *this;
         }
@@ -35,8 +35,8 @@ public:
         return *this;
     }
 
-    DbusSlot(const DbusSlot&) = delete;
-    DbusSlot& operator=(const DbusSlot&) = delete;
+    Slot(const Slot&) = delete;
+    Slot& operator=(const Slot&) = delete;
 
 private:
     sd_bus_slot* mRawSlot { nullptr };
