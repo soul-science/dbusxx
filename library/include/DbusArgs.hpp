@@ -9,6 +9,19 @@
 namespace SSDbus {
 
 template<typename T>
+constexpr bool isValidArgs() {
+    using R = std::decay_t<T>;
+    return std::is_integral_v<R>
+        || std::is_floating_point_v<R>
+        || std::is_same_v<R, bool>
+        || std::is_same_v<R, const char*>
+        || std::is_same_v<R, char*>
+        || std::is_same_v<R, std::string>
+        || std::is_same_v<R, std::string_view>;
+}
+
+
+template<typename T>
 struct DbusTypeSignature {
     static_assert(sizeof(T) == 0, "Unsupported Dbus type");
     static constexpr char value {'\0'};
@@ -74,6 +87,11 @@ struct DbusTypeSignature<bool> {
 //! char
 template<>
 struct DbusTypeSignature<const char*> {
+    static constexpr char value = 's';
+};
+
+template<>
+struct DbusTypeSignature<char*> {
     static constexpr char value = 's';
 };
 

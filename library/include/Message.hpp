@@ -7,19 +7,21 @@
 #include <tuple>
 #include <utility>
 
-#include "DbusReturnStatus.hpp"
+#include "Status.hpp"
 #include "DbusArgs.hpp"
 
 #include "message/MessagePrivate.hpp"
 
 namespace SSDbus {
 class Message {
-    using Status = DbusReturnStatus::Status;
 public:
     Message() = default;
 
     explicit Message(std::shared_ptr<Private::MessagePrivate> aImpl)
         : mPrivate(std::move(aImpl)) {}
+
+    explicit Message(Private::MessagePrivate&& aImpl)
+        : Message(std::make_shared<Private::MessagePrivate>(std::move(aImpl))) {}
 
     ~Message() = default;
 
@@ -42,32 +44,40 @@ public:
     }
 
     template<typename T>
-    DbusReturnStatus read(T& aVal) {
+    Status read(T& aVal) {
         return mPrivate->read(aVal);
     }
 
     template<typename First, typename... Rests>
-    DbusReturnStatus read(First& aFirst, Rests&... aRests) {
+    Status read(First& aFirst, Rests&... aRests) {
         return mPrivate->read(aFirst, aRests...);
     }
 
     template<typename... Args>
-    DbusReturnStatus read(std::tuple<Args...>& aVals) {
+    Status read(std::tuple<Args...>& aVals) {
         return mPrivate->read(aVals);
     }
 
     template<typename T>
-    DbusReturnStatus write(const T& aVal) {
+    Status write(const T& aVal) {
         return mPrivate->write(aVal);
     }
 
     template<typename First, typename... Rests>
-    DbusReturnStatus write(const First& aFirst, const Rests&... aRests) {
+    Status write(const First& aFirst, const Rests&... aRests) {
         return mPrivate->write(aFirst, aRests...);
     }
 
     std::string_view getSender() const {
         return mPrivate->getSender();
+    }
+
+    bool isError() const {
+        return mPrivate->getStatus().isError();
+    }
+
+    std::string errorMessage() const {
+        return mPrivate->getStatus().message();
     }
 
 private:

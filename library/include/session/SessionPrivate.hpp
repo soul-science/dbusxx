@@ -7,18 +7,18 @@
 #include <iostream>
 
 #include "DbusSlot.hpp"
-#include "DbusReturnStatus.hpp"
+#include "Status.hpp"
 #include "Utils.hpp"
 
 #include "adaptor/RawAdaptor.hpp"
 #include "adaptor/RawBusSharePtr.hpp"
 #include "message/MessagePrivate.hpp" 
+#include "message/SignalHandler.hpp"
 
 namespace SSDbus {
 namespace Private {
 
 class SessionPrivate {
-    using Status = SSDbus::DbusReturnStatus::Status;
 public:
     struct MethodInfo {
         std::string input;
@@ -51,16 +51,17 @@ public:
         return mRegisteredMethods;
     }
 
-    DbusReturnStatus setInfo(ServiceInfo aInfo) {
+    Status setInfo(ServiceInfo aInfo) {
         std::cout << "name:" << aInfo.name << ", path:" << aInfo.path << ", interface:" << aInfo.interface << std::endl;
-        int ret = Adaptor::RawBus::setUniqueName(mRawBus.get(), aInfo.name.c_str(), 0);
-        if (ret < 0) {
-            std::cout << "setUniqueName failed, reason:" << ret << " " << strerror(-ret) << std::endl;
-            return DbusReturnStatus(Status::FAIL);
+        Status st = Adaptor::RawBus::setUniqueName(mRawBus.get(), aInfo.name.c_str(), 0);
+        if (st.isSuccess()) {
+            mInfo = aInfo;
+        }
+        else {
+            std::cout << "setUniqueName failed, reason:" << st.message() << std::endl;
         }
 
-        mInfo = aInfo;
-        return DbusReturnStatus(Status::SUCCESS);
+        return st;
     }
 
     MessagePrivate createReply(MessagePrivate& aCallMsg) {
@@ -78,15 +79,13 @@ public:
         return MessagePrivate(call);
     }
 
-    DbusReturnStatus sendMessage(MessagePrivate& aMsg) {
+    Status sendMessage(MessagePrivate& aMsg) {
         return sendMessage(aMsg, aMsg.getSender());
     }
 
-    DbusReturnStatus sendMessage(MessagePrivate& aMsg, std::string_view aDestination) {
-        if (!mRawBus) return DbusReturnStatus(DbusReturnStatus::Status::FAIL);
-        int ret = Adaptor::RawBus::sendMessage(mRawBus.get(), aMsg.rawMessage(), aDestination);
-        return DbusReturnStatus(ret >= 0 ?
-            DbusReturnStatus::Status::SUCCESS : DbusReturnStatus::Status::FAIL);
+    Status sendMessage(MessagePrivate& aMsg, std::string_view aDestination) {
+        if (!mRawBus) return Status(StatusCode::UNKNOWN_ERROR);
+        return Adaptor::RawBus::sendMessage(mRawBus.get(), aMsg.rawMessage(), aDestination);
     }
 
     int process() {
@@ -105,10 +104,21 @@ public:
         Adaptor::RawBus::flushBus(mRawBus.get());
     }
 
+    static bool isInvalidInfo(const ServiceInfo& aInfo) {
+        return Adaptor::RawCheck::isServiceNameValid(aInfo.name)
+            && Adaptor::RawCheck::isPathNameValid(aInfo.path)
+            && Adaptor::RawCheck::isInterfaceNameValid(aInfo.interface);
+    }
+
+    void addSignalHandler(std::shared_ptr<void> aHandler) {
+        mSigHandler.push_back(std::move(aHandler));
+    }
+
 private:
     Adaptor::RawBusSharePtr mRawBus { nullptr };
     ServiceInfo mInfo;
     MethodMap mRegisteredMethods;
+    std::vector<std::shared_ptr<void>> mSigHandler;
 };
 
 }

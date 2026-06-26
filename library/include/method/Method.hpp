@@ -4,13 +4,12 @@
 
 #include <iostream>
 
-#include "DbusReturnStatus.hpp"
+#include "Status.hpp"
 #include "message/MessagePrivate.hpp"
+#include "message/SignalHandler.hpp"
 #include "session/SessionPrivate.hpp"
 
 namespace SSDbus {
-class Session;
-
 namespace Method {
 
 // ========== 共享工具 ==========
@@ -67,7 +66,7 @@ struct IMethodWrapper {
 
         if constexpr (sizeof...(Args)) {
             //! Parse args from message
-            std::tuple<typename ArgTypeAdaptor<Args...>::type> tpl;
+            std::tuple<typename ArgTypeAdaptor<std::decay_t<Args>>::type...> tpl;
             message.read(tpl);
 
             //! Apply function
@@ -100,23 +99,20 @@ struct IMethodWrapper {
         }
 
         //! Response reply
-        auto ret = context->session->sendMessage(reply, message.getSender());
-        return ret ? 1 : -1;
+        auto st = context->session->sendMessage(reply, message.getSender());
+        return st.isSuccess() ? 1 : -1;
     }
 };
 
 // ========== 服务端：注册方法 ==========
 
 template<typename Cls, typename Ret, typename... Args>
-DbusReturnStatus registerMethod(
+Status registerMethod(
     Private::SessionPrivate* aSession, std::string_view aFuncName, Cls* aObj, Ret (Cls::*aFunc)(Args...)) {
     using ClsFuncPtr = Ret (Cls::*)(Args...);
 
     if (aSession->info().name.empty() || aSession->info().path.empty()) {
-        return DbusReturnStatus(
-            DbusReturnStatus::Status::FAIL
-            // DbusError("", "service name or path is empty")
-        );
+        return Status(StatusCode::INVALID_ARG);
     }
 
     auto method = std::make_shared<std::pair<Cls*, ClsFuncPtr>>(aObj, aFunc);
@@ -152,17 +148,14 @@ DbusReturnStatus registerMethod(
     Slot slot(rawSlot);
     if (ret < 0) {
         aSession->methods().erase(aFuncName.data());
-        return DbusReturnStatus(
-           DbusReturnStatus::Status::FAIL
-            // DbusError("", strerror(-ret))
-        );
+        return Adaptor::RawError::makeStatus(ret);
     }
 
     info.method = data;
     info.vtable = std::move(vtable);
     info.slot = std::move(slot);
 
-    return DbusReturnStatus(DbusReturnStatus::Status::SUCCESS);
+    return Status(StatusCode::SUCCESS);
 }
 
 // template<typename... Args>
@@ -173,59 +166,102 @@ DbusReturnStatus registerMethod(
 // ========== 客户端：远程调用 ==========
 
 template<typename Ret, typename... Args>
-DbusReturnStatus callSync(
+Private::MessagePrivate callSync(
     Private::SessionPrivate* aSession, uint64_t aTimeoutUmsc,
     std::string_view aService, std::string_view aPath, std::string_view aIface,
     std::string_view aMethod, const Args&... aArgs) {
 
-    Private::MessagePrivate callMsg = aSession->createMethodCall(aService, aPath, aIface, aMethod);
+    Private::MessagePrivate callMsg = aSession->createMethodCall(
+        aService, aPath, aIface, aMethod);
 
+    Status st = Status(StatusCode::SUCCESS);
     if constexpr (sizeof...(Args)) {
-        callMsg.write(aArgs...);
+        st = callMsg.write(aArgs...);
     }
 
-    //! TODO: error
+    if (st.isError()) {
+        Private::MessagePrivate errMsg(
+            Adaptor::RawMessageSharePtr(nullptr));
+        errMsg.setStatus(st);
+        return errMsg;
+    }
+
     Adaptor::RawBusMessagePtr rawReply = nullptr;
-    int ret = Adaptor::RawBus::call(
+    st = Adaptor::RawBus::callSync(
         aSession->rawBus(), callMsg.rawMessage(), aTimeoutUmsc,
         nullptr /* error */, rawReply);
     Private::MessagePrivate repMsg(Adaptor::RawMessageSharePtr(rawReply, true));
-
-    if constexpr (!std::is_same_v<Ret, void>) {
-        Ret value;
-        repMsg.read(value);
-    }
-
-    std::cout << "call -- aService:" << aService
+    repMsg.setStatus(st);
+    std::cout << "callSync -- aService:" << aService
         << ", aPath:" << aPath << ", aIface" << aIface
-        << ", aMethod:" << aMethod << ", ret:" << ret << std::endl;
+        << ", aMethod:" << aMethod << ", ret:" << st.message() << std::endl;
 
-    //! TODO: 需要把DbusReturnStatus改造一下
-
-    return DbusReturnStatus(DbusReturnStatus::Status::SUCCESS);
+    return repMsg;
 }
 
 template<typename Ret, typename... Args>
-DbusReturnStatus callSync(
+Private::MessagePrivate callSync(
     Private::SessionPrivate* aSession,
     std::string_view aService, std::string_view aPath, std::string_view aIface,
     std::string_view aMethod, const Args&... aArgs) {
     return callSync<Ret>(aSession, 0, aService, aPath, aIface, aMethod, aArgs...);
 }
 
-// template<typename... Args>
-// Message callAsync(
-//     Session& aSession,
-//     std::string_view aService, std::string_view aPath, std::string_view aIface,
-//     std::string_view aMethod, const Args&... aArgs
-// );
+template<typename Ret, typename... Args>
+std::shared_ptr<Private::ReplyAsyncHandler> callAsync(
+    Private::SessionPrivate* aSession, uint64_t aTimeoutUmsc,
+    std::string_view aService, std::string_view aPath, std::string_view aIface,
+    std::string_view aMethod, const Args&... aArgs) {
+    Private::MessagePrivate callMsg = aSession->createMethodCall(
+        aService, aPath, aIface, aMethod);
 
-// template<typename... Args>
-// Message listenSignal(
-//     Session& aSession,
-//     std::string_view aService, std::string_view aPath, std::string_view aIface,
-//     std::string_view aSignal
-// );
+    if constexpr (sizeof...(Args)) {
+        callMsg.write(aArgs...);
+    }
+
+    auto repHandler = std::make_shared<Private::ReplyAsyncHandler>();
+    Status st = Adaptor::RawBus::callAsync(
+        aSession->rawBus(), nullptr, callMsg.rawMessage(),
+        Private::ReplyAsyncHandler::onReply, repHandler.get(), aTimeoutUmsc
+    );
+    repHandler->setStatus(st);
+
+    std::cout << "callAsync -- aService:" << aService
+        << ", aPath:" << aPath << ", aIface" << aIface
+        << ", aMethod:" << aMethod << ", ret:" << st.message() << std::endl;
+
+    return repHandler;
+}
+
+template<typename Ret, typename... Args>
+std::shared_ptr<Private::ReplyAsyncHandler> callAsync(
+    Private::SessionPrivate* aSession,
+    std::string_view aService, std::string_view aPath, std::string_view aIface,
+    std::string_view aMethod, const Args&... aArgs) {
+    return callAsync<Ret>(aSession, 0, aService, aPath, aIface, aMethod, aArgs...);
+}
+
+template<typename Callback>
+Status listenSignal(Private::SessionPrivate* aSession,
+    std::string_view aSender, std::string_view aPath, std::string_view aIface,
+    std::string_view aSignal, Callback&& aCallback) {
+
+    auto handler = std::make_shared<Private::SignalHandler<Callback>>(
+        std::forward<Callback>(aCallback));
+
+    Status st = Adaptor::RawBus::listenSignal(
+        aSession->rawBus(), handler->slot,
+        aSender, aPath, aIface, aSignal,
+        &Private::SignalHandler<Callback>::onSignal,
+        handler.get()
+    );
+
+    if (st.isSuccess()) {
+        aSession->addSignalHandler(std::move(handler));
+    }
+
+    return st;
+}
 
 }
 }

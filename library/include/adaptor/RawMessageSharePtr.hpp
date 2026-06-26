@@ -85,7 +85,7 @@ public:
         Adaptor::RawBusPtr aBus, std::string_view aService,
         std::string_view aPath, std::string_view aIface, std::string_view aMethod) {
         auto call = Adaptor::RawMessage::createMethodCall(
-            aBus, aService.data(), aPath.data(), aIface.data(), aMethod.data() 
+            aBus, aService, aPath, aIface, aMethod 
         );
         return RawMessageSharePtr(call, false);
     }

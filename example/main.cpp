@@ -1,6 +1,9 @@
 #include "Session.hpp"
 #include "DbusEventLoop.hpp"
 
+#include "Reply.hpp"
+#include "PendingReply.hpp"
+
 #include <iostream>
 
 using namespace SSDbus;
@@ -69,7 +72,7 @@ public:
         return i;
     };
 
-    std::string testString(std::string i) {
+    std::string testString(const std::string& i) {
         std::cout << "testString, i=" << i << std::endl;
         return i;
     };
@@ -83,59 +86,84 @@ public:
         std::cout << "testVoid" << std::endl;
     }
 
+    void listenSignal(const std::string& aName) {
+        std::cout << "Service acquired name: " << aName << std::endl;
+    }
+
 };
+
+void callback(Reply<int> aRep) {
+    std::cout << "reply4 -- isError:" << aRep.isError() 
+        << ", errorMessage:" << aRep.errorMessage()
+        << ", value:" << aRep.value() << std::endl;
+}
 
 int main() {
     SSDbus::Session session(true);
+
+    Status st = session.listenSignal(
+        "org.freedesktop.DBus",
+        "/org/freedesktop/DBus",
+        "org.freedesktop.DBus",
+        "NameAcquired",
+        [] (const std::string& aName) {
+            std::cout << "Service acquired name: " << aName << std::endl;
+        }
+    );
+
+    std::cout << "listenSignal -- code:" << static_cast<int>(st.code())
+        << ", message:" << st.message() << std::endl;
+
+
     session.setInfo(
         {"com.example.test", "/com/example/test", "com.example.interface"}
     );
 
     Test t;
     auto ret = session.registerInterface("testInt8", &t, &Test::testInt8);
-    std::cout << "register testInt8 ret=" << static_cast<int>(ret.getStatus()) << std::endl;
+    std::cout << "register testInt8 ret=" << ret.message() << std::endl;
 
     ret = session.registerInterface("testUint8", &t, &Test::testUint8);
-    std::cout << "register testUint8 ret=" << static_cast<int>(ret.getStatus()) << std::endl;
+    std::cout << "register testUint8 ret=" << ret.message() << std::endl;
 
     ret = session.registerInterface("testInt16", &t, &Test::testInt16);
-    std::cout << "register testInt16 ret=" << static_cast<int>(ret.getStatus()) << std::endl;
+    std::cout << "register testInt16 ret=" << ret.message() << std::endl;
 
     ret = session.registerInterface("testUint16", &t, &Test::testUint16);
-    std::cout << "register testUint16 ret=" << static_cast<int>(ret.getStatus()) << std::endl;
+    std::cout << "register testUint16 ret=" << ret.message() << std::endl;
 
     ret = session.registerInterface("testInt32", &t, &Test::testInt32);
-    std::cout << "register testInt32 ret=" << static_cast<int>(ret.getStatus()) << std::endl;
+    std::cout << "register testInt32 ret=" << ret.message() << std::endl;
 
     ret = session.registerInterface("testUint32", &t, &Test::testUint32);
-    std::cout << "register testUint32 ret=" << static_cast<int>(ret.getStatus()) << std::endl;
+    std::cout << "register testUint32 ret=" << ret.message() << std::endl;
 
     ret = session.registerInterface("testInt64", &t, &Test::testInt64);
-    std::cout << "register testInt64 ret=" << static_cast<int>(ret.getStatus()) << std::endl;
+    std::cout << "register testInt64 ret=" << ret.message() << std::endl;
 
     ret = session.registerInterface("testUint64", &t, &Test::testUint64);
-    std::cout << "register testUint64 ret=" << static_cast<int>(ret.getStatus()) << std::endl;
+    std::cout << "register testUint64 ret=" << ret.message() << std::endl;
 
     ret = session.registerInterface("testFloat", &t, &Test::testFloat);
-    std::cout << "register testFloat ret=" << static_cast<int>(ret.getStatus()) << std::endl;
+    std::cout << "register testFloat ret=" << ret.message() << std::endl;
 
     ret = session.registerInterface("testDouble", &t, &Test::testDouble);
-    std::cout << "register testDouble ret=" << static_cast<int>(ret.getStatus()) << std::endl;
+    std::cout << "register testDouble ret=" << ret.message() << std::endl;
 
     ret = session.registerInterface("testBool", &t, &Test::testBool);
-    std::cout << "register testBool ret=" << static_cast<int>(ret.getStatus()) << std::endl;
+    std::cout << "register testBool ret=" << ret.message() << std::endl;
 
     ret = session.registerInterface("testConstChars", &t, &Test::testConstChars);
-    std::cout << "register testConstChars ret=" << static_cast<int>(ret.getStatus()) << std::endl;
+    std::cout << "register testConstChars ret=" << ret.message() << std::endl;
 
     ret = session.registerInterface("testString", &t, &Test::testString);
-    std::cout << "register testString ret=" << static_cast<int>(ret.getStatus()) << std::endl;
+    std::cout << "register testString ret=" << ret.message() << std::endl;
 
     ret = session.registerInterface("testStringView", &t, &Test::testStringView);
-    std::cout << "register testStringView ret=" << static_cast<int>(ret.getStatus()) << std::endl;
+    std::cout << "register testStringView ret=" << ret.message() << std::endl;
 
     ret = session.registerInterface("testVoid", &t, &Test::testVoid);
-    std::cout << "register testVoid ret=" << static_cast<int>(ret.getStatus()) << std::endl;
+    std::cout << "register testVoid ret=" << ret.message() << std::endl;
 
 
     //! TODO: 注册匿名函数 
@@ -143,11 +171,54 @@ int main() {
     //     return;
     // });
 
-    session.callSync<void>(
+    Reply<void> reply1 = session.callSync(
         "com.sslog.service",
         "/com/sslog/service",
         "com.sslog.service.interfaces",
         "clearAll"
+    );
+
+    Reply<int> reply2 = session.callSync<int>(
+        "org.freedesktop.DBus",
+        "/org/freedesktop/DBus",
+        "org.freedesktop.DBus",
+        "GetId"                       // 返回类似 "a1b2c3..." 的总线 ID
+    );
+
+    std::cout << "reply2 -- isError:" << reply2.isError() 
+        << ", value:" << reply2.value() << std::endl;
+
+    PendingReply<std::string> reply3 = session.callAsync<std::string>(
+        "org.freedesktop.DBus",
+        "/org/freedesktop/DBus",
+        "org.freedesktop.DBus",
+        "GetId"
+    );
+
+    reply3.setCallback(
+        [] (Reply<std::string> aRep) -> void {
+            std::cout << "reply3 -- isError:" << aRep.isError() 
+                << ", value:" << aRep.value() << std::endl;
+        }
+    );
+
+    st = session.callAsync<int>(
+        "org.freedesktop.DBus",
+        "/org/freedesktop/DBus",
+        "org.freedesktop.DBus",
+        "GetId",
+        &callback
+    );
+
+    st = session.callAsync<std::string>(
+        "org.freedesktop.DBus",
+        "/org/freedesktop/DBus",
+        "org.freedesktop.DBus",
+        "GetId",
+        [] (Reply<std::string> aRep) -> void {
+            std::cout << "reply5 -- isError:" << aRep.isError() 
+                << ", value:" << aRep.value() << std::endl;
+        }
     );
 
     DbusEventLoop loop(session);

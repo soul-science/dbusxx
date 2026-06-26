@@ -4,7 +4,7 @@
 #include <string>
 #include <iostream>
 
-#include "DbusReturnStatus.hpp"
+#include "Status.hpp"
 
 #include "adaptor/RawAdaptor.hpp"
 #include "adaptor/RawMessageSharePtr.hpp"
@@ -13,7 +13,6 @@ namespace SSDbus {
 namespace Private {
 
 class MessagePrivate {
-    using Status = SSDbus::DbusReturnStatus::Status;
 public:
     MessagePrivate() = default;
 
@@ -33,75 +32,76 @@ public:
     }
 
     template<typename T>
-    DbusReturnStatus read(T& aVal) {
+    Status read(T& aVal) {
         if (!mRawMsg) {
-            return DbusReturnStatus(Status::FAIL);
+            std::cerr << "[DEBUG] Status created as UNKNOWN_ERROR" << std::endl;
+            return Status(StatusCode::UNKNOWN_ERROR);
         }
 
-        int ret;
-        if constexpr (std::is_same_v<T, std::string>) {
+        Status st;
+        if constexpr (std::is_same_v<std::decay_t<T>, std::string>) {
             const char* str;
-            ret = sd_bus_message_read_basic(
-                mRawMsg.get(), DbusTypeSignature<T>::value, &str);
+            st = Adaptor::RawMessage::popBasic(
+                mRawMsg.get(), DbusTypeSignature<std::decay_t<T>>::value, str);
             aVal = str;
         }
         else {
-            ret = sd_bus_message_read_basic(
-                mRawMsg.get(), DbusTypeSignature<T>::value, &aVal);
+            st = Adaptor::RawMessage::popBasic(
+                mRawMsg.get(), DbusTypeSignature<std::decay_t<T>>::value, aVal);
         }
 
-        return DbusReturnStatus(ret >= 0 ? Status::SUCCESS : Status::FAIL);
+        return st;
     }
 
     template<typename First, typename... Rests>
-    DbusReturnStatus read(First& aFirst, Rests&... aRests) {
-        auto res = read(aFirst);
-        if (!res) {
-            return res;
+    Status read(First& aFirst, Rests&... aRests) {
+        auto st = read(aFirst);
+        if (st.isError()) {
+            return st;
         }
 
         return read(aRests...);
     }
 
     template<typename... Args>
-    DbusReturnStatus read(std::tuple<Args...>& aVals) {
-        DbusReturnStatus status;
+    Status read(std::tuple<Args...>& aVals) {
+        Status status;
         [&]<size_t... Idx>(std::index_sequence<Idx...> ) {
-            status = (read(std::get<Idx>(aVals))
-            , ...);
+            ((status = read(std::get<Idx>(aVals))).isSuccess() && ...);
         }(std::make_index_sequence<sizeof...(Args)>{});
         return status;
     }
 
     template<typename T>
-    DbusReturnStatus write(const T& aVal) {
+    Status write(const T& aVal) {
         if (!mRawMsg.get()) {
-            return DbusReturnStatus(Status::FAIL);
+            return Status(StatusCode::UNKNOWN_ERROR);
         }
 
-        int ret;
-        if constexpr (std::is_same_v<T, std::string>
-            || std::is_same_v<T, std::string_view>) {
-            ret = sd_bus_message_append_basic(
-                mRawMsg.get(), DbusTypeSignature<T>::value, aVal.data());
+        Status st;
+        if constexpr (std::is_same_v<std::decay_t<T>, std::string>
+            || std::is_same_v<std::decay_t<T>, std::string_view>) {
+            st = Adaptor::RawMessage::appendBasic(
+                mRawMsg.get(), DbusTypeSignature<std::decay_t<T>>::value, aVal.data());
         }
-        else if constexpr (std::is_same_v<T, const char*>) {
-            ret = sd_bus_message_append_basic(
-                mRawMsg.get(), DbusTypeSignature<T>::value, aVal);
+        else if constexpr (std::is_same_v<std::decay_t<T>, const char*>
+            || std::is_same_v<std::decay_t<T>, char*>) {
+            st = Adaptor::RawMessage::appendBasic(
+                mRawMsg.get(), DbusTypeSignature<std::decay_t<T>>::value, aVal);
         }
         else {
-            ret = sd_bus_message_append_basic(
-                mRawMsg.get(), DbusTypeSignature<T>::value, &aVal);
+            st = Adaptor::RawMessage::appendBasic(
+                mRawMsg.get(), DbusTypeSignature<std::decay_t<T>>::value, &aVal);
         }
 
-        return DbusReturnStatus(ret >= 0 ? Status::SUCCESS : Status::FAIL);
+        return st;
     }
 
     template<typename First, typename... Rests>
-    DbusReturnStatus write(const First& aFirst, const Rests&... aRests) {
-        auto res = write(aFirst);
-        if (!res) {
-            return res;
+    Status write(const First& aFirst, const Rests&... aRests) {
+        auto st = write(aFirst);
+        if (st.isError()) {
+            return st;
         }
 
         return write(aRests...);
@@ -111,10 +111,18 @@ public:
         return Adaptor::RawMessage::getSender(mRawMsg.get());
     }
 
+    void setStatus(Status aStatus) {
+        mStatus = aStatus;
+    }
 
-private:
+    Status getStatus() const {
+        return mStatus;
+    }
+
+protected:
     Adaptor::RawMessageSharePtr mRawMsg { nullptr };
     Adaptor::RawMessage::Type mType { Adaptor::RawMessage::Type::Invalid };
+    Status mStatus { StatusCode::SUCCESS };
 };
 
 }

@@ -42,7 +42,6 @@ install(TARGETS ssdbus
 # Install header files to /usr/local/include/ssdbus
 install(FILES
     ${INCLUDES_DIR}/DbusContext.hpp
-    ${INCLUDES_DIR}/DbusManager.hpp
     DESTINATION include/ssdbus
 )
 
