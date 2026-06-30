@@ -1002,3 +1002,299 @@ function_traits<Lambda>
 | **比喻** | 盖楼：地基 → 一楼 | 管道：`f(g(h(x)))`，外层决定传给里层什么 |
 
 ---
+---
+
+## 16. sd_bus vtable 字符串生命周期
+
+### 16.1 核心事实
+
+```c
+// sd_bus_add_object_vtable 的 man 文档明确指出：
+// "The vtable and all referenced strings must remain valid
+//  for the entire lifetime of the bus object — they are NOT copied."
+```
+
+sd-bus **只存指针，不拷贝字符串**。vtable 数组和其中引用的所有 string 必须与 slot 同生共死。
+
+### 16.2 错误模式
+
+```cpp
+// ❌ 函数内注册，vtable 和字符串全在栈上
+void badRegister(sd_bus* bus) {
+    sd_bus_slot* slot;
+    sd_bus_add_object_vtable(bus, &slot, "/path", "iface",
+        (sd_bus_vtable[]){
+            SD_BUS_VTABLE_START(0),
+            SD_BUS_METHOD("method", "ii", "i", callback, 0),  // "ii"/"i" 是字面量，安全
+            SD_BUS_VTABLE_END
+        }, userdata);
+}   // ← vtable 数组是栈上复合字面量，函数返回后失效
+    // slot 仍存活，但指向已释放的栈内存 → use-after-free
+```
+
+### 16.3 正确模式：VTableContext 自持字符串
+
+```cpp
+struct VTableContext {
+    std::unique_ptr<sd_bus_vtable[]> vtable;
+    Slot slot;
+    std::string func;    // ← SD_BUS_METHOD(func.c_str(), ...) 的生命线
+    std::string input;
+    std::string output;
+};
+
+// commit() 时用 ctx 的字符串构建 vtable：
+ctx->func   = std::move(entry.func);
+ctx->input  = std::move(entry.input);
+ctx->output = std::move(entry.output);
+
+auto item = SD_BUS_METHOD(
+    ctx->func.c_str(),      // ← 指向 ctx->func，同生共死
+    ctx->input.c_str(),
+    ctx->output.c_str(), callback, 0);
+
+ctx->vtable.reset(new sd_bus_vtable[3]{
+    SD_BUS_VTABLE_START(0), item, SD_BUS_VTABLE_END});
+
+sd_bus_add_object_vtable(bus, &rawSlot, path, iface, ctx->vtable.get(), data);
+```
+
+---
+
+## 17. std::move 后指针悬空
+
+### 17.1 问题
+
+```cpp
+std::string src = "hello";
+auto* ptr      = src.c_str();  // 指向 src 的内部 buffer
+auto  dst      = std::move(src);  // 搬走 src 的内容
+// ptr 仍然指向 src 的内部 buffer，但 src 已处于未定义状态
+// 对于 std::string，move 后通常是空串或长度 0
+```
+
+### 17.2 在 VTable 场景中
+
+```cpp
+// ❌ 搬走后 item 的指针指向被搬空的内存
+ctx->input  = std::move(entry.input);   // entry.input 被搬空
+ctx->output = std::move(entry.output);
+
+// entry.item 中的字符串指针在 move 前指向 entry.input/entry.output
+// move 后这些指针悬空
+auto item = entry.item;  // ← 内部 c_str() 已悬空
+```
+
+### 17.3 正确做法
+
+```cpp
+// ✅ 拷贝（或用 ctx 的字符串重新构建 SD_BUS_METHOD）
+ctx->input  = entry.input;     // 拷贝，不搬
+ctx->output = entry.output;
+
+// 或：先搬，再用 ctx 的字符串重建 vtable 条目
+ctx->input  = std::move(entry.input);
+auto item   = SD_BUS_METHOD(func, ctx->input.c_str(), ctx->output.c_str(), ...);
+                                   // ^^^ 指向 ctx，ctx 常驻
+```
+
+---
+
+## 18. SSO 短字符串优化与悬空指针不漏
+
+### 18.1 SSO 原理
+
+`std::string` 对长度 ≤ 15（GCC）的字符串使用栈上内联存储（Small String Optimization）：
+
+```cpp
+std::string s("ii");   // 长度 2，内联存储在 s 对象内部
+auto* ptr = s.c_str(); // 指向 s 内部栈内存
+// s 析构后栈内存被回收，但数据不会立即被覆写
+```
+
+### 18.2 为什么 D-Bus 签名常"刚好不炸"
+
+D-Bus 签名如 `"y"`, `"i"`, `"s"`, `"ii"` 全是 1-3 字节，走 SSO。
+VTableEntry 析构后，栈上 SSO 缓冲区未被覆写，sd-bus 仍能读到"正确"数据——**纯属侥幸**。
+
+### 18.3 ASAN 能抓到
+
+```bash
+$ cmake -DCMAKE_CXX_FLAGS="-fsanitize=address -g" && make
+$ ./test
+==170299==ERROR: AddressSanitizer: heap-use-after-free
+READ of size 9 at 0x51c000000890 thread T0
+    #3 /lib/libsystemd.so.0  ← sd-bus 内部读取 vtable 字符串
+```
+
+SSO 只是延迟了问题的暴露时间，ASAN 能在任何情况下抓到。
+
+---
+
+## 19. D-Bus method/signal 唯一命名约束
+
+### 19.1 协议限制
+
+D-Bus 规范：同一 `(path, interface, member)` 三元组只能有唯一签名。`sd_bus_add_object_vtable` 对同名注册会返回 `-EEXIST` 或覆盖。
+
+```cpp
+// ❌ D-Bus 不支持
+.addSignal<int>("clear")     // 签名 i
+.addSignal<int, int>("clear") // 签名 ii  ← sd-bus 拒绝/覆盖前一个
+
+// ✅ 必须拆名
+.addSignal<int>("clear_one")
+.addSignal<int, int>("clear_two")
+```
+
+### 19.2 Map key 策略
+
+不要用 `name + "_" + input` 做 key——同名不同签本来就不合法：
+
+```cpp
+// ❌ 多余
+std::string regName = aName.data() + std::string("_") + input;
+
+// ✅ 直接用 name
+std::string regName = aName.data();
+```
+
+---
+
+## 20. 匿名类型作为 auto 返回值的 API 隐藏
+
+### 20.1 问题
+
+希望提供链式 API 但不想暴露 `VTableRegistrar` 类型给用户。
+
+### 20.2 方案：内嵌 struct + auto 返回
+
+```cpp
+class Session {
+    struct RegisterBuilder {      // struct 定义在 Session 内部
+        template<typename Func>
+        RegisterBuilder& addMethod(std::string_view aName, Func aFunc) { ... }
+        Status commit() { ... }
+    private:
+        // 不暴露的实现细节
+    };
+
+public:
+    auto registerBuilder() { return RegisterBuilder{...}; }
+};
+```
+
+### 20.3 效果
+
+```cpp
+auto builder = session.registerBuilder();  // 用户拿到的类型是 Session::RegisterBuilder
+builder.addMethod("add", ...).commit();    // 只能链式调用，看不到内部
+```
+
+| | 放外面 | 放里面（推荐） |
+|---|---|---|
+| 名称空间 | `::RegisterBuilder` 污染全局 | `Session::RegisterBuilder` 有归属 |
+| include | 需额外头文件 | 随 `Session.hpp` 一起 |
+| IDE 提示 | 无关类型建议 | 仅在 Session 上下文出现 |
+
+---
+
+## 21. shared_ptr 捕获替代 this 捕获
+
+### 21.1 问题
+
+```cpp
+// ❌ 回调中以 [this] 捕获，Session 拷贝/move 后 this 指向错误对象
+rep->setCallback([this, ...](Reply<Ret> aRep) {
+    mReps.erase(find(mReps.begin(), mReps.end(), repPtr));
+    // 如果 Session 被拷贝，this->mReps 是副本的 mReps，repPtr 在旧 Session
+});
+```
+
+### 21.2 修复：所有回调数据用 shared_ptr 捕获
+
+```cpp
+// ✅ mReps 改为 shared_ptr<vector>，lambda 通过 shared_ptr 访问
+class Session {
+    std::shared_ptr<std::vector<std::shared_ptr<void>>> mRepsPtr;
+
+    void setupCallback(auto& rep) {
+        mRepsPtr->push_back(rep);
+        rep->setCallback(
+            [RepsPtr = mRepsPtr, key = std::shared_ptr<void>(rep),
+             cb = std::move(cb)](Reply<Ret> aRep) {
+                struct Clear {
+                    std::vector<std::shared_ptr<void>>& reps;
+                    std::shared_ptr<void> entry;
+                    ~Clear() {
+                        reps.erase(std::find(reps.begin(), reps.end(), entry));
+                    }
+                } clear{*RepsPtr, key};
+                cb(aRep);
+            }
+        );
+    }
+};
+```
+
+### 21.3 原则
+
+| 捕获方式 | 安全性 | 适用场景 |
+|----------|:------:|---------|
+| `[this]` | ❌ 拷贝/move 不安全 | 对象生命周期确定的局部范围 |
+| `[shared_ptr]` | ✅ 引用计数保护 | 异步回调、跨生命周期访问 |
+| `[weak_ptr]` | ✅ 可检测失效 | 需要知道对象是否已析构的场景 |
+
+### 21.4 weak_ptr 示例：事件循环避免悬空
+
+```cpp
+// 场景：Session 可能提前析构，但 EventLoop 仍持有对其的引用
+class DbusEventLoop {
+    std::weak_ptr<Session> mWeakSession;
+
+public:
+    explicit DbusEventLoop(Session& aSession)
+        : mWeakSession(aSession.shared_from_this()) {}  // Session 需继承 enable_shared_from_this
+
+    void run() {
+        while (true) {
+            auto session = mWeakSession.lock();  // 尝试获取 shared_ptr
+            if (!session) {
+                // Session 已析构，安全退出
+                std::cout << "Session destroyed, exiting loop" << std::endl;
+                return;
+            }
+
+            // session 是 shared_ptr，在此作用域内保证存活
+            session->process();
+            session->wait(100);
+        }
+    }
+};
+```
+
+### 21.5 三者对比
+
+```cpp
+// [this] — 最简单的，也最危险
+session->onEvent([this] { mData = 42; });
+session.reset();  // ❌ this 悬空
+// ...
+
+// [shared_ptr] — 安全但不能检测析构
+auto self = shared_from_this();
+session->onEvent([self] { self->mData = 42; });
+session.reset();
+// 回调在 self 析构前正常执行 ✅
+
+// [weak_ptr] — 能检测析构并决定执行/跳过
+std::weak_ptr<Session> weakSelf = shared_from_this();
+session->onEvent([weakSelf] {
+    if (auto self = weakSelf.lock()) {
+        self->mData = 42;   // ✅ Session 存活，执行
+    } else {
+        // Session 已析构，跳过 ✅
+    }
+});
+session.reset();
+```

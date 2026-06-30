@@ -27,6 +27,8 @@ struct SignalHandler {
                 std::tuple<typename ArgTypeAdaptor<std::decay_t<Args>>::type...> tpl;
                 message.read(tpl);
                 std::apply(self->callback, tpl);
+            } else {
+                self->callback();
             }
 
             return 0;

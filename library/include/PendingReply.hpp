@@ -2,6 +2,7 @@
 #define SSDBUS_DBUS_PENDING_REPLY_HPP
 
 #include <functional>
+#include <memory>
 
 #include "Message.hpp"
 #include "Reply.hpp"
@@ -22,11 +23,13 @@ public:
         : mHandler(aHandler) {}
 
     void setCallback(std::function<void(Reply<Ret>)> aCallback) {
+        auto repPtr = std::make_shared<Reply<Ret>>();
         mHandler->setCallback(
-            [this, aCallback] (Private::MessagePrivate* aPrivate) {
-                mRep = Reply<Ret>(std::make_shared<Private::MessagePrivate>(*aPrivate));
-                aCallback(mRep);
+            [repPtr, aCallback] (Private::MessagePrivate* aPrivate) {
+                *repPtr = Reply<Ret>(std::make_shared<Private::MessagePrivate>(*aPrivate));
+                aCallback(*repPtr);
         });
+        mRepPtr = repPtr;
     }
 
     [[nodiscard]] bool isError() const {
@@ -42,12 +45,12 @@ public:
     }
 
     [[nodiscard]] Reply<Ret> reply() const {
-        return mRep;
+        return *mRepPtr;
     }
 
 private:
     std::shared_ptr<Private::ReplyAsyncHandler> mHandler { nullptr };
-    Reply<Ret> mRep {};
+    std::shared_ptr<Reply<Ret>> mRepPtr { std::make_shared<Reply<Ret>>() };
 };
 
 }

@@ -38,7 +38,7 @@ public:
     };
 
     uint32_t testUint32(uint32_t i) {
-        std::cout << "testInt32, i=" << i << std::endl;
+        std::cout << "testUint32, i=" << i << std::endl;
         return i;
     };
 
@@ -87,7 +87,8 @@ public:
     }
 
     void listenSignal(const std::string& aName) {
-        std::cout << "Service acquired name: " << aName << std::endl;
+        std::cout << "listenSignal_cls_func -- Service acquired name: "
+            << aName << std::endl;
     }
 
 };
@@ -100,74 +101,106 @@ void callback(Reply<int> aRep) {
 
 int main() {
     SSDbus::Session session(true);
+    Test t;
 
     Status st = session.listenSignal(
         "org.freedesktop.DBus",
         "/org/freedesktop/DBus",
         "org.freedesktop.DBus",
         "NameAcquired",
+        &t, &Test::listenSignal
+    );
+
+    std::cout << "listenSignal_cls_func -- code:" << static_cast<int>(st.code())
+        << ", message:" << st.message() << std::endl;
+
+    st = session.listenSignal(
+        "org.freedesktop.DBus",
+        "/org/freedesktop/DBus",
+        "org.freedesktop.DBus",
+        "NameAcquired",
         [] (const std::string& aName) {
-            std::cout << "Service acquired name: " << aName << std::endl;
+            std::cout << "listenSignal_lambda_func -- Service acquired name: "
+                << aName << std::endl;
         }
     );
 
-    std::cout << "listenSignal -- code:" << static_cast<int>(st.code())
+    std::cout << "listenSignal_lambda_func -- code:" << static_cast<int>(st.code())
         << ", message:" << st.message() << std::endl;
-
 
     session.setInfo(
         {"com.example.test", "/com/example/test", "com.example.interface"}
     );
 
-    Test t;
-    auto ret = session.registerInterface("testInt8", &t, &Test::testInt8);
-    std::cout << "register testInt8 ret=" << ret.message() << std::endl;
+    auto ret = session.registerBuilder()
+        .addMethod("testInt8", &t, &Test::testInt8)
+        .addMethod("testUint8", &t, &Test::testUint8)
+        .addMethod("testInt16", &t, &Test::testInt16)
+        .addMethod("testUint16", &t, &Test::testUint16)
+        .addMethod("testInt32", &t, &Test::testInt32)
+        .addMethod("testUint32", &t, &Test::testUint32)
+        .addMethod("testInt64", &t, &Test::testInt64)
+        .addMethod("testUint64", &t, &Test::testUint64)
+        .addMethod("testFloat", &t, &Test::testFloat)
+        .addMethod("testDouble", &t, &Test::testDouble)
+        .addMethod("testBool", &t, &Test::testBool)
+        .addMethod("testConstChars", &t, &Test::testConstChars)
+        .addMethod("testString", &t, &Test::testString)
+        .addMethod("testStringView", &t, &Test::testStringView)
+        .addMethod("testVoid", &t, &Test::testVoid)
+        .addSignal<int, int>("clear")
+        .commit();
 
-    ret = session.registerInterface("testUint8", &t, &Test::testUint8);
-    std::cout << "register testUint8 ret=" << ret.message() << std::endl;
+    std::cout << "register beginRegistration ret=" << ret.message() << std::endl;
 
-    ret = session.registerInterface("testInt16", &t, &Test::testInt16);
-    std::cout << "register testInt16 ret=" << ret.message() << std::endl;
+    // session.registerMethod("testInt8", &t, &Test::testInt8);
+    // std::cout << "register testInt8 ret=" << ret.message() << std::endl;
 
-    ret = session.registerInterface("testUint16", &t, &Test::testUint16);
-    std::cout << "register testUint16 ret=" << ret.message() << std::endl;
+    // ret = session.registerMethod("testUint8", &t, &Test::testUint8);
+    // std::cout << "register testUint8 ret=" << ret.message() << std::endl;
 
-    ret = session.registerInterface("testInt32", &t, &Test::testInt32);
-    std::cout << "register testInt32 ret=" << ret.message() << std::endl;
+    // ret = session.registerMethod("testInt16", &t, &Test::testInt16);
+    // std::cout << "register testInt16 ret=" << ret.message() << std::endl;
 
-    ret = session.registerInterface("testUint32", &t, &Test::testUint32);
-    std::cout << "register testUint32 ret=" << ret.message() << std::endl;
+    // ret = session.registerMethod("testUint16", &t, &Test::testUint16);
+    // std::cout << "register testUint16 ret=" << ret.message() << std::endl;
 
-    ret = session.registerInterface("testInt64", &t, &Test::testInt64);
-    std::cout << "register testInt64 ret=" << ret.message() << std::endl;
+    // ret = session.registerMethod("testInt32", &t, &Test::testInt32);
+    // std::cout << "register testInt32 ret=" << ret.message() << std::endl;
 
-    ret = session.registerInterface("testUint64", &t, &Test::testUint64);
-    std::cout << "register testUint64 ret=" << ret.message() << std::endl;
+    // ret = session.registerMethod("testUint32", &t, &Test::testUint32);
+    // std::cout << "register testUint32 ret=" << ret.message() << std::endl;
 
-    ret = session.registerInterface("testFloat", &t, &Test::testFloat);
-    std::cout << "register testFloat ret=" << ret.message() << std::endl;
+    // ret = session.registerMethod("testInt64", &t, &Test::testInt64);
+    // std::cout << "register testInt64 ret=" << ret.message() << std::endl;
 
-    ret = session.registerInterface("testDouble", &t, &Test::testDouble);
-    std::cout << "register testDouble ret=" << ret.message() << std::endl;
+    // ret = session.registerMethod("testUint64", &t, &Test::testUint64);
+    // std::cout << "register testUint64 ret=" << ret.message() << std::endl;
 
-    ret = session.registerInterface("testBool", &t, &Test::testBool);
-    std::cout << "register testBool ret=" << ret.message() << std::endl;
+    // ret = session.registerMethod("testFloat", &t, &Test::testFloat);
+    // std::cout << "register testFloat ret=" << ret.message() << std::endl;
 
-    ret = session.registerInterface("testConstChars", &t, &Test::testConstChars);
-    std::cout << "register testConstChars ret=" << ret.message() << std::endl;
+    // ret = session.registerMethod("testDouble", &t, &Test::testDouble);
+    // std::cout << "register testDouble ret=" << ret.message() << std::endl;
 
-    ret = session.registerInterface("testString", &t, &Test::testString);
-    std::cout << "register testString ret=" << ret.message() << std::endl;
+    // ret = session.registerMethod("testBool", &t, &Test::testBool);
+    // std::cout << "register testBool ret=" << ret.message() << std::endl;
 
-    ret = session.registerInterface("testStringView", &t, &Test::testStringView);
-    std::cout << "register testStringView ret=" << ret.message() << std::endl;
+    // ret = session.registerMethod("testConstChars", &t, &Test::testConstChars);
+    // std::cout << "register testConstChars ret=" << ret.message() << std::endl;
 
-    ret = session.registerInterface("testVoid", &t, &Test::testVoid);
-    std::cout << "register testVoid ret=" << ret.message() << std::endl;
+    // ret = session.registerMethod("testString", &t, &Test::testString);
+    // std::cout << "register testString ret=" << ret.message() << std::endl;
+
+    // ret = session.registerMethod("testStringView", &t, &Test::testStringView);
+    // std::cout << "register testStringView ret=" << ret.message() << std::endl;
+
+    // ret = session.registerMethod("testVoid", &t, &Test::testVoid);
+    // std::cout << "register testVoid ret=" << ret.message() << std::endl;
 
 
     //! TODO: 注册匿名函数 
-    // ret = session.registerInterface("anonymousTest", []() -> void {
+    // ret = session.registerMethod("anonymousTest", []() -> void {
     //     return;
     // });
 
@@ -188,19 +221,23 @@ int main() {
     std::cout << "reply2 -- isError:" << reply2.isError() 
         << ", value:" << reply2.value() << std::endl;
 
-    PendingReply<std::string> reply3 = session.callAsync<std::string>(
+
+    PendingReply<std::string> reply3;
+    {
+    PendingReply<std::string> tmp = session.callAsync<std::string>(
         "org.freedesktop.DBus",
         "/org/freedesktop/DBus",
         "org.freedesktop.DBus",
         "GetId"
     );
-
-    reply3.setCallback(
+    tmp.setCallback(
         [] (Reply<std::string> aRep) -> void {
             std::cout << "reply3 -- isError:" << aRep.isError() 
                 << ", value:" << aRep.value() << std::endl;
         }
     );
+    reply3 = std::move(tmp);
+    }
 
     st = session.callAsync<int>(
         "org.freedesktop.DBus",
@@ -220,6 +257,20 @@ int main() {
                 << ", value:" << aRep.value() << std::endl;
         }
     );
+
+    // st = session.registerSignal<int, int>(
+    //     "clear"
+    // );
+
+    // std::cout << "registerSignal -- code:" << static_cast<int>(st.code()) 
+    //     << ", message:" << st.message() << std::endl;
+
+    st = session.emitSignal(
+        "clear"
+    );
+
+    std::cout << "emitSignal -- code:" << static_cast<int>(st.code()) 
+        << ", message:" << st.message() << std::endl;
 
     DbusEventLoop loop(session);
     loop.run();

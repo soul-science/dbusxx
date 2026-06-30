@@ -29,7 +29,9 @@ struct DbusTypeSignature {
 
 template<>
 struct DbusTypeSignature<int8_t> {
-    static constexpr char value = 'n';
+    //! Use 'y' (for uint8_t)
+    //! Ensure that the byte count is consistent with int8_t
+    static constexpr char value = 'y';
 };
 
 template<>

@@ -2,14 +2,9 @@
 #ifndef SSDBUS_DBUS_SESSION_HPP
 #define SSDBUS_DBUS_SESSION_HPP
 
-#include <systemd/sd-bus.h>
-#include <utility>
 #include <memory>
-#include <unordered_map>
 #include <vector>
-#include <type_traits>
 
-#include "DbusError.hpp"
 #include "Message.hpp"
 #include "Reply.hpp"
 #include "PendingReply.hpp"
@@ -19,6 +14,7 @@
 
 #include "adaptor/RawBusSharePtr.hpp"
 #include "session/SessionPrivate.hpp"
+#include "session/VTableRegistrar.hpp"
 #include "method/Method.hpp"
 
 #include <iostream>
@@ -26,9 +22,91 @@
 namespace SSDbus {
 
 class Session {
+    using PendingRepsV = std::vector<std::shared_ptr<void>>;
+
+    struct RegisterBuilder {
+        Private::SessionPrivate* session;
+        Private::VTableRegistrar reg;
+        Private::SessionPrivate::MethodMap mMethods;
+        Private::SessionPrivate::SignalMap mSignals;
+
+        template<typename Func>
+        RegisterBuilder& addMethod(std::string_view aName, Func aFunc) {
+            using wrapper = Method::MethodWrapper<Func>;
+            std::string input = wrapper::input();
+            std::string output = wrapper::output();
+            std::string regName = aName.data() + std::string("_") + input;
+            std::cout << "addMethod: " << regName << std::endl;
+            auto data = std::make_shared<wrapper>(session, aFunc);
+            mMethods[regName] = {
+                std::move(data), nullptr
+            };
+            reg.addMethod(aName, std::move(input), std::move(output),
+                &wrapper::onCall, mMethods[regName].method.get());
+
+            return *this;
+        }
+
+        template<typename Cls, typename Ret, typename ...Args>
+        RegisterBuilder& addMethod(std::string_view aName, Cls* aCls, Ret(Cls::*aFunc)(Args...)) {
+            return addMethod(aName,
+                [aCls, aFunc] (Args... aArgs) -> Ret {
+                    return (aCls->*aFunc)(aArgs...);
+                }
+            );
+        }
+
+        template<typename... Args>
+        RegisterBuilder& addSignal(std::string_view aName) {
+            std::string input = Method::getArgsString<Args...>();
+            std::string regName = aName.data() + std::string("_") + input;
+            std::cout << "addSignal: " << regName << std::endl;
+            mSignals[regName] = {nullptr};
+            reg.addSiganl(aName, std::move(input));
+
+            return *this;
+        }
+
+        Status commit() {
+            for (auto& [name, _] : mMethods) {
+                if (session->methods().count(name)) {
+                    std::cout << "Method <" << name << "> already registered" << std::endl;
+                    return Status(StatusCode::METHOD_EXISTS);
+                }
+            }
+
+            for (auto& [name, _] : mSignals) {
+                if (session->signals().count(name)) {
+                    std::cout << "Signal <" << name << "> already registered" << std::endl;
+                    return Status(StatusCode::METHOD_EXISTS);
+                }
+            }
+
+            std::vector<std::unique_ptr<Private::VTableContext>> ctxs;
+            auto st = reg.commit(ctxs);
+            if (st.isError()) {
+                return st;
+            }
+
+            size_t i = 0;
+            for (auto& [k, v] : mMethods) {
+                v.context = std::move(ctxs[i++]);
+                session->methods()[k] = std::move(v);
+            }
+
+            for (auto& [k, v] : mSignals) {
+                v.context = std::move(ctxs[i++]);
+                session->signals()[k] = std::move(v);
+            }
+
+            return Status(StatusCode::SUCCESS);
+        }
+    };
+
 public:
     explicit Session(bool aIsSystem = false)
-    : mPrivate(std::make_shared<Private::SessionPrivate>(aIsSystem)) {}
+        : mPrivate(std::make_shared<Private::SessionPrivate>(aIsSystem))
+        , mRepsPtr(std::make_shared<PendingRepsV>()) {}
 
     ~Session() = default;
 
@@ -66,9 +144,34 @@ public:
         mPrivate->flush();
     }
 
+    auto registerBuilder() {
+        return RegisterBuilder {
+            mPrivate.get(),
+            Private::VTableRegistrar(
+                mPrivate.get(), mPrivate->info().path,
+                mPrivate->info().interface)
+        };
+    }
+
+    template<typename Func>
+    Status registerMethod(std::string_view aFuncName, Func aFunc) {
+        return Method::registerSingleMethod(mPrivate.get(), aFuncName, aFunc);
+    }
+
     template<typename Cls, typename Ret, typename... Args>
-    Status registerInterface(const char* aFuncName, Cls* aObj, Ret (Cls::*aFunc)(Args...)) {
-        return Method::registerMethod(mPrivate.get(), aFuncName, aObj, aFunc);
+    Status registerMethod(std::string_view aFuncName,
+        Cls* aCls, Ret(Cls::*aFunc)(Args...)) {
+        return Method::registerSingleMethod(
+            mPrivate.get(), aFuncName,
+            [aCls, aFunc] (Args... aArgs) -> Ret {
+                return (aCls->*aFunc)(std::forward<Args>(aArgs)...);
+            }
+        );
+    }
+
+    template<typename... Args>
+    Status registerSignal(std::string_view aSignalName) {
+        return Method::registerSingleSignal<Args...>(mPrivate.get(), aSignalName);
     }
 
     template<typename Ret, typename... Args>
@@ -124,24 +227,18 @@ public:
             Method::callAsync<Ret, Args...>(mPrivate.get(), aTimeoutUmsc, aService, aPath, aIface, aMethod, aArgs...)
         );
 
-        mReps.push_back(rep);
-        void* repPtr = rep.get();
+        mRepsPtr->push_back(rep);
         rep->setCallback(
-            [this, cb = Call(std::forward<Callback>(aCallback)), repPtr] (Reply<Ret> aRep) {
+            [RepsPtr = mRepsPtr, cb = Call(std::forward<Callback>(aCallback)),
+                key = std::shared_ptr<void>(rep)] (Reply<Ret> aRep) {
                 //! Use RAII to ensure release old rep
                 struct Clear {
                     std::vector<std::shared_ptr<void>>& reps;
-                    void* ptr;
+                    std::shared_ptr<void> entry;
                     ~Clear() {
-                        auto it = std::find_if(reps.begin(), reps.end(),
-                            [this](const auto& p) {
-                                return p.get() == ptr;
-                        });
-                        if (it != reps.end()) {
-                            reps.erase(it);
-                        }
+                        reps.erase(std::find(reps.begin(), reps.end(), entry));
                     }
-                } clear{mReps, repPtr};
+                } clear{*RepsPtr, key};
 
                 cb(aRep);
             }
@@ -163,17 +260,36 @@ public:
     Status listenSignal(std::string_view aSender,
         std::string_view aPath, std::string_view aIface,
         std::string_view aSignal, Callback&& aCallback) {
-            return Method::listenSignal(
-                mPrivate.get(), aSender, aPath, aIface, aSignal,
-                std::forward<Callback>(aCallback)
+        return Method::listenSignal(
+            mPrivate.get(), aSender, aPath, aIface, aSignal,
+            std::forward<Callback>(aCallback)
         );
     }
 
+    template<typename Cls, typename Ret, typename... Args>
+    Status listenSignal(std::string_view aSender,
+        std::string_view aPath, std::string_view aIface,
+        std::string_view aSignal, Cls* aCls, Ret(Cls::*aFunc)(Args...)) {
+        return Method::listenSignal(
+            mPrivate.get(), aSender, aPath, aIface, aSignal,
+            [aCls, aFunc] (Args... aArgs) -> Ret {
+                return (aCls->*aFunc)(std::forward<Args>(aArgs)...);
+            }
+        );
+    }
+
+    template<typename... Args>
+    Status emitSignal(std::string_view aSignal, const Args&... aArgs) {
+        ServiceInfo info = mPrivate->info();
+        return Method::emitSignal(
+            mPrivate.get(), info.path, info.interface, aSignal, aArgs...
+        );
+    }
+
+
 private:
     std::shared_ptr<Private::SessionPrivate> mPrivate { nullptr };
-    std::vector<std::shared_ptr<void>> mReps;
+    std::shared_ptr<PendingRepsV> mRepsPtr { nullptr };
 };
-
 }
-
 #endif

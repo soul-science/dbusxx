@@ -3,8 +3,7 @@
 #define SSDBUS_DBUS_RETURN_STATUS_HPP
 
 #include <memory>
-
-#include "DbusError.hpp"
+#include <string>
 
 namespace SSDbus {
 
@@ -18,6 +17,7 @@ enum class StatusCode : uint8_t {
     NO_METHOD,          //! not found method/interface/path
     ACCESS_DENIED,      // 权限不足
     NAME_EXISTS,        // 总线名已被占用
+    METHOD_EXISTS,      //! method has been registered
 
     // --- 连接错误 ---
     NOT_CONNECTED,      // 未连接到总线
@@ -57,6 +57,8 @@ inline constexpr const char* statusMessage(StatusCode aCode) {
             return "Access denied";
         case StatusCode::NAME_EXISTS:
             return "Bus name already taken";
+        case StatusCode::METHOD_EXISTS:
+            return "Method already registered";
         case StatusCode::NOT_CONNECTED:
             return "Not connected to bus";
         case StatusCode::CONN_RESET:

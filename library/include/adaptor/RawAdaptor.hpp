@@ -65,6 +65,8 @@ inline StatusCode fromErrno(int aErrno) {
             return StatusCode::ACCESS_DENIED;
         case EADDRINUSE:
             return StatusCode::NAME_EXISTS;
+        case EEXIST:
+            return StatusCode::METHOD_EXISTS;
         case ENOTCONN:
             return StatusCode::NOT_CONNECTED;
         case ECONNRESET:
@@ -141,205 +143,6 @@ namespace RawCheck {
     bool isPathNameValid(const std::string& aName) {
         return isPathNameValid(aName);
     }
-};
-
-namespace RawBus {
-    Status openBus(RawBusPtr& aBus) {
-        return RawError::makeStatus(sd_bus_open(&aBus));
-    }
-
-    Status openSystemBus(RawBusPtr& aBus) {
-        return RawError::makeStatus(sd_bus_open_system(&aBus));
-    }
-
-    Status openUserBus(RawBusPtr& aBus) {
-        return RawError::makeStatus(sd_bus_open_user(&aBus));
-    }
-
-    bool isBusReady(RawBusPtr aBus) {
-        if (!aBus) {
-            return false;
-        }
-
-        return sd_bus_is_ready(aBus) > 0;
-    }
-
-    bool isBusOpen(RawBusPtr aBus) {
-        if (!aBus) {
-            return false;
-        }
-
-        return sd_bus_is_open(aBus) > 0;
-    }
-
-    Status flushBus(RawBusPtr aBus) {
-        if (!aBus) {
-            return Status(StatusCode::INVALID_ARG);
-        }
-
-        return RawError::makeStatus(sd_bus_flush(aBus));
-    }
-
-    void unrefBus(RawBusPtr aBus) {
-        if (!aBus) {
-            return;
-        }
-
-        sd_bus_unref(aBus);
-    }
-
-    void refBus(RawBusPtr aBus) {
-        if (!aBus) {
-            return;
-        }
-
-        sd_bus_ref(aBus);
-    }
-
-    Status sendMessage(RawBusPtr aBus, RawBusMessagePtr aMsg) {
-        if (!aBus || !aMsg) {
-            return Status(StatusCode::INVALID_ARG);
-        }
-
-        return RawError::makeStatus(sd_bus_send(aBus, aMsg, nullptr));
-    }
-
-    Status sendMessage(RawBusPtr aBus, RawBusMessagePtr aMsg, std::string_view aDestination) {
-        if (!aBus || !aMsg) {
-            return Status(StatusCode::INVALID_ARG);
-        }
-
-        return RawError::makeStatus(sd_bus_send_to(aBus, aMsg, aDestination.data(), nullptr));
-    }
-
-    Status callSync(RawBusPtr aBus, RawBusMessagePtr aMsg,
-        uint64_t aTimeoutUmsc, RawBusErrorPtr aErr, RawBusMessagePtr& aRep) {
-        if (!aBus || !aMsg) {
-            return Status(StatusCode::INVALID_ARG);
-        }
-
-        return RawError::makeStatus(sd_bus_call(aBus, aMsg, aTimeoutUmsc, aErr, &aRep));
-    }
-
-    Status callAsync(RawBusPtr aBus, RawBusSlotPtr aSlot, RawBusMessagePtr aMsg,
-        RawBusMessageHandler aCallback, void* aUsrData, uint64_t aTimeoutUmsc) {
-        if (!aBus || !aMsg) {
-            return Status(StatusCode::INVALID_ARG);
-        }
-
-        return RawError::makeStatus(sd_bus_call_async(
-            aBus, &aSlot, aMsg, aCallback, aUsrData, aTimeoutUmsc
-        ));
-    }
-
-    void closeBus(RawBusPtr aBus) {
-        if (!aBus) {
-            return;
-        }
-
-        if (isBusReady(aBus)) {
-            flushBus(aBus);
-        }
-
-        if (isBusOpen(aBus)) {
-            sd_bus_close(aBus);
-        }
-
-        sd_bus_unref(aBus);
-    }
-
-    int getFd(RawBusPtr aBus) {
-        assert(aBus);
-        return sd_bus_get_fd(aBus);
-    }
-
-    int process(RawBusPtr aBus, RawBusMessagePtr* aMsg) {
-        assert(aBus);
-        return sd_bus_process(aBus, aMsg);
-    }
-
-    int wait(RawBusPtr aBus, uint64_t aTimeout) {
-        assert(aBus);
-        return sd_bus_wait(aBus, aTimeout);
-    }
-
-    RawBusSlotPtr getCurSlot(RawBusPtr aBus) {
-        if (!aBus) {
-            return nullptr;
-        }
-
-        return sd_bus_get_current_slot(aBus);
-    }
-
-    RawBusMessagePtr getCurMessage(RawBusPtr aBus) {
-        if (!aBus) {
-            return nullptr;
-        }
-
-        return sd_bus_get_current_message(aBus);
-    }
-
-    RawBusMessageHandler getCurMessageHandler(RawBusPtr aBus) {
-        if (!aBus) {
-            return nullptr;
-        }
-
-        return sd_bus_get_current_handler(aBus);
-    }
-
-    Status attachEvent(RawBusPtr aBus, RawBusEventPtr aEvent, int aPrio) {
-        if (!aBus || ! aEvent) {
-            return Status(StatusCode::INVALID_ARG);
-        }
-
-        return RawError::makeStatus(sd_bus_attach_event(aBus, aEvent, aPrio));
-    }
-
-    Status detachEvent(RawBusPtr aBus) {
-        if (!aBus) {
-            return Status(StatusCode::INVALID_ARG);
-        }
-
-        return RawError::makeStatus(sd_bus_detach_event(aBus));
-    }
-
-    RawBusEventPtr getCurEvent(RawBusPtr aBus) {
-        if (!aBus) {
-            return nullptr;
-        }
-
-        return sd_bus_get_event(aBus);
-    }
-
-    std::string_view getUniqueName(RawBusPtr aBus) {
-        if (!aBus) {
-            return "";
-        }
-
-        const char* name = nullptr;
-        sd_bus_get_unique_name(aBus, &name);
-        return name ? std::string_view(name) : std::string_view();
-    }
-
-    Status setUniqueName(RawBusPtr aBus, std::string_view aName, uint64_t aFlags) {
-        if (!aBus) {
-            return Status(StatusCode::INVALID_ARG);
-        }
-
-        return RawError::makeStatus(sd_bus_request_name(
-            aBus, aName.data(), aFlags));
-    }
-
-    Status listenSignal(RawBusPtr aBus, RawBusSlotPtr& aSlot,
-        std::string_view aSender, std::string_view aPath, std::string_view aIface,
-        std::string_view aSignal, RawBusMessageHandler aCallback, void* aData) {
-        return RawError::makeStatus(
-            sd_bus_match_signal(
-                aBus, &aSlot, aSender.data(), aPath.data(), aIface.data(),
-                aSignal.data(), aCallback, aData
-            ));
-    }
-    
 }
 
 namespace RawSlot {
@@ -829,14 +632,12 @@ namespace RawMessage {
         return ret > 0;
     }
 
-    RawBusMessagePtr copyMessage(RawBusMessagePtr aMsg, bool aIsAll = true) {
-        if (!aMsg) {
-            return nullptr;
+    Status copyMessage(RawBusMessagePtr aSrc, RawBusMessagePtr& aDst, bool aIsAll = true) {
+        if (!aSrc) {
+            return Status(StatusCode::INVALID_ARG);
         }
 
-        RawBusMessagePtr copy = nullptr;
-        sd_bus_message_copy(aMsg, copy, aIsAll);
-        return copy;
+        return RawError::makeStatus(sd_bus_message_copy(aSrc, aDst, aIsAll));
     }
 
     void unrefMessage(RawBusMessagePtr aMsg) {
@@ -856,6 +657,229 @@ namespace RawMessage {
     }
 
 }
+
+namespace RawBus {
+    Status openBus(RawBusPtr& aBus) {
+        return RawError::makeStatus(sd_bus_open(&aBus));
+    }
+
+    Status openSystemBus(RawBusPtr& aBus) {
+        return RawError::makeStatus(sd_bus_open_system(&aBus));
+    }
+
+    Status openUserBus(RawBusPtr& aBus) {
+        return RawError::makeStatus(sd_bus_open_user(&aBus));
+    }
+
+    bool isBusReady(RawBusPtr aBus) {
+        if (!aBus) {
+            return false;
+        }
+
+        return sd_bus_is_ready(aBus) > 0;
+    }
+
+    bool isBusOpen(RawBusPtr aBus) {
+        if (!aBus) {
+            return false;
+        }
+
+        return sd_bus_is_open(aBus) > 0;
+    }
+
+    Status flushBus(RawBusPtr aBus) {
+        if (!aBus) {
+            return Status(StatusCode::INVALID_ARG);
+        }
+
+        return RawError::makeStatus(sd_bus_flush(aBus));
+    }
+
+    void unrefBus(RawBusPtr aBus) {
+        if (!aBus) {
+            return;
+        }
+
+        sd_bus_unref(aBus);
+    }
+
+    void refBus(RawBusPtr aBus) {
+        if (!aBus) {
+            return;
+        }
+
+        sd_bus_ref(aBus);
+    }
+
+    Status sendMessage(RawBusPtr aBus, RawBusMessagePtr aMsg) {
+        if (!aBus || !aMsg) {
+            return Status(StatusCode::INVALID_ARG);
+        }
+
+        return RawError::makeStatus(sd_bus_send(aBus, aMsg, nullptr));
+    }
+
+    Status sendMessage(RawBusPtr aBus, RawBusMessagePtr aMsg, std::string_view aDestination) {
+        if (!aBus || !aMsg) {
+            return Status(StatusCode::INVALID_ARG);
+        }
+
+        return RawError::makeStatus(sd_bus_send_to(aBus, aMsg, aDestination.data(), nullptr));
+    }
+
+    Status callSync(RawBusPtr aBus, RawBusMessagePtr aMsg,
+        uint64_t aTimeoutUmsc, RawBusErrorPtr aErr, RawBusMessagePtr& aRep) {
+        if (!aBus || !aMsg) {
+            return Status(StatusCode::INVALID_ARG);
+        }
+
+        return RawError::makeStatus(sd_bus_call(aBus, aMsg, aTimeoutUmsc, aErr, &aRep));
+    }
+
+    Status callAsync(RawBusPtr aBus, RawBusSlotPtr aSlot, RawBusMessagePtr aMsg,
+        RawBusMessageHandler aCallback, void* aUsrData, uint64_t aTimeoutUmsc) {
+        if (!aBus || !aMsg) {
+            return Status(StatusCode::INVALID_ARG);
+        }
+
+        return RawError::makeStatus(sd_bus_call_async(
+            aBus, &aSlot, aMsg, aCallback, aUsrData, aTimeoutUmsc
+        ));
+    }
+
+    void closeBus(RawBusPtr aBus) {
+        if (!aBus) {
+            return;
+        }
+
+        if (isBusReady(aBus)) {
+            flushBus(aBus);
+        }
+
+        if (isBusOpen(aBus)) {
+            sd_bus_close(aBus);
+        }
+
+        sd_bus_unref(aBus);
+    }
+
+    int getFd(RawBusPtr aBus) {
+        if (!aBus) {
+            return -1;
+        }
+        
+        return sd_bus_get_fd(aBus);
+    }
+
+    int process(RawBusPtr aBus, RawBusMessagePtr* aMsg) {
+        if (!aBus) {
+            return -1;
+        }
+
+        return sd_bus_process(aBus, aMsg);
+    }
+
+    int wait(RawBusPtr aBus, uint64_t aTimeout) {
+        if (!aBus) {
+            return -1;
+        }
+
+        return sd_bus_wait(aBus, aTimeout);
+    }
+
+    RawBusSlotPtr getCurSlot(RawBusPtr aBus) {
+        if (!aBus) {
+            return nullptr;
+        }
+
+        return sd_bus_get_current_slot(aBus);
+    }
+
+    RawBusMessagePtr getCurMessage(RawBusPtr aBus) {
+        if (!aBus) {
+            return nullptr;
+        }
+
+        return sd_bus_get_current_message(aBus);
+    }
+
+    RawBusMessageHandler getCurMessageHandler(RawBusPtr aBus) {
+        if (!aBus) {
+            return nullptr;
+        }
+
+        return sd_bus_get_current_handler(aBus);
+    }
+
+    Status attachEvent(RawBusPtr aBus, RawBusEventPtr aEvent, int aPrio) {
+        if (!aBus || ! aEvent) {
+            return Status(StatusCode::INVALID_ARG);
+        }
+
+        return RawError::makeStatus(sd_bus_attach_event(aBus, aEvent, aPrio));
+    }
+
+    Status detachEvent(RawBusPtr aBus) {
+        if (!aBus) {
+            return Status(StatusCode::INVALID_ARG);
+        }
+
+        return RawError::makeStatus(sd_bus_detach_event(aBus));
+    }
+
+    RawBusEventPtr getCurEvent(RawBusPtr aBus) {
+        if (!aBus) {
+            return nullptr;
+        }
+
+        return sd_bus_get_event(aBus);
+    }
+
+    std::string_view getUniqueName(RawBusPtr aBus) {
+        if (!aBus) {
+            return "";
+        }
+
+        const char* name = nullptr;
+        sd_bus_get_unique_name(aBus, &name);
+        return name ? std::string_view(name) : std::string_view();
+    }
+
+    Status setUniqueName(RawBusPtr aBus, std::string_view aName, uint64_t aFlags) {
+        if (!aBus) {
+            return Status(StatusCode::INVALID_ARG);
+        }
+
+        return RawError::makeStatus(sd_bus_request_name(
+            aBus, aName.data(), aFlags));
+    }
+
+    Status listenSignal(RawBusPtr aBus, RawBusSlotPtr& aSlot,
+        std::string_view aSender, std::string_view aPath, std::string_view aIface,
+        std::string_view aSignal, RawBusMessageHandler aCallback, void* aData) {
+        return RawError::makeStatus(
+            sd_bus_match_signal(
+                aBus, &aSlot, aSender.data(), aPath.data(), aIface.data(),
+                aSignal.data(), aCallback, aData
+            ));
+    }
+
+    Status addObjectToVTable(RawBusPtr aBus, RawBusSlotPtr& aSlot,
+        std::string_view aPath, std::string_view aIface, Adaptor::RawBusVTable* aVTable, void* aData) {
+        if (!aBus
+            || !RawCheck::isPathNameValid(aPath)
+            || !RawCheck::isInterfaceNameValid(aIface)
+            || !aVTable) {
+            return Status(StatusCode::INVALID_ARG);
+        }
+
+        return RawError::makeStatus(
+            sd_bus_add_object_vtable(aBus, &aSlot, aPath.data(), aIface.data(), aVTable, aData)
+        );
+    }
+    
+}
+
 }
 }
 

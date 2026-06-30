@@ -21,7 +21,7 @@ public:
     RawMessageSharePtr(const RawMessageSharePtr& aPtr)
         : mRaw(aPtr.mRaw)
         , mIsOwned(aPtr.mIsOwned) {
-        if (mRaw) {
+        if (mRaw && mIsOwned) {
             RawMessage::refMessage(mRaw);
         }
     }
@@ -39,13 +39,13 @@ public:
             return *this;
         }
 
-        if (mIsOwned && mRaw) {
+        if (mRaw && mIsOwned) {
             RawMessage::unrefMessage(mRaw);
         }
 
         mRaw = aPtr.mRaw;
         mIsOwned = aPtr.mIsOwned;
-        if (mRaw) {
+        if (mRaw && mIsOwned) {
             RawMessage::refMessage(mRaw);
         }
 

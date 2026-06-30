@@ -8,6 +8,8 @@
 #include "message/MessagePrivate.hpp"
 #include "message/SignalHandler.hpp"
 #include "session/SessionPrivate.hpp"
+#include "session/VTableRegistrar.hpp"
+#include "FunctionTrait.hpp"
 
 namespace SSDbus {
 namespace Method {
@@ -38,130 +40,166 @@ std::string getArgsString() {
     return args;
 }
 
-// ========== 服务端：回调上下文 + 包装器 ==========
+// ========== 服务端 ==========
 
-template <typename Cls, typename Ret, typename... Args>
-struct CallContext {
-    using MethodPtr = std::shared_ptr<std::pair<Cls*, Ret (Cls::*)(Args...)>>;
-
-    CallContext(Private::SessionPrivate* aSession, MethodPtr aMethodPtr)
-        : session(aSession)
-        , method(std::move(aMethodPtr)) {}
-    
+template<typename Func>
+struct MethodWrapper {
     Private::SessionPrivate* session;
-    MethodPtr method;
-};
+    Func func;
 
-template <typename Cls, typename Ret, typename... Args>
-struct IMethodWrapper {
-    using ClsFuncPtr = Ret (Cls::*)(Args...);
+    using FuncType = std::decay_t<Func>;
+    using traits = Method::FuncTrait<FuncType>;
+    using ArgsTuple = typename traits::ArgsTuple;
+    using Ret = typename traits::RetType;
 
-    static int call(Adaptor::RawBusMessagePtr aMsg, void* aUsrData, Adaptor::RawBusErrorPtr aErr) {
-        auto* context = static_cast<CallContext<Cls, Ret, Args...>*>(aUsrData);
-        Cls* obj = context->method->first;
-        ClsFuncPtr func = context->method->second;
+    MethodWrapper(Private::SessionPrivate* aSession, Func aFunc)
+        : session(aSession)
+        , func(aFunc) {}
 
+    static std::string input() {
+        auto impl = [&]<typename... Args>(std::tuple<Args...>*) {
+            std::string args;
+            (args.append(std::string(1, getSignature<Args>())), ...);
+            return args;
+        };
+
+        return impl(static_cast<typename traits::ArgsTuple*>(nullptr));
+    }
+
+    static std::string output() {
+        return std::string(1, SSDbus::getSignature<Ret>());
+    }
+
+    static int onCall(Adaptor::RawBusMessagePtr aMsg, void* aUsr, Adaptor::RawBusErrorPtr) {
+        auto self = static_cast<MethodWrapper*>(aUsr);
         Private::MessagePrivate message(Adaptor::RawMessageSharePtr(aMsg, false));
-        Private::MessagePrivate reply = context->session->createReply(message);
+        Private::MessagePrivate reply = self->session->createReply(message);
 
-        if constexpr (sizeof...(Args)) {
-            //! Parse args from message
-            std::tuple<typename ArgTypeAdaptor<std::decay_t<Args>>::type...> tpl;
-            message.read(tpl);
+        auto impl = [&]<typename... Args>(std::tuple<Args...>*) {
+            if constexpr (traits::argSize) {
+                std::tuple<typename ArgTypeAdaptor<std::decay_t<Args>>::type...> tpl;
+                message.read(tpl);
 
-            //! Apply function
-            if constexpr (std::is_same_v<Ret, void>) {
-                std::apply(
-                    [&](auto&&... aArgs) -> void {
-                        (obj->*func)(std::forward<decltype(aArgs)>(aArgs)...);
-                    },
-                    tpl
-                );
-
-            } else {
-                Ret res = std::apply(
-                    [&](auto&&... aArgs) -> Ret {
-                        return (obj->*func)(std::forward<decltype(aArgs)>(aArgs)...);
-                    },
-                    tpl
-                );
-
-                reply.write(res);
+                //! Apply function
+                if constexpr (std::is_same_v<Ret, void>) {
+                    std::apply(self->func, tpl);
+                } else {
+                    Ret ret = std::apply(self->func, tpl);
+                    reply.write(ret);
+                }
             }
-        } else {
-            //! Apply function
-            if constexpr (std::is_same_v<Ret, void>) {
-                (obj->*func)();
-            } else {
-                Ret res = (obj->*func)();
-                reply.write(res);
+            else {
+                if constexpr (std::is_same_v<Ret, void>) {
+                    self->func();
+                } else {
+                    Ret ret = self->func();
+                    reply.write(ret);
+                }
             }
-        }
 
-        //! Response reply
-        auto st = context->session->sendMessage(reply, message.getSender());
-        return st.isSuccess() ? 1 : -1;
+            auto st = self->session->sendMessage(reply, message.getSender());
+            return st.isSuccess() ? 0 : -1;
+        };
+
+        return impl(static_cast<typename traits::ArgsTuple*>(nullptr));
     }
 };
 
-// ========== 服务端：注册方法 ==========
+template<typename Func>
+Status registerSingleMethod(
+    Private::SessionPrivate* aSession, std::string_view aFuncName, Func aFunc) {
+    using wrapper = MethodWrapper<Func>;
+    auto data = std::make_shared<wrapper>(
+        aSession, aFunc
+    );
+    auto dataPtr = data.get();
 
-template<typename Cls, typename Ret, typename... Args>
-Status registerMethod(
-    Private::SessionPrivate* aSession, std::string_view aFuncName, Cls* aObj, Ret (Cls::*aFunc)(Args...)) {
-    using ClsFuncPtr = Ret (Cls::*)(Args...);
+    std::string input = wrapper::input();
+    std::string output = wrapper::output();
+    std::string regName = aFuncName.data() + std::string("_") + input;
+
+    std::cout << "regName:"  << regName
+        << ", input: " << input << ", output:" << output << std::endl;
+
+    if (aSession->methods().count(regName.data())) {
+        return Status(StatusCode::METHOD_EXISTS);
+    }
+
+    aSession->methods()[regName.data()] = {};
+    auto& info = aSession->methods()[regName.data()];
+
+    info.method = data;
+
+    //! Create vtable
+    Private::VTableRegistrar reg(aSession, aSession->info().path, aSession->info().interface);
+    reg.addMethod(aFuncName, input, output, &MethodWrapper<Func>::onCall, dataPtr);
+    std::vector<std::unique_ptr<Private::VTableContext>> v;
+    auto st = reg.commit(v);
+    std::cout << "VTableRegistrar code=" << static_cast<int>(st.code())
+        << ", message=" << st.message() << std::endl;
+
+    if (st.isError()) {
+        aSession->methods().erase(regName);
+        return st;
+    }
+
+    info.context = std::move(v.front());
+    v.pop_back();
+
+    return Status(StatusCode::SUCCESS);
+}
+
+template<typename... Args>
+Status registerSingleSignal(Private::SessionPrivate* aSession, std::string_view aSignalName) {
 
     if (aSession->info().name.empty() || aSession->info().path.empty()) {
         return Status(StatusCode::INVALID_ARG);
     }
 
-    auto method = std::make_shared<std::pair<Cls*, ClsFuncPtr>>(aObj, aFunc);
-    auto data = std::make_shared<Method::CallContext<Cls, Ret, Args...>>(
-        aSession, method
-    );
-    auto dataPtr = data.get();
-
-    aSession->methods()[aFuncName.data()] = {};
-    auto& info = aSession->methods()[aFuncName.data()];
-
-    info.input = Method::getArgsString(aObj, aFunc);
-    info.output = Method::getReturnString(aObj, aFunc);
-
-    std::cout << "input: " << info.input << ", output:" << info.output << std::endl;
-
-    //! Create vtable
-    using wrapper = IMethodWrapper<Cls, Ret, Args...>;
-    auto vtable = std::unique_ptr<Adaptor::RawBusVTable[]>( new Adaptor::RawBusVTable[3] {
-        SD_BUS_VTABLE_START(0),
-        SD_BUS_METHOD(aFuncName.data(), info.input.c_str(), info.output.c_str(), &wrapper::call, SD_BUS_VTABLE_UNPRIVILEGED),
-        SD_BUS_VTABLE_END
-    });
-
-    Adaptor::RawBusVTable* vtablePtr = vtable.get();
-    Adaptor::RawBusSlotPtr rawSlot { nullptr };
-    auto ret = sd_bus_add_object_vtable(
-        aSession->rawBus(),
-        &rawSlot, aSession->info().path.c_str(),
-        aSession->info().interface.c_str(), vtablePtr, dataPtr
-    );
-
-    Slot slot(rawSlot);
-    if (ret < 0) {
-        aSession->methods().erase(aFuncName.data());
-        return Adaptor::RawError::makeStatus(ret);
+    std::string input = Method::getArgsString<Args...>();
+    std::string regName = aSignalName.data() + std::string("_") + input;
+    if (aSession->methods().count(regName.data())) {
+        return Status(StatusCode::METHOD_EXISTS);
     }
 
-    info.method = data;
-    info.vtable = std::move(vtable);
-    info.slot = std::move(slot);
+    aSession->signals()[aSignalName.data()] = {};
+    auto& info = aSession->signals()[regName.data()];
 
+    Private::VTableRegistrar reg(aSession, aSession->info().path, aSession->info().interface);
+    reg.addSiganl(aSignalName, input);
+    std::vector<std::unique_ptr<Private::VTableContext>> v;
+    auto st = reg.commit(v);
+    if (st.isError()) {
+        aSession->signals().erase(regName);
+        return st;
+    }
+
+    info.context = std::move(v.front());
     return Status(StatusCode::SUCCESS);
 }
 
-// template<typename... Args>
-// Message emitSignal(
-//     Session& aSession, std::string_view aSignal
-// );
+template<typename... Args>
+Status emitSignal(Private::SessionPrivate* aSession, std::string_view aPath, std::string_view aIface,
+    std::string_view aSignal, const Args&... aArgs) {
+    Adaptor::RawBusMessagePtr rawSig =  Adaptor::RawMessage::createSignal(
+        aSession->rawBus(), aPath, aIface, aSignal);
+    if (!rawSig) {
+        return Status(StatusCode::UNKNOWN_ERROR);
+    }
+
+    Status st = Status(StatusCode::SUCCESS);
+    Private::MessagePrivate sig(Adaptor::RawMessageSharePtr(rawSig, true));
+    if constexpr (sizeof...(Args)) {
+        st = sig.write(aArgs...);
+    }
+
+    if (st.isError()) {
+        return st;
+    }
+
+    return aSession->sendMessage(sig);
+    
+}
 
 // ========== 客户端：远程调用 ==========
 

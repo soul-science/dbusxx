@@ -79,19 +79,36 @@ public:
         }
 
         Status st;
-        if constexpr (std::is_same_v<std::decay_t<T>, std::string>
-            || std::is_same_v<std::decay_t<T>, std::string_view>) {
+        using rawType = std::decay_t<T>;
+        if constexpr (std::is_same_v<rawType, std::string>) {
             st = Adaptor::RawMessage::appendBasic(
-                mRawMsg.get(), DbusTypeSignature<std::decay_t<T>>::value, aVal.data());
+                mRawMsg.get(), DbusTypeSignature<rawType>::value, aVal.c_str());
         }
-        else if constexpr (std::is_same_v<std::decay_t<T>, const char*>
-            || std::is_same_v<std::decay_t<T>, char*>) {
+        else if constexpr (std::is_same_v<rawType, std::string_view>) {
+            //! string_view::data() No guarantee that it ends with \0
+            //! But the D-Bus type 's' requires a null-terminated C string
+            //! So convert it to string, and use c_str
+            std::string tmp(aVal);
             st = Adaptor::RawMessage::appendBasic(
-                mRawMsg.get(), DbusTypeSignature<std::decay_t<T>>::value, aVal);
+                mRawMsg.get(), DbusTypeSignature<rawType>::value, tmp.c_str());
+        }
+        else if constexpr (std::is_same_v<rawType, const char*>
+            || std::is_same_v<rawType, char*>) {
+            st = Adaptor::RawMessage::appendBasic(
+                mRawMsg.get(), DbusTypeSignature<rawType>::value, aVal);
+        }
+        else if constexpr (std::is_same_v<rawType, float>) {
+            //! Convert float to double (unified use of double type)
+            //! Ensure that the number of bytes read is consistent
+            double d = static_cast<double>(aVal);
+            st = Adaptor::RawMessage::appendBasic(
+                mRawMsg.get(), DbusTypeSignature<rawType>::value,
+                &d
+            );
         }
         else {
             st = Adaptor::RawMessage::appendBasic(
-                mRawMsg.get(), DbusTypeSignature<std::decay_t<T>>::value, &aVal);
+                mRawMsg.get(), DbusTypeSignature<rawType>::value, &aVal);
         }
 
         return st;

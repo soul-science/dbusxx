@@ -24,7 +24,7 @@ public:
         : mRaw(aPtr.mRaw)
         , mIsOwned(aPtr.mIsOwned)
         , mIsSystem(aPtr.mIsSystem) {
-        if (mRaw) {
+        if (mRaw && mIsOwned) {
             RawBus::refBus(mRaw);
         }
     }

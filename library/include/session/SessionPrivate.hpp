@@ -18,22 +18,31 @@
 namespace SSDbus {
 namespace Private {
 
+class VTableContext;
 class SessionPrivate {
 public:
     struct MethodInfo {
-        std::string input;
-        std::string output;
         std::shared_ptr<void> method;
-        std::unique_ptr<Adaptor::RawBusVTable[]> vtable;
-        Slot slot;
+        std::unique_ptr<VTableContext> context;
+    };
+
+    struct SignalInfo {
+        std::unique_ptr<VTableContext> context;
     };
 
     using MethodMap = std::unordered_map<std::string, MethodInfo>;
+    using SignalMap = std::unordered_map<std::string, SignalInfo>;
 
     explicit SessionPrivate(bool aIsSystem)
         : mRawBus(Adaptor::RawBusSharePtr::make(aIsSystem)) {}
 
     SessionPrivate() = default;
+
+    static bool isValidInfo(const ServiceInfo& aInfo) {
+        return Adaptor::RawCheck::isServiceNameValid(aInfo.name)
+            && Adaptor::RawCheck::isPathNameValid(aInfo.path)
+            && Adaptor::RawCheck::isInterfaceNameValid(aInfo.interface);
+    }
 
     Adaptor::RawBusPtr rawBus() const {
         return mRawBus.get();
@@ -49,6 +58,10 @@ public:
 
     MethodMap& methods() {
         return mRegisteredMethods;
+    }
+
+    SignalMap& signals() {
+        return mRegisteredSignals;
     }
 
     Status setInfo(ServiceInfo aInfo) {
@@ -80,11 +93,18 @@ public:
     }
 
     Status sendMessage(MessagePrivate& aMsg) {
-        return sendMessage(aMsg, aMsg.getSender());
+        if (!mRawBus) {
+            return Status(StatusCode::UNKNOWN_ERROR);
+        }
+
+        return Adaptor::RawBus::sendMessage(mRawBus.get(), aMsg.rawMessage());
     }
 
     Status sendMessage(MessagePrivate& aMsg, std::string_view aDestination) {
-        if (!mRawBus) return Status(StatusCode::UNKNOWN_ERROR);
+        if (!mRawBus) {
+            return Status(StatusCode::UNKNOWN_ERROR);
+        }
+
         return Adaptor::RawBus::sendMessage(mRawBus.get(), aMsg.rawMessage(), aDestination);
     }
 
@@ -104,12 +124,6 @@ public:
         Adaptor::RawBus::flushBus(mRawBus.get());
     }
 
-    static bool isInvalidInfo(const ServiceInfo& aInfo) {
-        return Adaptor::RawCheck::isServiceNameValid(aInfo.name)
-            && Adaptor::RawCheck::isPathNameValid(aInfo.path)
-            && Adaptor::RawCheck::isInterfaceNameValid(aInfo.interface);
-    }
-
     void addSignalHandler(std::shared_ptr<void> aHandler) {
         mSigHandler.push_back(std::move(aHandler));
     }
@@ -118,6 +132,7 @@ private:
     Adaptor::RawBusSharePtr mRawBus { nullptr };
     ServiceInfo mInfo;
     MethodMap mRegisteredMethods;
+    SignalMap mRegisteredSignals;
     std::vector<std::shared_ptr<void>> mSigHandler;
 };
 

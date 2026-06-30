@@ -13,12 +13,12 @@ public:
     explicit Reply(std::shared_ptr<Private::MessagePrivate> aImpl)
         : Message(std::move(aImpl)) {
             mStatus = read(mValue);
-        }
+    }
 
     explicit Reply(Private::MessagePrivate&& aImpl)
         : Message(std::make_shared<Private::MessagePrivate>(std::move(aImpl))) {
             mStatus = read(mValue);
-        }
+    }
 
     Reply(const Reply& aOther) = default;
 
