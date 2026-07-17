@@ -8,7 +8,6 @@
 #include "Message.hpp"
 #include "Reply.hpp"
 #include "PendingReply.hpp"
-#include "DbusSlot.hpp"
 #include "DbusArgs.hpp"
 #include "Status.hpp"
 
@@ -29,6 +28,7 @@ class Session {
         Private::VTableRegistrar reg;
         Private::SessionPrivate::MethodMap mMethods;
         Private::SessionPrivate::SignalMap mSignals;
+        Private::SessionPrivate::PropertyMap mProperties;
 
         template<typename Func>
         RegisterBuilder& addMethod(std::string_view aName, Func aFunc) {
@@ -42,7 +42,7 @@ class Session {
                 std::move(data), nullptr
             };
             reg.addMethod(aName, std::move(input), std::move(output),
-                &wrapper::onCall, mMethods[regName].method.get());
+                &wrapper::onCall, mMethods[regName].data.get());
 
             return *this;
         }
@@ -67,18 +67,41 @@ class Session {
             return *this;
         }
 
+        template<typename T>
+        RegisterBuilder& addProperty(std::string_view aName, T aValue) {
+            using wrapper = Method::PropertyWrapper<T>;
+            std::string sig = wrapper::signature();
+            
+            auto data = std::make_shared<wrapper>(
+                session, aName.data(), aValue);
+            mProperties[aName.data()] = {std::move(data), nullptr};
+            
+            reg.addProperty(aName, sig,
+                &wrapper::onGetter, &wrapper::onSetter,
+                mProperties[aName.data()].data.get());
+
+            return *this;
+        }
+
         Status commit() {
             for (auto& [name, _] : mMethods) {
                 if (session->methods().count(name)) {
                     std::cout << "Method <" << name << "> already registered" << std::endl;
-                    return Status(StatusCode::METHOD_EXISTS);
+                    return Status(StatusCode::NAME_EXISTS);
                 }
             }
 
             for (auto& [name, _] : mSignals) {
                 if (session->signals().count(name)) {
                     std::cout << "Signal <" << name << "> already registered" << std::endl;
-                    return Status(StatusCode::METHOD_EXISTS);
+                    return Status(StatusCode::NAME_EXISTS);
+                }
+            }
+
+            for (auto& [name, _] : mProperties) {
+                if (session->properties().count(name)) {
+                    std::cout << "Property <" << name << "> already registered" << std::endl;
+                    return Status(StatusCode::NAME_EXISTS);
                 }
             }
 
@@ -97,6 +120,11 @@ class Session {
             for (auto& [k, v] : mSignals) {
                 v.context = std::move(ctxs[i++]);
                 session->signals()[k] = std::move(v);
+            }
+
+            for (auto& [k, v] : mProperties) {
+                v.context = std::move(ctxs[i++]);
+                session->properties()[k] = std::move(v);
             }
 
             return Status(StatusCode::SUCCESS);
@@ -286,8 +314,56 @@ public:
         );
     }
 
+    template<typename T>
+    Status getProperty(std::string_view aName, T& aValue) {
+        auto p = getPropPrivate<T>(aName);
+        if (!p) {
+            return Status(StatusCode::INVALID_ARG);
+        }
+
+        aValue = (*p).get();
+        return Status(StatusCode::SUCCESS);
+    }
+
+    template<typename T>
+    Status setProperty(std::string_view aName, T aValue) {
+        auto p = getPropPrivate<T>(aName);
+        if (!p) {
+            return Status(StatusCode::INVALID_ARG);
+        }
+
+        (*p).set(aValue);
+        return Status(StatusCode::SUCCESS);
+    }
+
+    template<typename T>
+    Status onPropertyChanged(std::string_view aName, std::function<void(const T&)>&& aCallback) {
+        auto p = getPropPrivate<T>(aName);
+        if (!p) {
+            return Status(StatusCode::INVALID_ARG);
+        }
+
+        (*p).onChanged(std::forward<std::function<void(const T&)>>(aCallback));
+        return Status(StatusCode::SUCCESS);
+    }
 
 private:
+    template<typename T>
+    Method::PropertyWrapper<T>* getPropPrivate(std::string_view aName) {
+        auto it = mPrivate->properties().find(aName.data());
+        if (it == mPrivate->properties().end()) {
+            return nullptr;
+        }
+
+        auto p = static_cast<Method::PropertyWrapper<T>*>(it->second.data.get());
+        if (p->type != typeid(T).name()) {
+            return nullptr;
+        }
+        
+        return p;
+    }
+
+
     std::shared_ptr<Private::SessionPrivate> mPrivate { nullptr };
     std::shared_ptr<PendingRepsV> mRepsPtr { nullptr };
 };

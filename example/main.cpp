@@ -4,7 +4,11 @@
 #include "Reply.hpp"
 #include "PendingReply.hpp"
 
+#include <array>
 #include <iostream>
+#include <string_view>
+#include <string>
+#include <vector>
 
 using namespace SSDbus;
 
@@ -86,11 +90,67 @@ public:
         std::cout << "testVoid" << std::endl;
     }
 
+    void testVector(std::vector<int> v) {
+        std::cout << "testVector, v: ";
+        for (const auto& item : v) {
+            std::cout << item << " ";
+        }
+
+        std::cout << std::endl;
+    }
+
+    void testVector2D(std::vector<std::vector<int>> vv) {
+        std::cout << "testVector2D, vv: ";
+        for (const auto& v : vv) {
+            std::cout << "\\ ";
+            for (const auto& item : v) {
+                std::cout << item << " ";
+            }
+            std::cout << "\\ ";
+        }
+
+        std::cout << std::endl;
+    }
+
+    void testArray(std::array<int, 3> a) {
+        std::cout << "testArray, a: ";
+        for (const auto& item : a) {
+            std::cout << item << " ";
+        }
+
+        std::cout << std::endl;
+    }
+
+    void testArray2D(std::array<std::array<int, 3>, 2> aa) {
+        std::cout << "testArray2D, aa: ";
+        for (const auto& a : aa) {
+            std::cout << "\\ ";
+            for (const auto& item : a) {
+                std::cout << item << " ";
+            }
+            std::cout << "\\ ";
+        }
+
+        std::cout << std::endl;
+    }
+
+    void testMultiArgs(int i, std::string s, std::vector<double> v) {
+        std::cout << "testMultiArgs"
+            << ", i = " << i
+            << ", s = " << s << ", v = ( ";
+        for (const auto& item : v) {
+            std::cout << item << " ";
+        }
+        std::cout << ")" << std::endl;
+    }
+
     void listenSignal(const std::string& aName) {
         std::cout << "listenSignal_cls_func -- Service acquired name: "
             << aName << std::endl;
     }
 
+    int property1 {1};
+    std::string property2 {"p2"};
 };
 
 void callback(Reply<int> aRep) {
@@ -132,7 +192,7 @@ int main() {
         {"com.example.test", "/com/example/test", "com.example.interface"}
     );
 
-    auto ret = session.registerBuilder()
+    st = session.registerBuilder()
         .addMethod("testInt8", &t, &Test::testInt8)
         .addMethod("testUint8", &t, &Test::testUint8)
         .addMethod("testInt16", &t, &Test::testInt16)
@@ -148,10 +208,46 @@ int main() {
         .addMethod("testString", &t, &Test::testString)
         .addMethod("testStringView", &t, &Test::testStringView)
         .addMethod("testVoid", &t, &Test::testVoid)
+        .addMethod("testVector", &t, &Test::testVector)
+        .addMethod("testVector2D", &t, &Test::testVector2D)
+        .addMethod("testArray", &t, &Test::testArray)
+        .addMethod("testArray2D", &t, &Test::testArray2D)
+        .addMethod("testMultiArgs", &t, &Test::testMultiArgs)
         .addSignal<int, int>("clear")
+        .addSignal<std::vector<int>>("onCount")
+        .addProperty("property1", t.property1)
+        .addProperty("property2", t.property2)
         .commit();
 
-    std::cout << "register beginRegistration ret=" << ret.message() << std::endl;
+    std::cout << "register beginRegistration ret=" << st.message() << std::endl;
+
+    int prop1 = 0;
+    std::string prop2 = "";
+    int prop3 = 0;    
+
+    st = session.getProperty("property1", prop1);
+    std::cout << "prop1: st.message=" << st.message() << ", value=" << prop1 << std::endl;
+
+    st = session.getProperty("property2", prop2);
+    std::cout << "prop2: st.message=" << st.message() << ", value=" << prop2 << std::endl;
+
+    st = session.getProperty("property3", prop3);
+    std::cout << "prop3: st.message=" << st.message() << ", value=" << prop3 << std::endl;
+
+    st = session.onPropertyChanged<int>("property1", [](int newVal) {
+        std::cout << "property1 → " << newVal << std::endl;
+    });
+    std::cout << "onPropertyChanged property1: st.message=" << st.message() << std::endl;
+
+    st = session.onPropertyChanged<std::string>("property2", [](std::string newVal) {
+        std::cout << "property2 → " << newVal << std::endl;
+    });
+    std::cout << "onPropertyChanged property2: st.message=" << st.message() << std::endl;
+
+    st = session.onPropertyChanged<int>("property2", [](int newVal) {
+        std::cout << "property2 → " << newVal << std::endl;
+    });
+    std::cout << "onPropertyChanged property2: st.message=" << st.message() << std::endl;
 
     // session.registerMethod("testInt8", &t, &Test::testInt8);
     // std::cout << "register testInt8 ret=" << ret.message() << std::endl;
@@ -197,12 +293,6 @@ int main() {
 
     // ret = session.registerMethod("testVoid", &t, &Test::testVoid);
     // std::cout << "register testVoid ret=" << ret.message() << std::endl;
-
-
-    //! TODO: 注册匿名函数 
-    // ret = session.registerMethod("anonymousTest", []() -> void {
-    //     return;
-    // });
 
     Reply<void> reply1 = session.callSync(
         "com.sslog.service",

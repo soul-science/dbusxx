@@ -9,7 +9,7 @@
 #include "adaptor/RawAdaptor.hpp"
 #include "SessionPrivate.hpp"
 
-#include "DbusSlot.hpp"
+#include "adaptor/RawSlotSharePtr.hpp"
 
 namespace SSDbus {
 namespace Private {
@@ -17,8 +17,8 @@ namespace Private {
 struct VTableContext {
     using VTablePtr = std::unique_ptr<Adaptor::RawBusVTable[]>;
     VTablePtr vtable;
-    Slot slot;
-    std::string func;
+    Adaptor::RawSlotSharePtr slot;
+    std::string name;
     std::string input;
     std::string output;
 };
@@ -27,14 +27,17 @@ class VTableRegistrar {
 
     enum class Type : uint8_t {
         METHOD = 0,
-        SIGNAL
+        SIGNAL,
+        PROPERTY
     };
 
     struct VTableEntry {
-        std::string func;
+        std::string name;
         std::string input;
         std::string output;
         Adaptor::RawBusMessageHandler callback;
+        Adaptor::RawBusPropertyGetter getter;
+        Adaptor::RawBusPropertySetter setter;
         void* data;
         Type type;
     };
@@ -51,7 +54,7 @@ public:
             std::string(aFunc),
             std::string(aInput),
             std::string(aOutput),
-            aCallback, aData, Type::METHOD
+            aCallback, nullptr, nullptr, aData , Type::METHOD
         });
 
         return *this;
@@ -61,32 +64,57 @@ public:
         mEntries.push_back({
             std::string(aSignal),
             std::string(aInput),
-            "", nullptr, nullptr, Type::SIGNAL
+            "", nullptr, nullptr, nullptr, nullptr, Type::SIGNAL
         });
 
+        return *this;
+    }
+
+    VTableRegistrar& addProperty(std::string_view aProperty, std::string_view aInput,
+        Adaptor::RawBusPropertyGetter aGetter, Adaptor::RawBusPropertySetter aSetter, void* aData) {
+        mEntries.push_back({
+            std::string(aProperty),
+            std::string(aInput),
+            "", nullptr, aGetter, aSetter, aData, Type::PROPERTY
+        });
         return *this;
     }
 
     Status commit(std::vector<std::unique_ptr<VTableContext>>& aVTables) {
         for (auto& entry: mEntries) {
             auto ctx = std::make_unique<VTableContext>();
-            ctx->func = std::move(entry.func);
+            ctx->name = std::move(entry.name);
             ctx->input = std::move(entry.input);
             ctx->output = std::move(entry.output);
-            std::string regName = ctx->func + std::string("_") + ctx->input;
-            if (mSession->methods().count(regName)) {
-                return Status(StatusCode::METHOD_EXISTS);  // 已存在，不覆盖
-            }
 
             Adaptor::RawBusVTable item;
             switch (entry.type) {
-                case Type::METHOD:
-                    item = SD_BUS_METHOD(ctx->func.c_str(), ctx->input.c_str(),
+                case Type::METHOD: {
+                    if (mSession->methods().count(ctx->name)) {
+                        return Status(StatusCode::NAME_EXISTS);
+                    }
+
+                    item = SD_BUS_METHOD(ctx->name.c_str(), ctx->input.c_str(),
                         ctx->output.c_str(), entry.callback, 0);
                     break;
-                case Type::SIGNAL:
-                item = SD_BUS_SIGNAL(ctx->func.c_str(), ctx->input.c_str(), 0);
+                }
+                case Type::SIGNAL: {
+                    if (mSession->signals().count(ctx->name)) {
+                        return Status(StatusCode::NAME_EXISTS);
+                    }
+
+                    item = SD_BUS_SIGNAL(ctx->name.c_str(), ctx->input.c_str(), 0);
                     break;
+                }
+                case Type::PROPERTY: {
+                    if (mSession->properties().count(ctx->name)) {
+                        return Status(StatusCode::NAME_EXISTS);
+                    }
+
+                    item = SD_BUS_WRITABLE_PROPERTY(ctx->name.c_str(),
+                        ctx->input.c_str(), entry.getter, entry.setter, 0, 0);
+                    break;
+                }
                 default:
                     break;
             }
@@ -104,7 +132,7 @@ public:
                 return st;
             }
 
-            ctx->slot = Slot(rawSlot);
+            ctx->slot = Adaptor::RawSlotSharePtr(rawSlot);
             aVTables.push_back(std::move(ctx));
         }
 

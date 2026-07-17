@@ -8,6 +8,7 @@
 
 #include "adaptor/RawAdaptor.hpp"
 #include "adaptor/RawMessageSharePtr.hpp"
+#include "DbusArgs.hpp"
 
 namespace SSDbus {
 namespace Private {
@@ -39,15 +40,65 @@ public:
         }
 
         Status st;
-        if constexpr (std::is_same_v<std::decay_t<T>, std::string>) {
+        using rawType = std::decay_t<T>;
+        if constexpr (std::is_same_v<rawType, std::string>) {
             const char* str;
             st = Adaptor::RawMessage::popBasic(
-                mRawMsg.get(), DbusTypeSignature<std::decay_t<T>>::value, str);
+                mRawMsg.get(), BasicSignature<rawType>::value, str);
             aVal = str;
+        }
+        else if constexpr (isVectorV<rawType>) {
+            using ElemType = typename rawType::value_type;
+            st = Adaptor::RawMessage::enterContainer(
+                mRawMsg.get(), 'a', getSignature<ElemType>().c_str());
+            if (st.isError()) {
+                return st;
+            }
+
+            while (!Adaptor::RawMessage::isEnd(mRawMsg.get(), false)) {
+                ElemType elem {};
+                st = read(elem);
+                if (st.isError()) {
+                    return st;
+                }
+
+                aVal.push_back(std::move(elem));
+            }
+
+            st = Adaptor::RawMessage::exitContainer(mRawMsg.get());
+        }
+        else if constexpr (isArrayV<rawType>) {
+            using ElemType = typename rawType::value_type;
+            st = Adaptor::RawMessage::enterContainer(
+                mRawMsg.get(), 'a', getSignature<ElemType>().c_str());
+            if (st.isError()) {
+                return st;
+            }
+
+            size_t size = aVal.size();
+            size_t idx = 0;
+            while (!Adaptor::RawMessage::isEnd(mRawMsg.get(), false)) {
+                if (idx >= size) {
+                    return Status(StatusCode::INVALID_ARG);
+                }
+
+                ElemType elem {};
+                st = read(elem);
+                if (st.isError()) {
+                    return st;
+                }
+
+                aVal[idx++] = std::move(elem);
+            }
+
+            st = Adaptor::RawMessage::exitContainer(mRawMsg.get());
+            if (idx != size) {
+                return Status(StatusCode::INVALID_ARG);
+            }
         }
         else {
             st = Adaptor::RawMessage::popBasic(
-                mRawMsg.get(), DbusTypeSignature<std::decay_t<T>>::value, aVal);
+                mRawMsg.get(), BasicSignature<rawType>::value, aVal);
         }
 
         return st;
@@ -82,7 +133,7 @@ public:
         using rawType = std::decay_t<T>;
         if constexpr (std::is_same_v<rawType, std::string>) {
             st = Adaptor::RawMessage::appendBasic(
-                mRawMsg.get(), DbusTypeSignature<rawType>::value, aVal.c_str());
+                mRawMsg.get(), BasicSignature<rawType>::value, aVal.c_str());
         }
         else if constexpr (std::is_same_v<rawType, std::string_view>) {
             //! string_view::data() No guarantee that it ends with \0
@@ -90,25 +141,42 @@ public:
             //! So convert it to string, and use c_str
             std::string tmp(aVal);
             st = Adaptor::RawMessage::appendBasic(
-                mRawMsg.get(), DbusTypeSignature<rawType>::value, tmp.c_str());
+                mRawMsg.get(), BasicSignature<rawType>::value, tmp.c_str());
         }
         else if constexpr (std::is_same_v<rawType, const char*>
             || std::is_same_v<rawType, char*>) {
             st = Adaptor::RawMessage::appendBasic(
-                mRawMsg.get(), DbusTypeSignature<rawType>::value, aVal);
+                mRawMsg.get(), BasicSignature<rawType>::value, aVal);
         }
         else if constexpr (std::is_same_v<rawType, float>) {
             //! Convert float to double (unified use of double type)
             //! Ensure that the number of bytes read is consistent
             double d = static_cast<double>(aVal);
             st = Adaptor::RawMessage::appendBasic(
-                mRawMsg.get(), DbusTypeSignature<rawType>::value,
+                mRawMsg.get(), BasicSignature<rawType>::value,
                 &d
             );
         }
+        else if constexpr (isVectorV<rawType> || isArrayV<rawType>) {
+            using ElemType = typename rawType::value_type;
+            st = Adaptor::RawMessage::openContainer(
+                mRawMsg.get(), 'a', getSignature<ElemType>().c_str());
+            if (st.isError()) {
+                return st;
+            }
+
+            for (const auto& elem : aVal) {
+                st = write(elem);
+                if (st.isError()) {
+                    return st;
+                }
+            }
+
+            st = Adaptor::RawMessage::closeContainer(mRawMsg.get());
+        }
         else {
             st = Adaptor::RawMessage::appendBasic(
-                mRawMsg.get(), DbusTypeSignature<rawType>::value, &aVal);
+                mRawMsg.get(), BasicSignature<rawType>::value, &aVal);
         }
 
         return st;

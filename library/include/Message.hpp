@@ -38,7 +38,7 @@ public:
     }
 
     template<typename T>
-    Message& operator<<(T& aVal) {
+    Message& operator<<(const T& aVal) {
         write(aVal);
         return *this;
     }

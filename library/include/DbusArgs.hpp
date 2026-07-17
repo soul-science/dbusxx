@@ -2,14 +2,16 @@
 #ifndef SSDBUS_DBUS_ARGS_HPP
 #define SSDBUS_DBUS_ARGS_HPP
 
+#include <array>
 #include <string>
 #include <string_view>
 #include <type_traits>
+#include <vector>
 
 namespace SSDbus {
 
 template<typename T>
-constexpr bool isValidArgs() {
+constexpr bool isValidBasicArgs() {
     using R = std::decay_t<T>;
     return std::is_integral_v<R>
         || std::is_floating_point_v<R>
@@ -22,100 +24,127 @@ constexpr bool isValidArgs() {
 
 
 template<typename T>
-struct DbusTypeSignature {
+struct isArray : std::false_type {};
+
+template<typename T, size_t N>
+struct isArray<std::array<T, N>> : std::true_type {};
+
+template<typename T>
+inline constexpr bool isArrayV = isArray<T>::value;
+
+template<typename T, template<typename...> class Template>
+struct isSpecializationOf : std::false_type {};
+
+template<template<typename...> class Template, typename... Args>
+struct isSpecializationOf<Template<Args...>, Template> : std::true_type {};
+
+template<typename T>
+inline constexpr bool isVectorV = isSpecializationOf<T, std::vector>::value;
+
+template<typename T>
+struct BasicSignature {
     static_assert(sizeof(T) == 0, "Unsupported Dbus type");
     static constexpr char value {'\0'};
 };
 
 template<>
-struct DbusTypeSignature<int8_t> {
+struct BasicSignature<int8_t> {
     //! Use 'y' (for uint8_t)
     //! Ensure that the byte count is consistent with int8_t
     static constexpr char value = 'y';
 };
 
 template<>
-struct DbusTypeSignature<uint8_t> {
+struct BasicSignature<uint8_t> {
     static constexpr char value = 'y';
 };
 
 template<>
-struct DbusTypeSignature<int16_t> {
+struct BasicSignature<int16_t> {
     static constexpr char value = 'n';
 };
 
 template<>
-struct DbusTypeSignature<uint16_t> {
+struct BasicSignature<uint16_t> {
     static constexpr char value = 'q';
 };
 
 template<>
-struct DbusTypeSignature<int32_t> {
+struct BasicSignature<int32_t> {
     static constexpr char value = 'i';
 };
 
 template<>
-struct DbusTypeSignature<uint32_t> {
+struct BasicSignature<uint32_t> {
     static constexpr char value = 'u';
 };
 
 template<>
-struct DbusTypeSignature<int64_t> {
+struct BasicSignature<int64_t> {
     static constexpr char value = 'x';
 };
 
 template<>
-struct DbusTypeSignature<uint64_t> {
+struct BasicSignature<uint64_t> {
     static constexpr char value = 't';
 };
 
 //! double
 template<>
-struct DbusTypeSignature<double> {
+struct BasicSignature<double> {
     static constexpr char value = 'd';
 };
 
 template<>
-struct DbusTypeSignature<float> {
+struct BasicSignature<float> {
     static constexpr char value = 'd';
 };
 
 //! bool
 template<>
-struct DbusTypeSignature<bool> {
+struct BasicSignature<bool> {
     static constexpr char value = 'b';
 };
 
 //! char
 template<>
-struct DbusTypeSignature<const char*> {
+struct BasicSignature<const char*> {
     static constexpr char value = 's';
 };
 
 template<>
-struct DbusTypeSignature<char*> {
+struct BasicSignature<char*> {
     static constexpr char value = 's';
 };
 
 template<>
-struct DbusTypeSignature<std::string> {
+struct BasicSignature<std::string> {
     static constexpr char value = 's';
 };
 
 template<>
-struct DbusTypeSignature<std::string_view> {
+struct BasicSignature<std::string_view> {
     static constexpr char value = 's';
 };
 
 //! void
 template<>
-struct DbusTypeSignature<void> {
+struct BasicSignature<void> {
     static constexpr char value = '\0';
 };
 
 template<typename T>
-constexpr char getSignature() {
-    return DbusTypeSignature<std::decay_t<T>>::value;
+std::string getSignature() {
+    using R = std::decay_t<T>;
+    if constexpr (std::is_same_v<R, void>) {
+        return "";
+    }
+    else if constexpr (isVectorV<R> || isArrayV<R>) {
+        return "a" + getSignature<typename R::value_type>();
+    }
+    else {
+        return std::string(1, BasicSignature<R>::value);
+    }
 }
 
 template<typename T>

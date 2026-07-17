@@ -1,10 +1,10 @@
 # ssdbus 项目计划
 
-> 最后更新：2026-06-30（VTableRegistrar 完成，Bug 修复收尾）
+> 最后更新：2026-07-09（P1 全部完成：远端错误 + vtable 错误返回 + RawRemoteError 双向映射）
 
 ---
 
-## 一、项目完成度评估（约 85% 核心可用）
+## 一、项目完成度评估（约 90% 核心可用）
 
 ### ✅ 已完成
 
@@ -24,6 +24,7 @@
 | 事件循环 | `DbusEventLoop.hpp` | ✅ 可用（调试日志过多） |
 | 资源管理 | `DbusSlot.hpp` / SharePtr 系列 | ✅ RAII，移动语义完整 |
 | 类型推导 | `FunctionTrait.hpp` / `DbusArgs.hpp` | ✅ 编译期萃取 |
+| 属性注册 | `Method.hpp` / `Session.hpp` / `VTableRegistrar.hpp` | ✅ 自拥有值 + `getProperty`/`setProperty` + `onPropertyChanged` callback + `sd_bus_emit_properties_changed` + `typeid` 类型安全检查 |
 | 示例 | `example/main.cpp` | ✅ 覆盖主要 API |
 | 遗留代码清理 | DbusContext/DbusManager/DbusInterface/DbusError | ✅ 全部删除 |
 
@@ -45,8 +46,8 @@
 | B12 | 🟡 风格 | `RawAdaptor.hpp` | `DbusException` 抛出 vs `Status` 返回混用 |
 | B13 | 🟡 死码 | `Utils.hpp` | `__safeRead`/`__safeWrite` 保留标识符 + 无调用者 |
 | B14 | 🟡 日志 | `DbusEventLoop.hpp` | 每次迭代 5 条 fprintf(stderr) |
-| B15 | 🟡 复制 | `example/main.cpp` | `testUint32` 打印 `"testInt32"` |
-| B16 | 🟡 效率 | `Method.hpp` | `registerMethod` 对同一 key 两次 map 查找 |
+| B15 | ✅ 已修复 | `example/main.cpp` | `testUint32` 打印 `"testInt32"` |
+| B16 | ✅ 已修复 | `Method.hpp` | `registerMethod` 对同一 key 两次 map 查找 |
 
 ---
 
@@ -68,10 +69,11 @@
 
 | # | 任务 | 说明 |
 |---|------|------|
-| P1-1 | **Property get/set** | vtable 支持 `SD_BUS_PROPERTY` / `SD_BUS_WRITABLE_PROPERTY` |
-| P1-2 | **复杂 D-Bus 类型** | 数组(`a`)、变体(`v`)、字典(`a{e}`)、object path(`o`)、Unix fd(`h`) |
-| P1-3 | **远端错误信息传递** | `callSync` 传入 `sd_bus_error*`，`Status` 增加携带 error name/message |
-| P1-4 | **vtable 回调错误返回** | `IMethodWrapper::call` 使用 `RawBusErrorPtr aErr` 参数 |
+| P1-1 | ✅ 已完成 | `PropertyWrapper`: 自拥有值 → `set()` 自动 `emit_properties_changed` + `onChange` 回调；`Session`: `getProperty`/`setProperty`/`onPropertyChanged` + `getPropPrivate<T>` typeid 类型检查 (2026-07-02) |
+| P1-2 | ✅ 数组类型已完成 | `vector<T>` / `vector<vector<T>>` / `array<T,N>` read/write + `getSignature` 递归展开 |
+| P1-2a | ⏸️ 降级 P3 | 变体(`v`)、字典(`a{e}`) — 自有 Property 系统已覆盖标准 Properties 接口需求 |
+| P1-3 | ✅ 已完成 | `callSync`/`callAsync` 远端错误 → `RawRemoteError::toStatus()`；`onCall`/`onGetter`/`onSetter` 失败时 `fromStatus()` 填充 `aErr` |
+| P1-4 | ✅ 已完成（合并至 P1-3） | vtable 回调通过 `RawRemoteError::fromStatus()` 填充 `aErr` 返回对端 |
 | P1-5 | **`Reply::value()` 错误检查** | 读取失败时返回默认值——设计如此，同 B8 |
 | P1-6 | ✅ 已修复 | `float` 类型读写对称 —— `write` 中显式 `static_cast<double>` |
 | P1-7 | **线程安全声明** | 至少明确"单线程使用"，或加 `std::mutex` |
@@ -84,10 +86,10 @@
 | P2-1 | **统一日志系统** | 替换 `cout/cerr/fprintf` 为可配置 log level |
 | P2-2 | **事件循环改进** | 集成 sd-event、支持定时器、去掉忙循环 |
 | P2-3 | **单元测试** | Status、fromErrno、Message read/write、信号收发 |
-| P2-4 | **Lambda 注册** | `registerMethod` 支持自由函数和 lambda |
+| P2-4 | ✅ Lambda 注册已完成 | `registerMethod` 支持自由函数和 lambda |
 | P2-5 | **`PendingReply` 取消** | 暴露 `cancel()` → `sd_bus_slot_unref` |
 | P2-6 | **CMakeLists.txt 整理** | 移除已删除文件的引用、补充新头文件 |
-| P2-7 | **`Message::operator<<` const T&** | 当前非 const 引用阻止传入右值 |
+| P2-7 | ✅ 已完成 | `Message::operator<<` 改为 const T&，支持右值 |
 
 ### P3 — 锦上添花
 
@@ -100,6 +102,8 @@
 | P3-5 | **peer-to-peer 连接** | `sd_bus_open()` P2P 模式 |
 | P3-6 | **`RawAdaptor.hpp` 拆分** | 900 行单体 → RawBus/RawMessage/RawSlot/RawError |
 | P3-7 | **`FuncTrait` 补全** | noexcept/volatile/引用限定符版本 |
+| P3-8 | **变体类型 (`v`)** | 按需实现：`std::any` 或 tagged union 包装，含运行时签名 |
+| P3-9 | **字典类型 (`a{e}`)** | 按需实现：`std::map<K, V>` ↔ `a{KV}`，依赖变体则常用 `a{sv}` |
 
 ---
 
@@ -108,17 +112,17 @@
 ```
 P0 — ✅ 全部完成（2026-06-28）
 
-P1 — 当前迭代 🚀
-  ├─ ✅ VTableRegistrar 封装             ← 链式 API + 字符串托管已完成
-  ├─ Property get/set                   ← 基于 VTableRegistrar，加 addProperty
-  ├─ 复杂类型（数组/变体/字典）           ← 扩展适用范围
-  ├─ 远端错误信息 + vtable 错误返回       ← 健壮性
-  └─ 预计工作量: 1-2 周
+P1 — ✅ 全部完成（2026-07-09）
+  ├─ ✅ VTableRegistrar 封装             ← 链式 API + 字符串托管
+  ├─ ✅ Property get/set/onChanged      ← PropertyWrapper 自拥有值 + typeid 类型安全 + callback
+  ├─ ✅ vector<T> 数组类型               ← read/write 递归展开 + getSignature 递归
+  └─ ✅ 远端错误双向传递                 ← toStatus() / fromStatus() 映射表 + callSync/callAsync/onCall
 
 P2 — 完善阶段
+  ├─ ✅ Lambda 注册                    ← 自由函数 + lambda
   ├─ 日志系统 + 事件循环改进
-  ├─ 单元测试 + Lambda 注册
-  └─ 预计工作量: 1 周
+  ├─ 单元测试
+  └─ 预计工作量: ~4 天
 
 P3 — 锦上添花
   └─ 视需求决定

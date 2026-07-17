@@ -17,7 +17,6 @@ enum class StatusCode : uint8_t {
     NO_METHOD,          //! not found method/interface/path
     ACCESS_DENIED,      // 权限不足
     NAME_EXISTS,        // 总线名已被占用
-    METHOD_EXISTS,      //! method has been registered
 
     // --- 连接错误 ---
     NOT_CONNECTED,      // 未连接到总线
@@ -56,9 +55,7 @@ inline constexpr const char* statusMessage(StatusCode aCode) {
         case StatusCode::ACCESS_DENIED:
             return "Access denied";
         case StatusCode::NAME_EXISTS:
-            return "Bus name already taken";
-        case StatusCode::METHOD_EXISTS:
-            return "Method already registered";
+            return "name already taken";
         case StatusCode::NOT_CONNECTED:
             return "Not connected to bus";
         case StatusCode::CONN_RESET:

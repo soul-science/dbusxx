@@ -64,9 +64,8 @@ inline StatusCode fromErrno(int aErrno) {
         case EACCES:
             return StatusCode::ACCESS_DENIED;
         case EADDRINUSE:
-            return StatusCode::NAME_EXISTS;
         case EEXIST:
-            return StatusCode::METHOD_EXISTS;
+            return StatusCode::NAME_EXISTS;
         case ENOTCONN:
             return StatusCode::NOT_CONNECTED;
         case ECONNRESET:
@@ -146,12 +145,20 @@ namespace RawCheck {
 }
 
 namespace RawSlot {
-    void closeSlot(RawBusSlotPtr aSlot) {
+    void unrefSlot(RawBusSlotPtr aSlot) {
         if (!aSlot) {
             return;
         }
 
         sd_bus_slot_unref(aSlot);
+    }
+
+    void refSlot(RawBusSlotPtr aSlot) {
+        if (!aSlot) {
+            return;
+        }
+
+        sd_bus_slot_ref(aSlot);
     }
 
     RawBusPtr getBus(RawBusSlotPtr aSlot) {
@@ -559,6 +566,26 @@ namespace RawMessage {
         return append(aMsg, aTypes, std::forward<Values>(aValues)...);
     }
 
+    Status openContainer(RawBusMessagePtr aMsg, char aType, const char* aInType) {
+        if (!aMsg) {
+            return Status(StatusCode::INVALID_ARG);
+        }
+
+        return RawError::makeStatus(
+            sd_bus_message_open_container(aMsg, aType, aInType)
+        );
+    }
+
+    Status closeContainer(RawBusMessagePtr aMsg) {
+        if (!aMsg) {
+            return Status(StatusCode::INVALID_ARG);
+        }
+
+        return RawError::makeStatus(
+            sd_bus_message_close_container(aMsg)
+        );
+    }
+
     template<typename T>
     Status appendBasic(RawBusMessagePtr aMsg, char aType, T&& aValue) {
         if (!aMsg) {
@@ -584,6 +611,26 @@ namespace RawMessage {
     template<typename... Values>
     Status pop(RawBusMessagePtr aMsg, const std::string& aTypes, Values&... aValues) {
         return pop(aMsg, aTypes.c_str(), aValues...);
+    }
+
+    Status enterContainer(RawBusMessagePtr aMsg, char aType, const char* aInType) {
+        if (!aMsg) {
+            return Status(StatusCode::INVALID_ARG);
+        }
+
+        return RawError::makeStatus(
+            sd_bus_message_enter_container(aMsg, aType, aInType)
+        );
+    }
+
+    Status exitContainer(RawBusMessagePtr aMsg) {
+        if (!aMsg) {
+            return Status(StatusCode::INVALID_ARG);
+        }
+
+        return RawError::makeStatus(
+            sd_bus_message_exit_container(aMsg)
+        );
     }
 
     template<typename T>

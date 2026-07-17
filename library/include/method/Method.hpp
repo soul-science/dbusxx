@@ -4,12 +4,13 @@
 
 #include <iostream>
 
-#include "Status.hpp"
+#include "adaptor/RawRemoteError.hpp"
 #include "message/MessagePrivate.hpp"
 #include "message/SignalHandler.hpp"
 #include "session/SessionPrivate.hpp"
 #include "session/VTableRegistrar.hpp"
 #include "FunctionTrait.hpp"
+#include "Status.hpp"
 
 namespace SSDbus {
 namespace Method {
@@ -20,7 +21,7 @@ template<typename Cls, typename Ret, typename... Args>
 std::string getArgsString(Cls* aObj, Ret (Cls::*aFunc)(Args...)) {
     std::string args;
     if constexpr (sizeof...(Args)) {
-        (args.append(std::string(1, SSDbus::getSignature<Args>())), ...);
+        (args.append(getSignature<Args>()), ...);
     }
 
     return args;
@@ -28,14 +29,14 @@ std::string getArgsString(Cls* aObj, Ret (Cls::*aFunc)(Args...)) {
 
 template<typename Cls, typename Ret, typename... Args>
 std::string getReturnString(Cls* aObj, Ret (Cls::*aFunc)(Args...)) {
-    return std::string(1, SSDbus::getSignature<Ret>());
+    return getSignature<Ret>();
 }
 
 template<typename... Args>
 std::string getArgsString() {
     std::string args;
     if constexpr (sizeof...(Args)) {
-        (args.append(std::string(1, getSignature<Args>())), ...);
+        (args.append(getSignature<Args>()), ...);
     }
     return args;
 }
@@ -58,34 +59,40 @@ struct MethodWrapper {
 
     static std::string input() {
         auto impl = [&]<typename... Args>(std::tuple<Args...>*) {
-            std::string args;
-            (args.append(std::string(1, getSignature<Args>())), ...);
-            return args;
+            return getArgsString<Args...>();
         };
 
         return impl(static_cast<typename traits::ArgsTuple*>(nullptr));
     }
 
     static std::string output() {
-        return std::string(1, SSDbus::getSignature<Ret>());
+        return getSignature<Ret>();
     }
 
-    static int onCall(Adaptor::RawBusMessagePtr aMsg, void* aUsr, Adaptor::RawBusErrorPtr) {
+    static int onCall(Adaptor::RawBusMessagePtr aMsg, void* aUsr, Adaptor::RawBusErrorPtr aErr) {
         auto self = static_cast<MethodWrapper*>(aUsr);
         Private::MessagePrivate message(Adaptor::RawMessageSharePtr(aMsg, false));
         Private::MessagePrivate reply = self->session->createReply(message);
-
+        Status st = Status(StatusCode::SUCCESS);
         auto impl = [&]<typename... Args>(std::tuple<Args...>*) {
             if constexpr (traits::argSize) {
                 std::tuple<typename ArgTypeAdaptor<std::decay_t<Args>>::type...> tpl;
-                message.read(tpl);
+                st = message.read(tpl);
+                if (st.isError()) {
+                    Adaptor::RawRemoteError::fromStatus(st.code()).moveTo(aErr);
+                    return -1;
+                }
 
                 //! Apply function
                 if constexpr (std::is_same_v<Ret, void>) {
                     std::apply(self->func, tpl);
                 } else {
                     Ret ret = std::apply(self->func, tpl);
-                    reply.write(ret);
+                    st = reply.write(ret);
+                    if (st.isError()) {
+                        Adaptor::RawRemoteError::fromStatus(st.code()).moveTo(aErr);
+                        return -1;
+                    }
                 }
             }
             else {
@@ -93,12 +100,21 @@ struct MethodWrapper {
                     self->func();
                 } else {
                     Ret ret = self->func();
-                    reply.write(ret);
+                    st = reply.write(ret);
+                    if (st.isError()) {
+                        Adaptor::RawRemoteError::fromStatus(st.code()).moveTo(aErr);
+                        return -1;
+                    }
                 }
             }
 
-            auto st = self->session->sendMessage(reply, message.getSender());
-            return st.isSuccess() ? 0 : -1;
+            st = self->session->sendMessage(reply, message.getSender());
+            if (st.isError()) {
+                Adaptor::RawRemoteError::fromStatus(st.code()).moveTo(aErr);
+                return -1;
+            }
+
+            return 0;
         };
 
         return impl(static_cast<typename traits::ArgsTuple*>(nullptr));
@@ -116,19 +132,17 @@ Status registerSingleMethod(
 
     std::string input = wrapper::input();
     std::string output = wrapper::output();
-    std::string regName = aFuncName.data() + std::string("_") + input;
 
-    std::cout << "regName:"  << regName
-        << ", input: " << input << ", output:" << output << std::endl;
+    std::cout << "input: " << input << ", output:" << output << std::endl;
 
-    if (aSession->methods().count(regName.data())) {
-        return Status(StatusCode::METHOD_EXISTS);
+    if (aSession->methods().count(aFuncName.data())) {
+        return Status(StatusCode::NAME_EXISTS);
     }
 
-    aSession->methods()[regName.data()] = {};
-    auto& info = aSession->methods()[regName.data()];
+    aSession->methods()[input.data()] = {};
+    auto& info = aSession->methods()[input.data()];
 
-    info.method = data;
+    info.data = data;
 
     //! Create vtable
     Private::VTableRegistrar reg(aSession, aSession->info().path, aSession->info().interface);
@@ -139,7 +153,7 @@ Status registerSingleMethod(
         << ", message=" << st.message() << std::endl;
 
     if (st.isError()) {
-        aSession->methods().erase(regName);
+        aSession->methods().erase(input);
         return st;
     }
 
@@ -157,20 +171,19 @@ Status registerSingleSignal(Private::SessionPrivate* aSession, std::string_view 
     }
 
     std::string input = Method::getArgsString<Args...>();
-    std::string regName = aSignalName.data() + std::string("_") + input;
-    if (aSession->methods().count(regName.data())) {
-        return Status(StatusCode::METHOD_EXISTS);
+    if (aSession->signals().count(aSignalName.data())) {
+        return Status(StatusCode::NAME_EXISTS);
     }
 
     aSession->signals()[aSignalName.data()] = {};
-    auto& info = aSession->signals()[regName.data()];
+    auto& info = aSession->signals()[input.data()];
 
     Private::VTableRegistrar reg(aSession, aSession->info().path, aSession->info().interface);
     reg.addSiganl(aSignalName, input);
     std::vector<std::unique_ptr<Private::VTableContext>> v;
-    auto st = reg.commit(v);
+    Status st = reg.commit(v);
     if (st.isError()) {
-        aSession->signals().erase(regName);
+        aSession->signals().erase(input);
         return st;
     }
 
@@ -201,6 +214,80 @@ Status emitSignal(Private::SessionPrivate* aSession, std::string_view aPath, std
     
 }
 
+template<typename T>
+struct PropertyWrapper {
+    Private::SessionPrivate* session;
+    std::string propName;
+    T prop;
+    std::string_view type;
+    std::function<void(const T&)> onChange {nullptr};
+
+    PropertyWrapper(Private::SessionPrivate* aSession, std::string aPropName, T aProp)
+        : session(aSession)
+        , propName(aPropName)
+        , prop(aProp)
+        , type(typeid(T).name()) {}
+
+    T get() const {
+        return prop;
+    }
+
+    void set(T aNew) {
+        prop = std::move(aNew);
+        if (onChange) {
+            onChange(prop);
+        }
+
+        auto& info = session->info();
+        sd_bus_emit_properties_changed(
+            session->rawBus(),
+            info.path.c_str(), info.interface.c_str(),
+            propName.c_str(), nullptr);
+    }
+
+    void onChanged(std::function<void(const T&)> aCallback) {
+        onChange = std::move(aCallback);
+    }
+
+    static std::string signature() {
+        return getSignature<T>();
+    }
+
+    static int onGetter(Adaptor::RawBusPtr, const char*, const char*, const char*,
+        Adaptor::RawBusMessagePtr aReply, void* aData, Adaptor::RawBusErrorPtr aErr) {
+                auto self = static_cast<PropertyWrapper*>(aData);
+        Private::MessagePrivate reply(
+            Adaptor::RawMessageSharePtr(aReply, false));
+        
+        Status st = reply.write(self->prop);
+        if (st.isError()) {
+            Adaptor::RawRemoteError::fromStatus(st.code()).moveTo(aErr); 
+            return -1;
+        }
+
+        return 0;
+    }
+
+    static int onSetter(Adaptor::RawBusPtr, const char*, const char*, const char*,
+        Adaptor::RawBusMessagePtr aValue, void* aData, Adaptor::RawBusErrorPtr aErr) {
+        auto self = static_cast<PropertyWrapper*>(aData);
+        Private::MessagePrivate msg(
+            Adaptor::RawMessageSharePtr(aValue, false));
+        
+        Status st = msg.read(self->prop);
+        if (st.isError()) {
+            Adaptor::RawRemoteError::fromStatus(st.code()).moveTo(aErr); 
+            return -1;
+        }
+
+        if (self->onChange) {
+            self->onChange(self->prop);
+        }
+
+        return 0;
+    }
+};
+
 // ========== 客户端：远程调用 ==========
 
 template<typename Ret, typename... Args>
@@ -225,14 +312,21 @@ Private::MessagePrivate callSync(
     }
 
     Adaptor::RawBusMessagePtr rawReply = nullptr;
+    Adaptor::RawRemoteError error;
     st = Adaptor::RawBus::callSync(
         aSession->rawBus(), callMsg.rawMessage(), aTimeoutUmsc,
-        nullptr /* error */, rawReply);
+        error.getRawPtr(), rawReply);
     Private::MessagePrivate repMsg(Adaptor::RawMessageSharePtr(rawReply, true));
-    repMsg.setStatus(st);
+
+    if (st.isError()) {
+        repMsg.setStatus(error.toStatus());
+    } else {
+        repMsg.setStatus(st);
+    }
+
     std::cout << "callSync -- aService:" << aService
         << ", aPath:" << aPath << ", aIface" << aIface
-        << ", aMethod:" << aMethod << ", ret:" << st.message() << std::endl;
+        << ", aMethod:" << aMethod << ", ret:" << repMsg.getStatus().message() << std::endl;
 
     return repMsg;
 }

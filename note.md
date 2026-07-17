@@ -1298,3 +1298,356 @@ session->onEvent([weakSelf] {
 });
 session.reset();
 ```
+
+
+---
+
+## 22. 类型萃取：检测 `std::vector`
+
+使用模板偏特化检测一个类型是否为 `std::vector<...>`：
+
+```cpp
+template<typename T>
+struct isVector : std::false_type {};
+
+template<typename T, typename Alloc>
+struct isVector<std::vector<T, Alloc>> : std::true_type {};
+
+template<typename T>
+inline constexpr bool isVectorV = isVector<T>::value;
+```
+
+偏特化匹配任意 `T` 和 `Alloc`，在 `if constexpr` 中使用：
+
+```cpp
+if constexpr (isVectorV<rawType>) {
+    using ElemType = typename rawType::value_type;  // vector 原生提供 value_type
+    // ...
+}
+```
+
+> `typename` 不可省略：`rawType::value_type` 是依赖名称，编译器需要 `typename` 明确它是类型。
+
+---
+
+## 23. D-Bus 签名系统设计演变
+
+### 23.1 原始设计（单 `char`）
+
+```cpp
+template<typename T> struct DbusTypeSignature { static constexpr char value = '\0'; };
+template<> struct DbusTypeSignature<int32_t> { static constexpr char value = 'i'; };
+// ...
+```
+
+问题：`vector<int>` 的 D-Bus 签名是 `"ai"`（数组+元素类型），单 `char` 无法表达两层信息。之前的 `DbusTypeSignature<vector<T>>::value = 'a'` 丢失了元素类型签名。
+
+### 23.2 最终设计：分离职责
+
+```cpp
+// 基础类型 → 单 char（只给底层 sd-bus API 用）
+template<typename T> struct BasicSignature { ... };
+template<> struct BasicSignature<int32_t> { static constexpr char value = 'i'; };
+
+// 完整签名字符串（含容器递归）
+template<typename T>
+std::string getSignature() {
+    using R = std::decay_t<T>;
+    if constexpr (std::is_same_v<R, void>) {
+        return "";        // void 返回空串，不是 "\0"
+    } else if constexpr (isVectorV<R>) {
+        return "a" + getSignature<typename R::value_type>();  // 递归
+    } else {
+        return std::string(1, BasicSignature<R>::value);
+    }
+}
+```
+
+设计要点：
+- `BasicSignature<T>` 只负责基础类型 → 单 `char`，不碰容器
+- `getSignature<T>()` 返回完整签名字符串，递归展开 `vector<vector<int>>` → `"aai"`
+- 去掉 `DbusTypeSignature`，避免和 `BasicSignature` 混淆
+- `PropertyWrapper::BasicSignature()` 改为 `signature()`，避免与 struct 同名
+
+---
+
+## 24. `openContainer` 参数 bug：`char` vs `const char*`
+
+**原始代码（有 bug）**：
+
+```cpp
+Status openContainer(RawBusMessagePtr aMsg, char aType, char aInType) {
+    sd_bus_message_open_container(aMsg, aType, &aInType);  // &aInType 是单个 char 的地址
+}
+```
+
+`sd_bus_message_open_container` 的第三个参数是 `const char*`（期望以 `\0` 结尾的 C 字符串如 `"i"`），传入 `&aInType` 是栈上单字符的指针，后面字节不确定——未定义行为。
+
+**修复**：
+
+```cpp
+Status openContainer(RawBusMessagePtr aMsg, char aType, const char* aInType) {
+    sd_bus_message_open_container(aMsg, aType, aInType);  // 直接传
+}
+```
+
+调用侧：`openContainer(msg, 'a', getSignature<ElemType>().c_str())` — 用 `.c_str()` 取 `std::string` 的内部 C 字符串。
+
+---
+
+## 25. D-Bus 容器读写模式
+
+### 25.1 写（服务端构造消息）
+
+```cpp
+// openContainer → 逐元素 write → closeContainer
+st = Adaptor::RawMessage::openContainer(msg, 'a', elemSig.c_str());
+for (const auto& elem : vec) {
+    st = write(elem);        // 递归调用自身
+}
+st = Adaptor::RawMessage::closeContainer(msg);
+```
+
+### 25.2 读（客户端解析消息）
+
+```cpp
+// enterContainer → while(!isEnd) → 逐元素 read → exitContainer
+st = Adaptor::RawMessage::enterContainer(msg, 'a', elemSig.c_str());
+while (!Adaptor::RawMessage::isEnd(msg, false)) {  // false = 仅本层容器
+    ElemType elem{};
+    st = read(elem);
+    aVal.push_back(std::move(elem));
+}
+st = Adaptor::RawMessage::exitContainer(msg);
+```
+
+关键点：
+- `isEnd(msg, false)` 的 `false` 意思是只判断当前容器层级是否结束，不检查外层
+- 循环内 `ElemType elem{}` 值初始化，避免残留旧数据
+- 用 `std::move` 避免不必要的拷贝
+
+---
+
+## 26. `FuncTrait` 函数萃取（重点）
+
+### 26.1 核心机制
+
+通过模板偏特化从各种可调用对象中提取返回值类型和参数类型：
+
+```cpp
+// 主模板：F 如果是 lambda/functor，取其 operator()
+template<typename F>
+struct FuncTrait : FuncTrait<decltype(&F::operator())> {};
+
+// 函数指针特化
+template<typename Ret, typename... Args>
+struct FuncTrait<Ret(*)(Args...)> {
+    using RetType = Ret;
+    using ArgsTuple = std::tuple<Args...>;
+    static constexpr size_t argSize = sizeof...(Args);
+};
+
+// 成员函数指针 → 继承函数指针的结果
+template<typename Cls, typename Ret, typename... Args>
+struct FuncTrait<Ret(Cls::*)(Args...)> : FuncTrait<Ret(*)(Args...)> {};
+
+template<typename Cls, typename Ret, typename... Args>
+struct FuncTrait<Ret(Cls::*)(Args...) const> : FuncTrait<Ret(*)(Args...)> {};
+// ... noexcept 版本同理
+
+// std::function 特化
+template<typename Ret, typename... Args>
+struct FuncTrait<std::function<Ret(Args...)>> : FuncTrait<Ret(*)(Args...)> {};
+```
+
+### 26.2 工作流程（以 lambda 为例）
+
+1. 传入 `Func` = lambda 类型 → 匹配主模板 `FuncTrait<F>`
+2. `FuncTrait<F> : FuncTrait<decltype(&F::operator())>` → `decltype(&F::operator())` 是成员函数指针 `Ret(Cls::*)(Args...) const`
+3. 成员函数指针匹配 `FuncTrait<Ret(Cls::*)(Args...) const>` → 继承 `FuncTrait<Ret(*)(Args...)>`
+4. `FuncTrait<Ret(*)(Args...)>` 提供 `RetType`、`ArgsTuple`、`argSize`
+
+### 26.3 `decltype(&F::operator())` 的关键作用
+
+这是萃取 lambda 类型的"支点"——lambda 没有标准方式直接获取参数类型，但它的 `operator()` 是普通成员函数，`decltype` 能拿到精确的函数指针类型。通过偏特化匹配成员函数指针，就能间接获取 lambda 的 `Ret` 和 `Args...`。
+
+---
+
+## 27. `MethodWrapper` + `FuncTrait` 配合使用
+
+### 27.1 整体结构
+
+```cpp
+template<typename Func>
+struct MethodWrapper {
+    using traits = Method::FuncTrait<std::decay_t<Func>>;
+    using ArgsTuple = typename traits::ArgsTuple;
+    using Ret = typename traits::RetType;
+
+    static std::string input() {
+        // 从 ArgsTuple 展开，得到签名字符串如 "isai"
+        auto impl = [&]<typename... Args>(std::tuple<Args...>*) {
+            return getArgsString<Args...>();
+        };
+        return impl(static_cast<ArgsTuple*>(nullptr));
+    }
+};
+```
+
+### 27.2 `static_cast<ArgsTuple*>(nullptr)` 技巧
+
+这是"将类型参数包传递给泛型 lambda"的惯用法：
+
+```cpp
+// ArgsTuple = std::tuple<int32_t, std::string, std::vector<int>>
+// 无法直接写 impl<int32_t, std::string, std::vector<int>>()
+// 所以用空指针标记类型，让编译器从 tuple 推导 Args...
+auto impl = [&]<typename... Args>(std::tuple<Args...>*) { ... };
+impl(static_cast<std::tuple<int32_t, std::string, std::vector<int>>*>(nullptr));
+// 编译器推导出 Args... = int32_t, std::string, std::vector<int>
+```
+
+### 27.3 `onCall` 中的 `ArgTypeAdaptor` 作用
+
+```cpp
+// 读消息时需要用适配过的类型（如 float→double, string_view→const char*）
+std::tuple<typename ArgTypeAdaptor<std::decay_t<Args>>::type...> tpl;
+message.read(tpl);  // tpl 类型可能是 tuple<int32_t, double, const char*>
+
+// 调用实际函数时直接 apply 到原始 tpl
+std::apply(self->func, tpl);
+```
+
+`ArgTypeAdaptor` 确保消息层的读写类型一致（底层 sd-bus 没有 `float`，统一用 `double`），而 `std::apply` 会做隐式转换。
+
+### 27.4 `read` 的 `std::index_sequence` 折叠表达式
+
+```cpp
+template<typename... Args>
+Status read(std::tuple<Args...>& aVals) {
+    Status status;
+    [&]<size_t... Idx>(std::index_sequence<Idx...>) {
+        ((status = read(std::get<Idx>(aVals))).isSuccess() && ...);
+    }(std::make_index_sequence<sizeof...(Args)>{});
+    return status;
+}
+```
+
+这是"短路读取"模式：用 `&&` 折叠，任意一个 `read` 失败后后续不再执行。
+
+---
+
+## 28. 其他注意事项
+
+### 28.1 `string_view::data()` 与 map key
+
+`std::string_view::data()` 不保证 `\0` 结尾。当用作 map 的 key（`map<const char*, ...>`）时存在风险。实际中如果 `string_view` 来自字符串字面量则安全，但不应依赖此行为。
+
+### 28.2 头文件依赖顺序
+
+`MessagePrivate.hpp` 直接使用了 `isVectorV`、`BasicSignature`、`getSignature`，必须显式 `#include "DbusArgs.hpp"`，不能依赖间接引入。否则在其他 include 顺序下编译失败。
+
+### 28.3 `float` 转 `double` 的设计
+
+D-Bus 协议只有 `double` 类型（签名 `'d'`），没有 `float`。所以：
+- `BasicSignature<float>::value = 'd'`（和 double 相同）
+- `ArgTypeAdaptor<float>::type = double`（读写时统一转 double）
+- `MessagePrivate::write` 中对 `float` 显式 `static_cast<double>` 后再 `appendBasic`
+
+### 28.4 分层设计原则
+
+| 层 | 文件 | 职责 |
+|---|---|---|
+| 底层适配 | `RawAdaptor.hpp` → `RawMessage` | sd-bus C API 的薄封装，只提供原子操作 |
+| 高层逻辑 | `MessagePrivate.hpp` → `MessagePrivate` | 类型分发（`if constexpr`），组合底层操作 |
+
+vector 的读写逻辑放在 `MessagePrivate` 而非 `RawAdaptor`，因为它是"组合底层原子操作"的高层逻辑，不应污染适配层。`RawMessage` 只提供 `openContainer`/`closeContainer`/`appendBasic` 等积木。
+
+---
+
+## 29. `isSpecializationOf` 无法匹配 `std::array`：类型参数 vs 非类型参数
+
+### 29.1 问题
+
+尝试用统一的"是否为某模板特化"萃取同时支持 `std::vector` 和 `std::array`：
+
+```cpp
+template<typename T, template<typename...> class Template>
+struct isSpecializationOf : std::false_type {};
+
+template<template<typename...> class Template, typename... Args>
+struct isSpecializationOf<Template<Args...>, Template> : std::true_type {};
+
+// vector 可以
+inline constexpr bool isVectorV = isSpecializationOf<T, std::vector>::value;  // ✅
+
+// array 不行
+inline constexpr bool isArrayV = isSpecializationOf<T, std::array>::value;    // ❌
+```
+
+### 29.2 根因：非类型模板参数
+
+两个容器的模板签名本质不同：
+
+```cpp
+template<typename T, typename Alloc>   // 全类型参数
+class vector;
+
+template<typename T, std::size_t N>    // 类型 + 非类型参数
+class array;
+```
+
+`template<typename...>` 只能匹配类型参数包（type parameter pack）。`std::size_t N` 是非类型参数（non-type parameter），不在 `typename...` 的匹配空间内。偏特化 `Template<Args...>` 对 `std::array<int, 3>` 匹配失败 → 始终走 `false_type`。
+
+> C++20 引入 `template<auto...>` 可以混合匹配类型和非类型参数，但 C++17 做不到。
+
+### 29.3 解决方案：独立 trait + 统一入口
+
+放弃万能萃取，回归简单偏特化：
+
+```cpp
+// vector — 独立特化
+template<typename T>
+struct isVector : std::false_type {};
+template<typename T, typename Alloc>
+struct isVector<std::vector<T, Alloc>> : std::true_type {};
+template<typename T>
+inline constexpr bool isVectorV = isVector<T>::value;
+
+// array — 独立特化（std::size_t N 是非类型参数，直接匹配）
+template<typename T>
+struct isArray : std::false_type {};
+template<typename T, std::size_t N>
+struct isArray<std::array<T, N>> : std::true_type {};
+template<typename T>
+inline constexpr bool isArrayV = isArray<T>::value;
+
+// 统一入口（给 getSignature / write / read 用）
+template<typename T>
+inline constexpr bool isContainerV = isVectorV<T> || isArrayV<T>;
+```
+
+### 29.4 读写逻辑完全复用
+
+`std::array<T, N>::value_type` = `T`，和 `vector` 一致：
+
+```cpp
+// getSignature 中
+else if constexpr (isContainerV<R>) {
+    return "a" + getSignature<typename R::value_type>();  // 复用
+}
+
+// MessagePrivate::write 中
+else if constexpr (isContainerV<rawType>) {
+    // openContainer / for-elem / closeContainer — 完全相同的逻辑
+}
+```
+
+### 29.5 设计教训
+
+| 万能萃取 | 独立 trait |
+|---|---|
+| 一个 template 匹配一切 | 每种容器各一个偏特化 |
+| 碰到非类型参数就失效 | `size_t N` 直接写在偏特化里 |
+| 抽象泄漏（std::array 需要 C++20 才能统一） | 零抽象，零泄漏 |
+| 可删掉 `isSpecializationOf`，它只服务了 1 个场景 | — |

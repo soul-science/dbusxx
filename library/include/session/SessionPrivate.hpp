@@ -6,11 +6,11 @@
 #include <unordered_map>
 #include <iostream>
 
-#include "DbusSlot.hpp"
 #include "Status.hpp"
 #include "Utils.hpp"
 
 #include "adaptor/RawAdaptor.hpp"
+#include "adaptor/RawSlotSharePtr.hpp"
 #include "adaptor/RawBusSharePtr.hpp"
 #include "message/MessagePrivate.hpp" 
 #include "message/SignalHandler.hpp"
@@ -22,7 +22,7 @@ class VTableContext;
 class SessionPrivate {
 public:
     struct MethodInfo {
-        std::shared_ptr<void> method;
+        std::shared_ptr<void> data;
         std::unique_ptr<VTableContext> context;
     };
 
@@ -30,8 +30,14 @@ public:
         std::unique_ptr<VTableContext> context;
     };
 
+    struct PropertyInfo {
+        std::shared_ptr<void> data;
+        std::unique_ptr<VTableContext> context;
+    };
+
     using MethodMap = std::unordered_map<std::string, MethodInfo>;
     using SignalMap = std::unordered_map<std::string, SignalInfo>;
+    using PropertyMap = std::unordered_map<std::string, PropertyInfo>;
 
     explicit SessionPrivate(bool aIsSystem)
         : mRawBus(Adaptor::RawBusSharePtr::make(aIsSystem)) {}
@@ -62,6 +68,10 @@ public:
 
     SignalMap& signals() {
         return mRegisteredSignals;
+    }
+
+    PropertyMap& properties() {
+        return mRegisteredProperties;
     }
 
     Status setInfo(ServiceInfo aInfo) {
@@ -133,6 +143,7 @@ private:
     ServiceInfo mInfo;
     MethodMap mRegisteredMethods;
     SignalMap mRegisteredSignals;
+    PropertyMap mRegisteredProperties;
     std::vector<std::shared_ptr<void>> mSigHandler;
 };
 

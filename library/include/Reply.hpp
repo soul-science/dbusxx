@@ -6,7 +6,7 @@
 namespace SSDbus {
 template<typename Ret>
 class Reply : public Message {
-    static_assert(isValidArgs<Ret>(), "Unsupported value type");
+    static_assert(isValidBasicArgs<Ret>(), "Unsupported value type");
 public:
     Reply() = default;
 
