@@ -1,9 +1,9 @@
 #ifndef SSDBUS_SIGNAL_HANDLER_HPP
 #define SSDBUS_SIGNAL_HANDLER_HPP
 
-#include "adaptor/RawAdaptor.hpp"
+#include "adaptor/RawCommon.hpp"
 #include "method/FunctionTrait.hpp"
-#include "DbusArgs.hpp"
+#include "adaptor/DbusArgs.hpp"
 
 namespace SSDbus {
 namespace Private {

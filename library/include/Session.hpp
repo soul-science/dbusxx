@@ -8,8 +8,8 @@
 #include "Message.hpp"
 #include "Reply.hpp"
 #include "PendingReply.hpp"
-#include "DbusArgs.hpp"
 #include "Status.hpp"
+#include "MetaObject.hpp"
 
 #include "adaptor/RawBusSharePtr.hpp"
 #include "session/SessionPrivate.hpp"
@@ -21,8 +21,10 @@
 namespace SSDbus {
 
 class Session {
+    friend class Looper;
     using PendingRepsV = std::vector<std::shared_ptr<void>>;
 
+public:
     struct RegisterBuilder {
         Private::SessionPrivate* session;
         Private::VTableRegistrar reg;
@@ -38,11 +40,11 @@ class Session {
             std::string regName = aName.data() + std::string("_") + input;
             std::cout << "addMethod: " << regName << std::endl;
             auto data = std::make_shared<wrapper>(session, aFunc);
-            mMethods[regName] = {
+            mMethods[aName.data()] = {
                 std::move(data), nullptr
             };
             reg.addMethod(aName, std::move(input), std::move(output),
-                &wrapper::onCall, mMethods[regName].data.get());
+                &wrapper::onCall, mMethods[aName.data()].data.get());
 
             return *this;
         }
@@ -61,8 +63,8 @@ class Session {
             std::string input = Method::getArgsString<Args...>();
             std::string regName = aName.data() + std::string("_") + input;
             std::cout << "addSignal: " << regName << std::endl;
-            mSignals[regName] = {nullptr};
-            reg.addSiganl(aName, std::move(input));
+            mSignals[aName.data()] = {nullptr};
+            reg.addSiganl(aName.data(), std::move(input));
 
             return *this;
         }
@@ -131,7 +133,6 @@ class Session {
         }
     };
 
-public:
     explicit Session(bool aIsSystem = false)
         : mPrivate(std::make_shared<Private::SessionPrivate>(aIsSystem))
         , mRepsPtr(std::make_shared<PendingRepsV>()) {}
@@ -176,7 +177,7 @@ public:
         return RegisterBuilder {
             mPrivate.get(),
             Private::VTableRegistrar(
-                mPrivate.get(), mPrivate->info().path,
+                mPrivate.get()->rawBus(), mPrivate->info().path,
                 mPrivate->info().interface)
         };
     }
@@ -200,6 +201,23 @@ public:
     template<typename... Args>
     Status registerSignal(std::string_view aSignalName) {
         return Method::registerSingleSignal<Args...>(mPrivate.get(), aSignalName);
+    }
+
+    template<typename T>
+    Status registerObject(T* aObj) {
+        auto builder = registerBuilder();
+        for (auto& entry : MetaObject<T>::registry()) {
+            switch (static_cast<typename MetaObject<T>::EntryType>(entry.type)) {
+                case MetaObject<T>::EntryType::SignalListen: {
+                    entry.registerFn(this, aObj);
+                    break;
+                }
+                default: {
+                    entry.registerFn(&builder, aObj);
+                }
+            }
+        }
+        return builder.commit();
     }
 
     template<typename Ret, typename... Args>
@@ -258,7 +276,11 @@ public:
         mRepsPtr->push_back(rep);
         rep->setCallback(
             [RepsPtr = mRepsPtr, cb = Call(std::forward<Callback>(aCallback)),
-                key = std::shared_ptr<void>(rep)] (Reply<Ret> aRep) {
+                key = std::weak_ptr<void>(rep)] (Reply<Ret> aRep) {
+                auto locked = key.lock();
+                if (!locked) {
+                    return;
+                }
                 //! Use RAII to ensure release old rep
                 struct Clear {
                     std::vector<std::shared_ptr<void>>& reps;
@@ -266,7 +288,7 @@ public:
                     ~Clear() {
                         reps.erase(std::find(reps.begin(), reps.end(), entry));
                     }
-                } clear{*RepsPtr, key};
+                } clear{*RepsPtr, locked};
 
                 cb(aRep);
             }

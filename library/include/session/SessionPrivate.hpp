@@ -9,7 +9,7 @@
 #include "Status.hpp"
 #include "Utils.hpp"
 
-#include "adaptor/RawAdaptor.hpp"
+#include "adaptor/RawCommon.hpp"
 #include "adaptor/RawSlotSharePtr.hpp"
 #include "adaptor/RawBusSharePtr.hpp"
 #include "message/MessagePrivate.hpp" 
@@ -44,14 +44,20 @@ public:
 
     SessionPrivate() = default;
 
+    ~SessionPrivate() {
+        if (mRawBus.get()) {
+            Adaptor::RawBus::closeBus(mRawBus.get());
+        }
+    }
+
     static bool isValidInfo(const ServiceInfo& aInfo) {
         return Adaptor::RawCheck::isServiceNameValid(aInfo.name)
             && Adaptor::RawCheck::isPathNameValid(aInfo.path)
             && Adaptor::RawCheck::isInterfaceNameValid(aInfo.interface);
     }
 
-    Adaptor::RawBusPtr rawBus() const {
-        return mRawBus.get();
+    Adaptor::RawBusSharePtr rawBus() const {
+        return mRawBus;
     }
 
     const ServiceInfo& info() const {

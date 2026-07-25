@@ -6,9 +6,8 @@
 #include <string_view>
 #include <vector>
 
-#include "adaptor/RawAdaptor.hpp"
-#include "SessionPrivate.hpp"
-
+#include "adaptor/RawCommon.hpp"
+#include "adaptor/RawBusSharePtr.hpp"
 #include "adaptor/RawSlotSharePtr.hpp"
 
 namespace SSDbus {
@@ -43,8 +42,8 @@ class VTableRegistrar {
     };
 
 public:
-    VTableRegistrar(SessionPrivate* aSession, std::string_view aPath, std::string_view aIface)
-        : mSession(aSession)
+    VTableRegistrar(const Adaptor::RawBusSharePtr& aBus, std::string_view aPath, std::string_view aIface)
+        : mBus(aBus)
         , mPath(aPath)
         , mIface(aIface) {}
 
@@ -90,27 +89,15 @@ public:
             Adaptor::RawBusVTable item;
             switch (entry.type) {
                 case Type::METHOD: {
-                    if (mSession->methods().count(ctx->name)) {
-                        return Status(StatusCode::NAME_EXISTS);
-                    }
-
                     item = SD_BUS_METHOD(ctx->name.c_str(), ctx->input.c_str(),
                         ctx->output.c_str(), entry.callback, 0);
                     break;
                 }
                 case Type::SIGNAL: {
-                    if (mSession->signals().count(ctx->name)) {
-                        return Status(StatusCode::NAME_EXISTS);
-                    }
-
                     item = SD_BUS_SIGNAL(ctx->name.c_str(), ctx->input.c_str(), 0);
                     break;
                 }
                 case Type::PROPERTY: {
-                    if (mSession->properties().count(ctx->name)) {
-                        return Status(StatusCode::NAME_EXISTS);
-                    }
-
                     item = SD_BUS_WRITABLE_PROPERTY(ctx->name.c_str(),
                         ctx->input.c_str(), entry.getter, entry.setter, 0, 0);
                     break;
@@ -125,7 +112,7 @@ public:
 
             Adaptor::RawBusSlotPtr rawSlot{nullptr};
             Status st = Adaptor::RawBus::addObjectToVTable(
-               mSession->rawBus(), rawSlot, mPath.c_str(), mIface.c_str(),
+               mBus.get(), rawSlot, mPath.c_str(), mIface.c_str(),
                ctx->vtable.get(), entry.data
             );
             if (st.isError()) {
@@ -141,7 +128,7 @@ public:
 
 
 private:
-    SessionPrivate* mSession;
+    Adaptor::RawBusSharePtr mBus;
     std::string mPath;
     std::string mIface;
     std::vector<VTableEntry> mEntries;

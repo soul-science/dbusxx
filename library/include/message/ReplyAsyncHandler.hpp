@@ -4,8 +4,9 @@
 
 #include <memory>
 
-#include "adaptor/RawAdaptor.hpp"
+#include "adaptor/RawCommon.hpp"
 #include "adaptor/RawRemoteError.hpp"
+#include "adaptor/RawSlotSharePtr.hpp"
 #include "MessagePrivate.hpp"
 
 namespace SSDbus {
@@ -39,6 +40,7 @@ struct ReplyAsyncHandler : public MessagePrivate,
         }
     }
 
+    Adaptor::RawSlotSharePtr mSlot { nullptr };
     std::function<void(MessagePrivate*)> mCallback { nullptr };
     bool isFinished { false };
 };

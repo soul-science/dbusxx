@@ -1,7 +1,20 @@
 project(example)
 
-add_executable(test
-    main.cpp
+
+add_executable(example_session
+    example_session.cpp
+)
+
+add_executable(example_meta
+    example_meta.cpp
+)
+
+add_executable(example_server
+    example_server.cpp
+)
+
+add_executable(example_register
+    example_register.cpp
 )
 
 # Find systemd library
@@ -9,9 +22,27 @@ add_executable(test
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(SYSTEMD REQUIRED libsystemd)
 
-target_link_libraries(test PRIVATE
+target_link_libraries(example_session PRIVATE
     ${SYSTEMD_LIBRARIES}
     ssdbus
 )
 
-add_dependencies(test ssdbus)
+target_link_libraries(example_meta PRIVATE
+    ${SYSTEMD_LIBRARIES}
+    ssdbus
+)
+
+target_link_libraries(example_server PRIVATE
+    ${SYSTEMD_LIBRARIES}
+    ssdbus
+)
+
+target_link_libraries(example_register PRIVATE
+    ${SYSTEMD_LIBRARIES}
+    ssdbus
+)
+
+add_dependencies(example_session ssdbus)
+add_dependencies(example_meta ssdbus)
+add_dependencies(example_server ssdbus)
+add_dependencies(example_register ssdbus)

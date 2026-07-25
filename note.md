@@ -626,7 +626,7 @@ private:
 ```
 
 ```cpp
-// ============ RawAdaptor.hpp ============
+// ============ RawCommon.hpp ============
 // 平台适配层：唯一允许出现 #include <cerrno> 的地方
 #ifndef SSDBUS_RAW_ADAPTOR_HPP
 #define SSDBUS_RAW_ADAPTOR_HPP
@@ -638,7 +638,7 @@ private:
 
 namespace SSDbus {
 namespace Adaptor {
-namespace RawError {
+namespace RawErrorConvert {
 
 // ① 平台映射函数：POSIX errno → 项目 StatusCode
 inline StatusCode fromErrno(int aErrno) {
@@ -674,19 +674,19 @@ inline Status makeStatus(int aRet) {
     return Status(fromErrno(-aRet));
 }
 
-} // namespace RawError
+} // namespace RawErrorConvert
 
 // ③ Adaptor 层所有封装函数直接使用 makeStatus
 namespace RawBus {
     Status flushBus(RawBusPtr aBus) {
         if (!aBus) return Status(StatusCode::INVALID_ARG);
-        return RawError::makeStatus(sd_bus_flush(aBus));
+        return RawErrorConvert::makeStatus(sd_bus_flush(aBus));
     }
 
     Status sendMessage(RawBusPtr aBus, RawBusMessagePtr aMsg,
                        std::string_view aDestination) {
         if (!aBus || !aMsg) return Status(StatusCode::INVALID_ARG);
-        return RawError::makeStatus(
+        return RawErrorConvert::makeStatus(
             sd_bus_send_to(aBus, aMsg, aDestination.data(), nullptr));
     }
     // ...
@@ -710,7 +710,7 @@ Status setInfo(ServiceInfo aInfo) {
 
 // Method.hpp — callSync
 int ret = Adaptor::RawBus::callSync(...);
-repMsg.setStatus(Adaptor::RawError::makeStatus(ret));
+repMsg.setStatus(Adaptor::RawErrorConvert::makeStatus(ret));
 // ↑ 在 Adaptor 层完成 int→Status 转换，上层直接拿到 Status 对象
 ```
 
@@ -726,7 +726,7 @@ repMsg.setStatus(Adaptor::RawError::makeStatus(ret));
                │ 依赖（单向）
                ▼
 ┌────────────────────────────────────────────────────┐
-│  适配层: Adaptor::RawError, Adaptor::RawBus, ...    │
+│  适配层: Adaptor::RawErrorConvert, Adaptor::RawBus, ...    │
 │  #include "Status.hpp" + <cerrno> + <sd-bus.h>    │
 │  fromErrno()  — 平台映射（唯一的 errno 消费点）     │
 │  makeStatus() — sd-bus 返回值约定 → Status         │
@@ -746,7 +746,7 @@ repMsg.setStatus(Adaptor::RawError::makeStatus(ret));
 
 | 场景 | 放在 Status.hpp | 放在 Adaptor 层 |
 |---|---|---|
-| 从 sd-bus → GDBus | 改 `Status.hpp`（影响所有文件重编译） | 只改 `RawAdaptor.hpp` 中的 `fromErrno()` |
+| 从 sd-bus → GDBus | 改 `Status.hpp`（影响所有文件重编译） | 只改 `RawCommon.hpp` 中的 `fromErrno()` |
 | 从 Linux → Windows | `Status.hpp` 编译失败（缺少 E* 宏） | 改 `fromErrno()`，用 Windows 错误码替代 |
 | 新增自定义错误码 | 在 `StatusCode` enum 加一项 + `fromErrno` 加映射 | 完全相同，但改动点在两个文件、职责清晰 |
 | 单测构造错误场景 | `fromErrno(EINVAL)` — 需要真实 errno | `Status(StatusCode::INVALID_ARG)` — 直接构造 |
@@ -1249,11 +1249,11 @@ class Session {
 
 ```cpp
 // 场景：Session 可能提前析构，但 EventLoop 仍持有对其的引用
-class DbusEventLoop {
+class EventLoop {
     std::weak_ptr<Session> mWeakSession;
 
 public:
-    explicit DbusEventLoop(Session& aSession)
+    explicit EventLoop(Session& aSession)
         : mWeakSession(aSession.shared_from_this()) {}  // Session 需继承 enable_shared_from_this
 
     void run() {
@@ -1558,10 +1558,10 @@ D-Bus 协议只有 `double` 类型（签名 `'d'`），没有 `float`。所以�
 
 | 层 | 文件 | 职责 |
 |---|---|---|
-| 底层适配 | `RawAdaptor.hpp` → `RawMessage` | sd-bus C API 的薄封装，只提供原子操作 |
+| 底层适配 | `RawCommon.hpp` → `RawMessage` | sd-bus C API 的薄封装，只提供原子操作 |
 | 高层逻辑 | `MessagePrivate.hpp` → `MessagePrivate` | 类型分发（`if constexpr`），组合底层操作 |
 
-vector 的读写逻辑放在 `MessagePrivate` 而非 `RawAdaptor`，因为它是"组合底层原子操作"的高层逻辑，不应污染适配层。`RawMessage` 只提供 `openContainer`/`closeContainer`/`appendBasic` 等积木。
+vector 的读写逻辑放在 `MessagePrivate` 而非 `RawCommon`，因为它是"组合底层原子操作"的高层逻辑，不应污染适配层。`RawMessage` 只提供 `openContainer`/`closeContainer`/`appendBasic` 等积木。
 
 ---
 

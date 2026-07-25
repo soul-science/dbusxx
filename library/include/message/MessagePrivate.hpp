@@ -6,9 +6,9 @@
 
 #include "Status.hpp"
 
-#include "adaptor/RawAdaptor.hpp"
+#include "adaptor/RawCommon.hpp"
 #include "adaptor/RawMessageSharePtr.hpp"
-#include "DbusArgs.hpp"
+#include "adaptor/DbusArgs.hpp"
 
 namespace SSDbus {
 namespace Private {

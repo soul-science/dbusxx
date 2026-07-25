@@ -20,12 +20,6 @@ struct ServiceInfo {
     std::string path;
     std::string interface;
 };
-
-//! Safe read function
-ssize_t __safeRead(int aFd, void* aBuffer, size_t aCount);
-
-//! Safe write function
-ssize_t __safeWrite(int aFd, const void* aBuffer, size_t aCount);
 }
 
 #endif //! SSDBUS_UTILS_HPP

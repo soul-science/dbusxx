@@ -7,7 +7,7 @@
 #include "Message.hpp"
 #include "Reply.hpp"
 
-#include "adaptor/RawAdaptor.hpp"
+#include "adaptor/RawCommon.hpp"
 #include "message/MessagePrivate.hpp"
 #include "message/ReplyAsyncHandler.hpp"
 

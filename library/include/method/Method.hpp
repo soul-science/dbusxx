@@ -139,13 +139,13 @@ Status registerSingleMethod(
         return Status(StatusCode::NAME_EXISTS);
     }
 
-    aSession->methods()[input.data()] = {};
-    auto& info = aSession->methods()[input.data()];
+    aSession->methods()[aFuncName.data()] = {};
+    auto& methodInfo = aSession->methods()[aFuncName.data()];
 
-    info.data = data;
+    methodInfo.data = data;
 
     //! Create vtable
-    Private::VTableRegistrar reg(aSession, aSession->info().path, aSession->info().interface);
+    Private::VTableRegistrar reg(aSession->rawBus(), aSession->info().path, aSession->info().interface);
     reg.addMethod(aFuncName, input, output, &MethodWrapper<Func>::onCall, dataPtr);
     std::vector<std::unique_ptr<Private::VTableContext>> v;
     auto st = reg.commit(v);
@@ -157,7 +157,7 @@ Status registerSingleMethod(
         return st;
     }
 
-    info.context = std::move(v.front());
+    methodInfo.context = std::move(v.front());
     v.pop_back();
 
     return Status(StatusCode::SUCCESS);
@@ -176,9 +176,9 @@ Status registerSingleSignal(Private::SessionPrivate* aSession, std::string_view 
     }
 
     aSession->signals()[aSignalName.data()] = {};
-    auto& info = aSession->signals()[input.data()];
+    auto& sigInfo = aSession->signals()[aSignalName.data()];
 
-    Private::VTableRegistrar reg(aSession, aSession->info().path, aSession->info().interface);
+    Private::VTableRegistrar reg(aSession->rawBus(), aSession->info().path, aSession->info().interface);
     reg.addSiganl(aSignalName, input);
     std::vector<std::unique_ptr<Private::VTableContext>> v;
     Status st = reg.commit(v);
@@ -187,7 +187,7 @@ Status registerSingleSignal(Private::SessionPrivate* aSession, std::string_view 
         return st;
     }
 
-    info.context = std::move(v.front());
+    sigInfo.context = std::move(v.front());
     return Status(StatusCode::SUCCESS);
 }
 
@@ -195,7 +195,7 @@ template<typename... Args>
 Status emitSignal(Private::SessionPrivate* aSession, std::string_view aPath, std::string_view aIface,
     std::string_view aSignal, const Args&... aArgs) {
     Adaptor::RawBusMessagePtr rawSig =  Adaptor::RawMessage::createSignal(
-        aSession->rawBus(), aPath, aIface, aSignal);
+        aSession->rawBus().get(), aPath, aIface, aSignal);
     if (!rawSig) {
         return Status(StatusCode::UNKNOWN_ERROR);
     }
@@ -240,7 +240,7 @@ struct PropertyWrapper {
 
         auto& info = session->info();
         sd_bus_emit_properties_changed(
-            session->rawBus(),
+            session->rawBus().get(),
             info.path.c_str(), info.interface.c_str(),
             propName.c_str(), nullptr);
     }
@@ -314,7 +314,7 @@ Private::MessagePrivate callSync(
     Adaptor::RawBusMessagePtr rawReply = nullptr;
     Adaptor::RawRemoteError error;
     st = Adaptor::RawBus::callSync(
-        aSession->rawBus(), callMsg.rawMessage(), aTimeoutUmsc,
+        aSession->rawBus().get(), callMsg.rawMessage(), aTimeoutUmsc,
         error.getRawPtr(), rawReply);
     Private::MessagePrivate repMsg(Adaptor::RawMessageSharePtr(rawReply, true));
 
@@ -352,10 +352,12 @@ std::shared_ptr<Private::ReplyAsyncHandler> callAsync(
     }
 
     auto repHandler = std::make_shared<Private::ReplyAsyncHandler>();
+    Adaptor::RawBusSlotPtr rawSlot = nullptr;
     Status st = Adaptor::RawBus::callAsync(
-        aSession->rawBus(), nullptr, callMsg.rawMessage(),
+        aSession->rawBus().get(), rawSlot, callMsg.rawMessage(),
         Private::ReplyAsyncHandler::onReply, repHandler.get(), aTimeoutUmsc
     );
+    repHandler->mSlot = Adaptor::RawSlotSharePtr(rawSlot);
     repHandler->setStatus(st);
 
     std::cout << "callAsync -- aService:" << aService
@@ -382,7 +384,7 @@ Status listenSignal(Private::SessionPrivate* aSession,
         std::forward<Callback>(aCallback));
 
     Status st = Adaptor::RawBus::listenSignal(
-        aSession->rawBus(), handler->slot,
+        aSession->rawBus().get(), handler->slot,
         aSender, aPath, aIface, aSignal,
         &Private::SignalHandler<Callback>::onSignal,
         handler.get()
