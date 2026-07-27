@@ -220,57 +220,33 @@ public:
         return builder.commit();
     }
 
-    template<typename Ret, typename... Args>
-    Reply<Ret> callSync(std::string_view aService, std::string_view aPath,
-        std::string_view aIface, std::string_view aMethod, uint64_t aTimeoutUmsc, const Args&... aArgs) {
-        return Reply<Ret>(
-            Method::callSync<Ret, Args...>(
-                mPrivate.get(), aTimeoutUmsc, aService, aPath, aIface, aMethod, aArgs...
-            ));
-    }
-
-    template<typename... Args>
-    Reply<void> callSync(std::string_view aService, std::string_view aPath,
-        std::string_view aIface, std::string_view aMethod, uint64_t aTimeoutUmsc, const Args&... aArgs) {
-        return Reply<void>(
-            Method::callSync<void, Args...>(mPrivate.get(), aTimeoutUmsc, aService, aPath, aIface, aMethod, aArgs...
-        ));
-    }
-
-    template<typename Ret, typename... Args>
+    template<typename Ret=void, uint64_t TimeoutUsec=0, typename... Args>
     Reply<Ret> callSync(std::string_view aService, std::string_view aPath,
         std::string_view aIface, std::string_view aMethod, const Args&... aArgs) {
         return Reply<Ret>(
             Method::callSync<Ret, Args...>(
-                mPrivate.get(), aService, aPath, aIface, aMethod, aArgs...
+                mPrivate.get(), TimeoutUsec, aService, aPath, aIface, aMethod, aArgs...
             ));
     }
 
-    template<typename... Args>
-    Reply<void> callSync(std::string_view aService, std::string_view aPath,
-        std::string_view aIface, std::string_view aMethod, const Args&... aArgs) {
-        return Reply<void>(
-            Method::callSync<void, Args...>(mPrivate.get(), aService, aPath, aIface, aMethod, aArgs...
-        ));
-    }
-
-    template<typename Ret, typename... Args>
+    template<typename Ret=void, uint64_t TimeoutUsec=0, typename... Args>
     PendingReply<Ret> callAsync(std::string_view aService, std::string_view aPath,
         std::string_view aIface, std::string_view aMethod, const Args&... aArgs) {
         return PendingReply<Ret>(
-            Method::callAsync<Ret, Args...>(mPrivate.get(), aService, aPath, aIface, aMethod, aArgs...)
-        );
+            Method::callAsync<Ret, Args...>(
+                mPrivate.get(), TimeoutUsec, aService, aPath, aIface, aMethod, aArgs...
+        ));
     }
 
-    template<typename Ret, typename Callback, typename... Args>
-    //! Callback takes precedence over template<typename Ret, typename... Args>
+    template<typename Ret=void, uint64_t TimeoutUsec=0, typename Callback, typename... Args>
     Status callAsync(std::string_view aService, std::string_view aPath, std::string_view aIface,
-        std::string_view aMethod, uint64_t aTimeoutUmsc, Callback&& aCallback, const Args&... aArgs) {
+        std::string_view aMethod, Callback&& aCallback, const Args&... aArgs) {
         static_assert(std::is_invocable_r_v<void, Callback, Reply<Ret>>,
             "callAsync callback must be callable as: void(Reply<Ret>)");
         using Call = std::function<void(Reply<Ret>)>;
         auto rep = std::make_shared<PendingReply<Ret>>(
-            Method::callAsync<Ret, Args...>(mPrivate.get(), aTimeoutUmsc, aService, aPath, aIface, aMethod, aArgs...)
+            Method::callAsync<Ret, Args...>(mPrivate.get(), TimeoutUsec,
+                aService, aPath, aIface, aMethod, aArgs...)
         );
 
         mRepsPtr->push_back(rep);
@@ -295,15 +271,6 @@ public:
         );
 
         return rep->getStatus();
-    }
-
-    template<typename Ret, typename Callback, typename... Args>
-    //! Callback takes precedence over template<typename Ret, typename... Args>
-    Status callAsync(std::string_view aService, std::string_view aPath, std::string_view aIface,
-        std::string_view aMethod, Callback&& aCallback, const Args&... aArgs) {
-        return callAsync<Ret, Callback, Args...>(
-            aService, aPath, aIface, aMethod, static_cast<uint64_t>(0), std::forward<Callback>(aCallback), aArgs...
-        );
     }
 
     template<typename Callback>
@@ -337,7 +304,7 @@ public:
     }
 
     template<typename T>
-    Status getProperty(std::string_view aName, T& aValue) {
+    Status getLocalProperty(std::string_view aName, T& aValue) {
         auto p = getPropPrivate<T>(aName);
         if (!p) {
             return Status(StatusCode::INVALID_ARG);
@@ -348,7 +315,7 @@ public:
     }
 
     template<typename T>
-    Status setProperty(std::string_view aName, T aValue) {
+    Status setLocalProperty(std::string_view aName, T aValue) {
         auto p = getPropPrivate<T>(aName);
         if (!p) {
             return Status(StatusCode::INVALID_ARG);
@@ -359,7 +326,7 @@ public:
     }
 
     template<typename T>
-    Status onPropertyChanged(std::string_view aName, std::function<void(const T&)>&& aCallback) {
+    Status onLocalPropertyChanged(std::string_view aName, std::function<void(const T&)>&& aCallback) {
         auto p = getPropPrivate<T>(aName);
         if (!p) {
             return Status(StatusCode::INVALID_ARG);

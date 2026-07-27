@@ -1649,5 +1649,170 @@ else if constexpr (isContainerV<rawType>) {
 |---|---|
 | 一个 template 匹配一切 | 每种容器各一个偏特化 |
 | 碰到非类型参数就失效 | `size_t N` 直接写在偏特化里 |
-| 抽象泄漏（std::array 需要 C++20 才能统一） | 零抽象，零泄漏 |
+| 抽象泄漏 | 零抽象，零泄漏 |
 | 可删掉 `isSpecializationOf`，它只服务了 1 个场景 | — |
+
+---
+
+## 30. callSync 重载决议与二义性（2026-07-27）
+
+### 30.1 背景
+
+`callSync` 从 4 个重载合并为 2 个（`Ret=void` 默认参数消去 void 特化）：
+
+```cpp
+// ③ 带 timeout
+template<typename Ret=void, typename... Args>
+Reply<Ret> callSync(svc×4, uint64_t aTimeoutUmsc, const Args&... aArgs);
+
+// ④ 不带 timeout
+template<typename Ret=void, typename... Args>
+Reply<Ret> callSync(svc×4, const Args&... aArgs);
+```
+
+### 30.2 歧义矩阵
+
+| 调用 | ③ 匹配度 | ④ 匹配度 | 结果 |
+|------|:--:|:--:|------|
+| `callSync(svc×4, "method")` | ❌ 缺 timeout | ✅ | ④ |
+| `callSync(svc×4, "method", 42)` | `int→uint64_t` 转换 | `int→const int&` 精确 | ④ 更优 |
+| `callSync(svc×4, "method", 0ULL)` | 精确 | 精确 | **歧义** ❌ |
+| `callSync(svc×4, "method", 0ULL, 42)` | 精确 | 精确 | **歧义** ❌ |
+| `callSync<Ret,Args>(svc×4,"m",0ULL,42)` | ✅ | ❌ 参数个数不匹配 | ③ |
+
+**核心矛盾**：`uint64_t` 字面量既能匹配 ③ 的 `uint64_t timeout` 形参，也能匹配 ④ 的 `const Args&...` 第一个元素——两者都是精确匹配。
+
+### 30.3 为什么普通整数不歧义
+
+`42` 是 `int`，不是 `uint64_t`：
+- ③：`int → uint64_t` = 整数类型转换（非精确匹配）
+- ④：`int → const int&` = 精确匹配 → ④ 胜出
+
+### 30.4 Client 中的消歧实践
+
+```cpp
+// 带 timeout：显式传 <Ret, Args...> 让 ④ 参数个数不匹配 → 只剩 ③
+template<typename Ret=void, typename... Args>
+Reply<Ret> callSync(std::string_view aMethod, uint64_t aTimeout,
+                    const Args&... aArgs) {
+    return syncSession().callSync<Ret, Args...>(..., aMethod, aTimeout, aArgs...);
+}
+
+// 不带 timeout：直接转发，永远选 ④
+template<typename Ret=void, typename... Args>
+Reply<Ret> callSync(std::string_view aMethod, const Args&... aArgs) {
+    return syncSession().callSync<Ret, Args...>(..., aMethod, aArgs...);
+}
+```
+
+### 30.5 根本原因
+
+两个重载只在"多一个 `uint64_t`"上有区别，而 `Args...` 参数包可以吞掉任何类型。这是 C++ 函数模板"固定类型参数 vs 参数包"的固有局限。消歧方式只有两种：显式模板参数，或去掉无 timeout 重载让 timeout 有默认值。
+
+---
+
+## 31. TLS（thread_local）sync Session（2026-07-27）
+
+### 31.1 问题
+
+`Client` 的 `callSync` 需要独立的 sync `Session`——不能走 `mAsyncPtr`（与事件循环竞争 fd）。如果每个 `Client` 各自持有 `mSyncSession`，100 个 `Client` 同线程 sync 调用就开 100 个 `sd_bus` 连接。
+
+### 31.2 方案：thread_local 惰性创建
+
+```cpp
+class Client {
+private:
+    Session& syncSession() {
+        thread_local Session sSystemSession(true);
+        thread_local Session sUserSession(false);
+        return mIsSystem ? sSystemSession : sUserSession;
+    }
+    bool mIsSystem;
+};
+```
+
+**效果**：每线程最多 2 个 sync Session，同线程所有 `Client` 共享。
+
+```
+线程 A: Client1/2/3.callSync() → 共享 TLS sUserSession
+线程 B: Client4.callSync()     → 另一个 TLS sUserSession
+```
+
+### 31.3 为什么 sleep 不该在构造函数里
+
+之前试图在 `Client` 构造函数里 `sleep(500ms)` 等 async Hello 握手。但：
+
+- `syncSession()` 的 `Session` 用 `sd_bus_call` 内部 poll，立即可用，**不需要 sleep**
+- `mAsyncPtr` 需要等 Hello 才能 `listenSignal`——这个等待属于**测试代码**的时序问题，不是 `Client` 的职责
+
+把 sleep 放在测试里比放在构造函数里更合理：不污染所有使用者，只针对调用时机敏感的测试场景。
+
+### 31.4 sync vs async Session 对比
+
+| | sync Session | async Session |
+|---|---|---|
+| 创建方式 | `thread_local` 惰性 | 构造函数或外部传入 |
+| 事件循环 | 不需要 | 必须绑 `Looper` |
+| 多 Client 共享 | 天然（同线程） | 手动传 `Session&` |
+| 用途 | `callSync` | `callAsync` / `listenSignal` |
+
+---
+
+## 32. timeout 模板参数化消除二义性（2026-07-28）
+
+### 32.1 问题回顾
+
+`callSync` 有两个重载——带 timeout 和不带——当第 5 个参数恰好是 `uint64_t` 时两者都精确匹配，产生歧义。
+
+### 32.2 方案：timeout 从函数参数提升为模板参数
+
+```cpp
+// ❌ 旧：timeout 是函数参数 → 二义性
+template<typename Ret=void, typename... Args>
+Reply<Ret> callSync(svc×4, uint64_t timeout, const Args&...);  // ③
+template<typename Ret=void, typename... Args>
+Reply<Ret> callSync(svc×4, const Args&...);                     // ④
+
+// ✅ 新：timeout 是模板参数 → 单重载，零歧义
+template<typename Ret=void, uint64_t TimeoutUsec=0, typename... Args>
+Reply<Ret> callSync(svc×4, const Args&...);
+```
+
+唯一代价：timeout 必须是编译期常量。实际中 D-Bus timeout 几乎都是默认值或固定值，不影响使用。
+
+### 32.3 无回调 callAsync 同步统一
+
+```cpp
+// 同样从 2 个重载 → 1 个
+template<typename Ret=void, uint64_t TimeoutUsec=0, typename... Args>
+PendingReply<Ret> callAsync(svc×4, const Args&...);
+```
+
+### 32.4 有回调 callAsync 也可统一
+
+有回调版本加上 `TimeoutUsec` 不会导致和无回调版本冲突——因为 C++ 偏特化排序会优选 `Callback` 版本（`Callback&&` vs `const Args&...`，与旧设计相同）：
+
+```cpp
+template<typename Ret=void, uint64_t TimeoutUsec=0, typename Callback, typename... Args>
+Status callAsync(svc×4, Callback&&, const Args&...);
+```
+
+**时序**：最初尝试统一时编译失败，原因不是模板冲突，而是 `Client` 里显式传了 `<Ret, TimeoutUsec>` 模板参数导致两个重载完全一致。去掉显式传参，靠偏特化排序即可。
+
+### 32.5 最终效果
+
+```
+Session::callSync:  1 个重载（原 2 个）
+Session::callAsync: 2 个重载（原 3 个——无回调 2 + 有回调 2 合并为 1 + 1）
+Client: 同上
+```
+
+使用：
+
+```cpp
+// 不指定 timeout = 默认 0
+session.callSync<std::string>(svc, path, iface, "method", "hello");
+
+// 指定 timeout
+session.callSync<std::string, 5'000'000>(svc, path, iface, "method", "hello");
+```

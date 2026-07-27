@@ -1,8 +1,8 @@
 /****************************************************************************
  * example_session.cpp
  * 展示直接使用 Session 的完整流程:
- *   listenSignal → setInfo → registerBuilder → getProperty →
- *   onPropertyChanged → callSync → callAsync → emitSignal → Looper 事件循环
+ *   listenSignal → setInfo → registerBuilder → getLocalProperty →
+ *   onLocalPropertyChanged → callSync → callAsync → emitSignal → Looper 事件循环
  *
  * 所有方法来自 main.cpp 的 Test class，覆盖 D-Bus 全部基础类型。
  ****************************************************************************/
@@ -204,20 +204,20 @@ int main() {
 
     // ④ 读取属性
     int p1 = 0;
-    st = session.getProperty("property1", p1);
-    std::cout << "getProperty(property1) = " << p1
+    st = session.getLocalProperty("property1", p1);
+    std::cout << "getLocalProperty(property1) = " << p1
               << "  (" << st.message() << ")" << std::endl;
 
     std::string p2;
-    st = session.getProperty("property2", p2);
-    std::cout << "getProperty(property2) = " << p2
+    st = session.getLocalProperty("property2", p2);
+    std::cout << "getLocalProperty(property2) = " << p2
               << "  (" << st.message() << ")" << std::endl;
 
     // ⑤ 监听属性变化
-    st = session.onPropertyChanged<int>("property1", [](int v) {
+    st = session.onLocalPropertyChanged<int>("property1", [](int v) {
         std::cout << "[property] property1 -> " << v << std::endl;
     });
-    std::cout << "onPropertyChanged(property1): " << st.message() << std::endl;
+    std::cout << "onLocalPropertyChanged(property1): " << st.message() << std::endl;
 
     // ⑥ 同步调用远程方法
     Reply<void> r1 = session.callSync(

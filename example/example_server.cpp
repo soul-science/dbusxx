@@ -254,29 +254,29 @@ int main() {
     // ③ 同步调用 — 基础类型
     std::cout << "\n=== Step 3: Sync calls (basic types) ===" << std::endl;
     {
-        auto r = syncClient.callSync<int32_t, int32_t>(
-            svc, path, iface, "testInt32", uint64_t(0), 42);
+        auto r = syncClient.callSync<int32_t>(
+            svc, path, iface, "testInt32", 42);
         TEST("testInt32 echo", !r.isError() && r.value() == 42);
     }
     {
-        auto r = syncClient.callSync<std::string, std::string>(
-            svc, path, iface, "testString", uint64_t(0),
+        auto r = syncClient.callSync<std::string>(
+            svc, path, iface, "testString",
             std::string("hello"));
         TEST("testString echo", !r.isError() && r.value() == "hello");
     }
     {
-        auto r = syncClient.callSync<bool, bool>(
-            svc, path, iface, "testBool", uint64_t(0), true);
+        auto r = syncClient.callSync<bool>(
+            svc, path, iface, "testBool", true);
         TEST("testBool echo", !r.isError() && r.value() == true);
     }
     {
-        auto r = syncClient.callSync<double, double>(
-            svc, path, iface, "testDouble", uint64_t(0), 3.14);
+        auto r = syncClient.callSync<double>(
+            svc, path, iface, "testDouble", 3.14);
         TEST("testDouble echo", !r.isError() && r.value() == 3.14);
     }
     {
-        auto r = syncClient.callSync<int64_t, int64_t>(
-            svc, path, iface, "testInt64", uint64_t(0),
+        auto r = syncClient.callSync<int64_t>(
+            svc, path, iface, "testInt64",
             int64_t(-1234567890123LL));
         TEST("testInt64 echo",
              !r.isError() && r.value() == int64_t(-1234567890123LL));
@@ -290,12 +290,11 @@ int main() {
     std::cout << "\n=== Step 4: Sync calls (compound types) ===" << std::endl;
     {
         auto r = syncClient.callSync(svc, path, iface, "testVector",
-                                     uint64_t(0), std::vector<int>{1, 2, 3});
+                                     std::vector<int>{1, 2, 3});
         TEST("testVector", !r.isError());
     }
     {
         auto r = syncClient.callSync(svc, path, iface, "testMultiArgs",
-                                     uint64_t(0),
                                      100, std::string("multi"),
                                      std::vector<double>{1.1, 2.2});
         TEST("testMultiArgs", !r.isError());
@@ -330,8 +329,8 @@ int main() {
               << std::endl;
     {
         signalReceived.reset();
-        auto r = syncClient.callSync<void, int, int>(
-            svc, path, iface, "triggerClear", uint64_t(0), 7, 8);
+        auto r = syncClient.callSync(
+            svc, path, iface, "triggerClear", 7, 8);
         TEST("triggerClear call", !r.isError());
 
         signalReceived.wait();

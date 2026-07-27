@@ -1,0 +1,214 @@
+/****************************************************************************
+ * example_client.cpp
+ * 展示 Client 类用法（类似 QDBusInterface）
+ *   callSync / callAsync / listenSignal / 信号触发 / 跨线程 emit
+ *
+ * 启动方式: 先启动 example_server，再启动本程序
+ *   或: 本程序会自动启动内嵌 server 做测试（需 session bus）
+ ****************************************************************************/
+
+#include "Client.hpp"
+#include "Server.hpp"
+
+#include <chrono>
+#include <condition_variable>
+#include <csignal>
+#include <iostream>
+#include <mutex>
+#include <string>
+#include <thread>
+#include <vector>
+
+using namespace SSDbus;
+
+// ── 服务端（同 example_server.cpp，供 Client 测试）─────────────────────
+
+class DemoServer : public Server<DemoServer> {
+public:
+    DemoServer()
+        : Server(ServiceInfo{"com.example.demo", "/com/example/demo",
+                             "com.example.Demo"}, false /* session bus */) {}
+
+    int32_t testInt32(int32_t i) {
+        std::cout << "[server] testInt32: " << i << std::endl;
+        return i;
+    }
+    SSDBUS_METHOD(testInt32)
+
+    std::string testString(const std::string& i) {
+        std::cout << "[server] testString: " << i << std::endl;
+        return i;
+    }
+    SSDBUS_METHOD(testString)
+
+    void testVoid() {
+        std::cout << "[server] testVoid" << std::endl;
+    }
+    SSDBUS_METHOD(testVoid)
+
+    void testMultiArgs(int i, std::string s) {
+        std::cout << "[server] testMultiArgs: i=" << i << ", s=" << s << std::endl;
+    }
+    SSDBUS_METHOD(testMultiArgs)
+
+    void triggerClear(int a, int b) {
+        std::cout << "[server] triggerClear(" << a << ", " << b << ")" << std::endl;
+        emit("clear", a, b);
+    }
+    SSDBUS_METHOD(triggerClear)
+
+    void shutdown() {
+        std::cout << "[server] shutdown" << std::endl;
+        stop();
+    }
+    SSDBUS_METHOD(shutdown)
+
+    SSDBUS_SIGNAL(clear, int, int)
+};
+
+// ── 同步辅助 ────────────────────────────────────────────────────────────
+
+struct SyncFlag {
+    void set() {
+        { std::lock_guard<std::mutex> lock(m); flag = true; }
+        cv.notify_one();
+    }
+    void wait() {
+        std::unique_lock<std::mutex> lock(m);
+        cv.wait(lock, [this] { return flag; });
+    }
+    void reset() { std::lock_guard<std::mutex> lock(m); flag = false; }
+    bool get() const { return flag; }
+
+private:
+    std::mutex m;
+    std::condition_variable cv;
+    bool flag { false };
+};
+
+static int gPassed = 0, gFailed = 0;
+
+#define TEST(name, expr)                                                      \
+    do {                                                                      \
+        std::cout << "  [" << (name) << "] ";                                 \
+        if (expr) { ++gPassed; std::cout << "PASSED"; }                      \
+        else       { ++gFailed; std::cout << "FAILED"; }                      \
+        std::cout << std::endl;                                               \
+    } while (0)
+
+// ── main ─────────────────────────────────────────────────────────────────
+
+int main() {
+    DemoServer server;
+
+    std::signal(SIGINT, [](int) {
+        std::cout << "\n[SIGINT] exiting..." << std::endl;
+        _exit(0);
+    });
+
+    // ① 启动服务
+    std::cout << "=== Step 1: Starting server ===" << std::endl;
+    std::thread serverThread([&server] { server.run(); });
+    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+
+    // ② 创建 Client（自管模式：内部管理 Session + Looper + thread）
+    std::cout << "\n=== Step 2: Creating Client (self-contained) ==="
+              << std::endl;
+    Client c("com.example.demo", "/com/example/demo", "com.example.Demo");
+    // 等待 async 连接的 Hello 握手完成（syncSession 不受影响）
+    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+
+    // ③ 同步调用 — 基础类型
+    std::cout << "\n=== Step 3: sync calls (basic) ===" << std::endl;
+    {
+        auto r = c.callSync<int32_t>("testInt32", 42);
+        TEST("testInt32 echo", !r.isError() && r.value() == 42);
+    }
+    {
+        auto r = c.callSync<std::string>("testString", std::string("hello"));
+        TEST("testString echo", !r.isError() && r.value() == "hello");
+    }
+    {
+        auto r = c.callSync("testVoid");
+        TEST("testVoid", !r.isError());
+    }
+
+    // ④ 同步调用 — 复合参数
+    std::cout << "\n=== Step 4: sync calls (compound) ===" << std::endl;
+    {
+        auto r = c.callSync("testMultiArgs", 100, std::string("multi"));
+        TEST("testMultiArgs", !r.isError());
+    }
+
+    // ⑤ 信号监听
+    std::cout << "\n=== Step 5: Signal listening ===" << std::endl;
+    SyncFlag signalReceived;
+    int sigA = 0, sigB = 0;
+
+    Status st = c.listenSignal("clear", [&](int a, int b) {
+        std::cout << "  [client] signal clear: a=" << a << ", b=" << b << std::endl;
+        sigA = a; sigB = b; signalReceived.set();
+    });
+    TEST("listenSignal clear", st.isSuccess());
+
+    // ⑥ 触发信号（服务端同线程 emit）
+    std::cout << "\n=== Step 6: Trigger signal ===" << std::endl;
+    {
+        signalReceived.reset();
+        auto r = c.callSync("triggerClear", 7, 8);
+        TEST("triggerClear call", !r.isError());
+
+        signalReceived.wait();
+        TEST("signal received", signalReceived.get());
+        TEST("signal args match", sigA == 7 && sigB == 8);
+    }
+
+    // ⑦ 跨线程 emit — main 线程直接调 server.emit()
+    std::cout << "\n=== Step 7: Cross-thread emit ===" << std::endl;
+    {
+        signalReceived.reset();
+        Status stEmit = server.emit("clear", 99, 100);
+        TEST("cross-thread emit posted", stEmit.isSuccess());
+
+        signalReceived.wait();
+        TEST("cross-thread signal received", signalReceived.get());
+        TEST("cross-thread args match", sigA == 99 && sigB == 100);
+    }
+
+    // ⑧ 异步调用
+    std::cout << "\n=== Step 8: Async call ===" << std::endl;
+    {
+        SyncFlag asyncDone;
+        std::string asyncResult;
+
+        c.callAsync<std::string>(
+            "testString",
+            [&](Reply<std::string> rep) {
+                asyncResult = rep.value();
+                asyncDone.set();
+            },
+            std::string("async-hello"));
+
+        asyncDone.wait();
+        TEST("async call received", asyncDone.get());
+        TEST("async call echo", asyncResult == "async-hello");
+    }
+
+    // ⑨ 关闭服务
+    std::cout << "\n=== Step 9: Shutdown ===" << std::endl;
+    {
+        auto r = c.callSync("shutdown");
+        TEST("shutdown call", !r.isError());
+    }
+
+    serverThread.join();
+    std::cout << "[main] done." << std::endl;
+
+    // ── 结果 ──
+    std::cout << "\n========================================" << std::endl;
+    std::cout << "  Results: " << gPassed << " passed, "
+              << gFailed << " failed" << std::endl;
+    std::cout << "========================================" << std::endl;
+
+    return gFailed > 0 ? 1 : 0;
+}

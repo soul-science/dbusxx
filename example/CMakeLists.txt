@@ -17,6 +17,10 @@ add_executable(example_register
     example_register.cpp
 )
 
+add_executable(example_client
+    example_client.cpp
+)
+
 # Find systemd library
 # Need to install PkgConfig, sudo apt-get install pkg-config
 find_package(PkgConfig REQUIRED)
@@ -42,7 +46,13 @@ target_link_libraries(example_register PRIVATE
     ssdbus
 )
 
+target_link_libraries(example_client PRIVATE
+    ${SYSTEMD_LIBRARIES}
+    ssdbus
+)
+
 add_dependencies(example_session ssdbus)
 add_dependencies(example_meta ssdbus)
 add_dependencies(example_server ssdbus)
 add_dependencies(example_register ssdbus)
+add_dependencies(example_client ssdbus)

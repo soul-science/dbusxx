@@ -101,6 +101,11 @@ public:
         return mStatus.isError() ? mStatus : mLooper.status();
     }
 
+protected:
+    Session& session() {
+        return mSession;
+    }
+
 private:
     void init() {
         if (mInited || mStatus.isError()) {
