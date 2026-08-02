@@ -391,6 +391,12 @@ Status exitContainer(RawBusMessagePtr aMsg) {
     );
 }
 
+Status skip(RawBusMessagePtr aMsg, const char* aTypes) {
+    return RawErrorConvert::makeStatus(
+        sd_bus_message_skip(aMsg, aTypes)
+    );
+}
+
 template<typename T>
 Status popBasic(RawBusMessagePtr aMsg, char aType, T& aValue) {
     if (!aMsg) {

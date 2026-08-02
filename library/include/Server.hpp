@@ -106,6 +106,10 @@ protected:
         return mSession;
     }
 
+    Looper& looper() {
+        return mLooper;
+    }
+
 private:
     void init() {
         if (mInited || mStatus.isError()) {

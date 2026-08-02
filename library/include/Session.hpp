@@ -70,7 +70,7 @@ public:
         }
 
         template<typename T>
-        RegisterBuilder& addProperty(std::string_view aName, T aValue) {
+        RegisterBuilder& addProperty(std::string_view aName, T aValue, bool writable = true) {
             using wrapper = Method::PropertyWrapper<T>;
             std::string sig = wrapper::signature();
             
@@ -80,7 +80,7 @@ public:
             
             reg.addProperty(aName, sig,
                 &wrapper::onGetter, &wrapper::onSetter,
-                mProperties[aName.data()].data.get());
+                mProperties[aName.data()].data.get(), writable);
 
             return *this;
         }
@@ -224,7 +224,7 @@ public:
     Reply<Ret> callSync(std::string_view aService, std::string_view aPath,
         std::string_view aIface, std::string_view aMethod, const Args&... aArgs) {
         return Reply<Ret>(
-            Method::callSync<Ret, Args...>(
+            Method::callSync<>(
                 mPrivate.get(), TimeoutUsec, aService, aPath, aIface, aMethod, aArgs...
             ));
     }
@@ -233,7 +233,7 @@ public:
     PendingReply<Ret> callAsync(std::string_view aService, std::string_view aPath,
         std::string_view aIface, std::string_view aMethod, const Args&... aArgs) {
         return PendingReply<Ret>(
-            Method::callAsync<Ret, Args...>(
+            Method::callAsync<>(
                 mPrivate.get(), TimeoutUsec, aService, aPath, aIface, aMethod, aArgs...
         ));
     }
@@ -245,7 +245,7 @@ public:
             "callAsync callback must be callable as: void(Reply<Ret>)");
         using Call = std::function<void(Reply<Ret>)>;
         auto rep = std::make_shared<PendingReply<Ret>>(
-            Method::callAsync<Ret, Args...>(mPrivate.get(), TimeoutUsec,
+            Method::callAsync<>(mPrivate.get(), TimeoutUsec,
                 aService, aPath, aIface, aMethod, aArgs...)
         );
 
@@ -334,6 +334,30 @@ public:
 
         (*p).onChanged(std::forward<std::function<void(const T&)>>(aCallback));
         return Status(StatusCode::SUCCESS);
+    }
+
+    template<typename Ret>
+    Reply<Ret> getRemoteProperty(std::string_view aService, std::string_view aPath,
+        std::string_view aIface, std::string_view aProp) {
+        return Reply<Ret>(
+            Method::getRemoteProperty(
+                mPrivate.get(), aService, aPath, aIface, aProp
+        ));
+    }
+
+    template<typename T>
+    Status setRemoteProperty(std::string_view aService, std::string_view aPath,
+        std::string_view aIface, std::string_view aProp, const T& aValue) {
+        return Method::setRemoteProperty(
+            mPrivate.get(), aService, aPath, aIface, aProp, aValue);
+    }
+
+    template<typename Callback>
+    Status onRemotePropertyChanged(std::string_view aService, std::string_view aPath,
+        std::string_view aIface, std::string_view aProp, Callback&& aCallback) {
+        return Method::onRemotePropertyChanged(
+            mPrivate.get(), aService, aPath, aIface, aProp, std::forward<Callback>(aCallback)
+        );
     }
 
 private:

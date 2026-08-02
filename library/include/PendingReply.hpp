@@ -15,7 +15,7 @@ namespace SSDbus {
 
 template<typename Ret>
 class PendingReply {
-    static_assert(isValidBasicArgs<Ret>(), "Unsupported value type");
+    static_assert(isValidArgs<Ret>(), "Unsupported value type");
 public:
     PendingReply() = default;
 

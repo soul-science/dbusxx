@@ -2,7 +2,6 @@
 #define SSDBUS_LOOPER_PRIVATE_HPP
 
 #include <deque>
-#include <fcntl.h>
 #include <functional>
 #include <mutex>
 #include <sys/eventfd.h>
@@ -15,6 +14,7 @@ namespace SSDbus {
 namespace Private {
 
 class LooperPrivate {
+    static constexpr uint64_t EVENT_FD_SIGNAL { 1 };
 public:
     LooperPrivate() {}
 
@@ -45,12 +45,9 @@ public:
             mExitSrc = nullptr;
         }
 
-        if (mExitFds[0] >= 0) {
-            close(mExitFds[0]);
-        }
-
-        if (mExitFds[1] >= 0) {
-            close(mExitFds[1]);
+        if (mExitFd >= 0) {
+            close(mExitFd);
+            mExitFd = -1;
         }
     }
 
@@ -79,9 +76,7 @@ public:
     }
 
     void stop() {
-        if (__safeWrite(mExitFds[1], "\0", 1) < 0) {
-            mStatus = Adaptor::RawErrorConvert::fromErrno(errno);
-        }
+        __safeWrite(mExitFd, &EVENT_FD_SIGNAL, sizeof(EVENT_FD_SIGNAL));
     }
 
     void post(std::function<void()> aTask){
@@ -91,8 +86,7 @@ public:
         }
 
         //! Write eventfd to awake looper
-        uint64_t one = 1;
-        __safeWrite(mWakeFd, &one, sizeof(one));
+        __safeWrite(mWakeFd, &EVENT_FD_SIGNAL, sizeof(EVENT_FD_SIGNAL));
     }
 
     bool isOwnerThread() const {
@@ -139,19 +133,15 @@ private:
     }
 
     Status bindExitEntry() {
-        if (pipe(mExitFds) < 0) {
+        mExitFd = eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC);
+        if (mExitFd < 0) {
             return Adaptor::RawErrorConvert::fromErrno(errno);
         }
 
-        //! Set the reading end to non blocking
-        fcntl(mExitFds[0], F_SETFL, O_NONBLOCK);
-        //! Set the seting end to non blocking
-        fcntl(mExitFds[1], F_SETFL, O_NONBLOCK);
-
-        return Adaptor::RawEvent::addIO(mEvent.get(), mExitSrc, mExitFds[0], EPOLLIN,
+        return Adaptor::RawEvent::addIO(mEvent.get(), mExitSrc, mExitFd, EPOLLIN,
             [] (Adaptor::RawBusEventSrcPtr, int aFd, uint32_t aRevent, void *aData) -> int {
-                char buf[1];
-                if (__safeRead(aFd, buf, 1) <= 0) {
+                uint64_t cnt;
+                if (__safeRead(aFd, &cnt, sizeof(cnt)) <= 0) {
                     return -errno;
                 }
 
@@ -196,7 +186,7 @@ private:
     SessionPrivate* mSession;
     Adaptor::RawEventSharePtr mEvent { nullptr, StatusCode::UNKNOWN_ERROR };
     Adaptor::RawBusEventSrcPtr mExitSrc { nullptr };
-    int mExitFds[2];
+    int mExitFd { -1 };
 
     std::mutex mTaskMutex;
     std::deque<std::function<void()>> mTasks;

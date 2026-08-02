@@ -3,26 +3,14 @@
 #define SSDBUS_DBUS_ARGS_HPP
 
 #include <array>
+#include <map>
+#include <unordered_map>
 #include <string>
 #include <string_view>
 #include <type_traits>
 #include <vector>
 
 namespace SSDbus {
-
-template<typename T>
-constexpr bool isValidBasicArgs() {
-    using R = std::decay_t<T>;
-    return std::is_integral_v<R>
-        || std::is_floating_point_v<R>
-        || std::is_same_v<R, bool>
-        || std::is_same_v<R, const char*>
-        || std::is_same_v<R, char*>
-        || std::is_same_v<R, std::string>
-        || std::is_same_v<R, std::string_view>;
-}
-
-
 template<typename T>
 struct isArray : std::false_type {};
 
@@ -40,6 +28,10 @@ struct isSpecializationOf<Template<Args...>, Template> : std::true_type {};
 
 template<typename T>
 inline constexpr bool isVectorV = isSpecializationOf<T, std::vector>::value;
+
+template<typename T>
+inline constexpr bool isMapV = isSpecializationOf<T, std::map>::value
+    || isSpecializationOf<T, std::unordered_map>::value;
 
 template<typename T>
 struct BasicSignature {
@@ -142,9 +134,33 @@ std::string getSignature() {
     else if constexpr (isVectorV<R> || isArrayV<R>) {
         return "a" + getSignature<typename R::value_type>();
     }
+    else if constexpr (isMapV<R>) {
+        std::string s;
+        s.push_back('a');
+        s.push_back('{');
+        s.append(getSignature<typename R::key_type>());
+        s.append(getSignature<typename R::mapped_type>());
+        s.push_back('}');
+        return s;
+    }
     else {
         return std::string(1, BasicSignature<R>::value);
     }
+}
+
+template<typename T>
+constexpr bool isValidArgs() {
+    using R = std::decay_t<T>;
+    return std::is_integral_v<R>
+        || std::is_floating_point_v<R>
+        || std::is_same_v<R, bool>
+        || std::is_same_v<R, const char*>
+        || std::is_same_v<R, char*>
+        || std::is_same_v<R, std::string>
+        || std::is_same_v<R, std::string_view>
+        || isVectorV<R>
+        || isArrayV<R>
+        || isMapV<R>;
 }
 
 template<typename T>

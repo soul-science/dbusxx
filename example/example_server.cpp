@@ -16,6 +16,7 @@
 #include <condition_variable>
 #include <csignal>
 #include <iostream>
+#include <map>
 #include <mutex>
 #include <string>
 #include <string_view>
@@ -138,6 +139,41 @@ public:
     }
     SSDBUS_METHOD(testMultiArgs)
 
+    // ─ Map 读写方法 ─
+
+    // 读取 map: echo 回显 int map
+    std::map<std::string, int32_t> testMapRead(
+        const std::map<std::string, int32_t>& m) {
+        std::cout << "[server] testMapRead: { ";
+        for (const auto& [k, v] : m)
+            std::cout << k << ":" << v << " ";
+        std::cout << "}" << std::endl;
+        return m;
+    }
+    SSDBUS_METHOD(testMapRead)
+
+    // 写入 map: 接收 string→string map
+    void testMapWrite(const std::map<std::string, std::string>& m) {
+        std::cout << "[server] testMapWrite: { ";
+        for (const auto& [k, v] : m)
+            std::cout << k << ":\"" << v << "\" ";
+        std::cout << "}" << std::endl;
+    }
+    SSDBUS_METHOD(testMapWrite)
+
+    // 嵌套 map: map<string, vector<int>>
+    void testMapNested(
+        const std::map<std::string, std::vector<int>>& m) {
+        std::cout << "[server] testMapNested: { ";
+        for (const auto& [k, v] : m) {
+            std::cout << k << ":[";
+            for (auto x : v) std::cout << x << ",";
+            std::cout << "] ";
+        }
+        std::cout << "}" << std::endl;
+    }
+    SSDBUS_METHOD(testMapNested)
+
     // ─ 信号触发方法 ─
 
     // 同线程 emit: 由 D-Bus 调用触发，在事件循环线程内执行
@@ -160,6 +196,25 @@ public:
     // ─ 信号声明 ─
 
     SSDBUS_SIGNAL(clear, int, int)
+
+    // ─ 属性 ─
+    // RO: 只读属性，外部只能 Get 不能 Set
+    SSDBUS_PROPERTY_RO(serverName, std::string, std::string("demo-server"))
+    // RW: 读写属性，Get / Set 均可
+    SSDBUS_PROPERTY_RW(version, int32_t, 1)
+    SSDBUS_PROPERTY_RW(description, std::string, std::string("demo"))
+
+    //! 注册本地属性变更监听（供外部 main 调用）
+    void listenVersion() {
+        session().onLocalPropertyChanged<int32_t>("version",
+            [this](const int32_t& v) {
+                std::cout << "[server] version changed: " << v << std::endl;
+                mVerChanged = true;
+                mNewVer = v;
+            });
+    }
+    bool mVerChanged { false };
+    int32_t mNewVer { 0 };
 
     // ─ 监听 DBus 总线信号 ─
 
@@ -298,6 +353,111 @@ int main() {
                                      100, std::string("multi"),
                                      std::vector<double>{1.1, 2.2});
         TEST("testMultiArgs", !r.isError());
+    }
+
+    // ④.⑤ Map 读写测试
+    std::cout << "\n=== Step 4.5: Map read/write ===" << std::endl;
+    {
+        // 读取 map: echo 回显
+        std::map<std::string, int32_t> inputMap{
+            {"score", 100}, {"rank", 3}, {"count", 42}};
+        auto r = syncClient.callSync<std::map<std::string, int32_t>>(
+            svc, path, iface, "testMapRead", inputMap);
+        TEST("testMapRead echo", !r.isError() && r.value() == inputMap);
+
+        // 写入 map
+        std::map<std::string, std::string> strMap{
+            {"key1", "val1"}, {"key2", "val2"}};
+        auto r2 = syncClient.callSync(
+            svc, path, iface, "testMapWrite", strMap);
+        TEST("testMapWrite", !r2.isError());
+
+        // 嵌套 map
+        std::map<std::string, std::vector<int>> nestedMap{
+            {"a", {1, 2, 3}}, {"b", {4, 5}}};
+        auto r3 = syncClient.callSync(
+            svc, path, iface, "testMapNested", nestedMap);
+        TEST("testMapNested", !r3.isError());
+    }
+
+    // ④.⑥ 远程属性读取 — getRemoteProperty (RO + RW)
+    std::cout << "\n=== Step 4.6: getRemoteProperty (RO + RW) ===" << std::endl;
+    {
+        // RO: serverName
+        auto r = syncClient.getRemoteProperty<std::string>(
+            svc, path, iface, "serverName");
+        TEST("getRemoteProperty RO string",
+            !r.isError() && r.value() == "demo-server");
+
+        // RW: version
+        auto r2 = syncClient.getRemoteProperty<int32_t>(
+            svc, path, iface, "version");
+        TEST("getRemoteProperty RW int32_t",
+            !r2.isError() && r2.value() == 1);
+
+        // RW: description
+        auto r3 = syncClient.getRemoteProperty<std::string>(
+            svc, path, iface, "description");
+        TEST("getRemoteProperty RW string",
+            !r3.isError() && r3.value() == "demo");
+
+        // 不存在的属性
+        auto r4 = syncClient.getRemoteProperty<int32_t>(
+            svc, path, iface, "nonexistent");
+        TEST("getRemoteProperty nonexistent", r4.isError());
+    }
+
+    // ④.⑦ 远程属性写入 — setRemoteProperty (RW 成功, RO 失败)
+    std::cout << "\n=== Step 4.7: setRemoteProperty (RW OK, RO fail) ===" << std::endl;
+    {
+        // RW: 写入 version
+        auto st = syncClient.setRemoteProperty<int32_t>(
+            svc, path, iface, "version", 99);
+        TEST("setRemoteProperty RW int32_t", st.isSuccess());
+        auto r = syncClient.getRemoteProperty<int32_t>(
+            svc, path, iface, "version");
+        TEST("getRemoteProperty after set RW",
+            !r.isError() && r.value() == 99);
+
+        // RW: 写入 description
+        auto st2 = syncClient.setRemoteProperty<std::string>(
+            svc, path, iface, "description", std::string("updated"));
+        TEST("setRemoteProperty RW string", st2.isSuccess());
+        auto r2 = syncClient.getRemoteProperty<std::string>(
+            svc, path, iface, "description");
+        TEST("getRemoteProperty after set RW",
+            !r2.isError() && r2.value() == "updated");
+
+        // RO: 尝试写入 serverName 应失败
+        auto st3 = syncClient.setRemoteProperty<std::string>(
+            svc, path, iface, "serverName", std::string("hack"));
+        TEST("setRemoteProperty RO should fail", st3.isError());
+
+        // RO: 确认 serverName 未被修改
+        auto r3 = syncClient.getRemoteProperty<std::string>(
+            svc, path, iface, "serverName");
+        TEST("getRemoteProperty RO unchanged",
+            !r3.isError() && r3.value() == "demo-server");
+
+        // 不存在的属性
+        auto st4 = syncClient.setRemoteProperty<int32_t>(
+            svc, path, iface, "nonexistent", 42);
+        TEST("setRemoteProperty nonexistent", st4.isError());
+    }
+
+    // ④.⑧ 本地属性变更监听（服务端侧）
+    std::cout << "\n=== Step 4.8: Local property change listener ===" << std::endl;
+    {
+        server.listenVersion();
+
+        auto st = syncClient.setRemoteProperty<int32_t>(
+            svc, path, iface, "version", 77);
+        TEST("setRemoteProperty trigger", st.isSuccess());
+
+        // 等待属性变更回调（在事件循环线程中执行）
+        std::this_thread::sleep_for(std::chrono::milliseconds(200));
+        TEST("onLocalPropertyChanged fired",
+            server.mVerChanged && server.mNewVer == 77);
     }
 
     // ⑤ 启动客户端事件循环（绑定 asyncClient，不与 syncClient 的 fd 冲突）

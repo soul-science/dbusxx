@@ -27,7 +27,8 @@ class VTableRegistrar {
     enum class Type : uint8_t {
         METHOD = 0,
         SIGNAL,
-        PROPERTY
+        PROPERTY_RO,
+        PROPERTY_RW
     };
 
     struct VTableEntry {
@@ -70,11 +71,12 @@ public:
     }
 
     VTableRegistrar& addProperty(std::string_view aProperty, std::string_view aInput,
-        Adaptor::RawBusPropertyGetter aGetter, Adaptor::RawBusPropertySetter aSetter, void* aData) {
+        Adaptor::RawBusPropertyGetter aGetter, Adaptor::RawBusPropertySetter aSetter, void* aData, bool writable = true) {
         mEntries.push_back({
             std::string(aProperty),
             std::string(aInput),
-            "", nullptr, aGetter, aSetter, aData, Type::PROPERTY
+            "", nullptr, aGetter, aSetter, aData,
+            writable ? Type::PROPERTY_RW : Type::PROPERTY_RO
         });
         return *this;
     }
@@ -97,9 +99,20 @@ public:
                     item = SD_BUS_SIGNAL(ctx->name.c_str(), ctx->input.c_str(), 0);
                     break;
                 }
-                case Type::PROPERTY: {
-                    item = SD_BUS_WRITABLE_PROPERTY(ctx->name.c_str(),
-                        ctx->input.c_str(), entry.getter, entry.setter, 0, 0);
+                case Type::PROPERTY_RO: {
+                    item = SD_BUS_PROPERTY(
+                        ctx->name.c_str(), ctx->input.c_str(),
+                        entry.getter, 0,
+                        SD_BUS_VTABLE_PROPERTY_EMITS_CHANGE
+                    );
+                    break;
+                }
+                case Type::PROPERTY_RW: {
+                    item = SD_BUS_WRITABLE_PROPERTY(
+                        ctx->name.c_str(), ctx->input.c_str(),
+                        entry.getter, entry.setter, 0,
+                        SD_BUS_VTABLE_PROPERTY_EMITS_CHANGE
+                    );
                     break;
                 }
                 default:

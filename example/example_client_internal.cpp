@@ -1,6 +1,6 @@
 /****************************************************************************
- * example_client.cpp
- * 展示 Client 类用法（类似 QDBusInterface）
+ * example_client_internal.cpp
+ * 展示 Client 类用法（自管模式：内部创建 Looper + Session + thread）
  *   callSync / callAsync / listenSignal / 信号触发 / 跨线程 emit
  *
  * 启动方式: 先启动 example_server，再启动本程序
@@ -14,6 +14,7 @@
 #include <condition_variable>
 #include <csignal>
 #include <iostream>
+#include <map>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -63,7 +64,24 @@ public:
     }
     SSDBUS_METHOD(shutdown)
 
+    SSDBUS_PROPERTY_RO(serverName, std::string, std::string("demo-server"))
+    SSDBUS_PROPERTY_RW(version, int32_t, 1)
+    SSDBUS_PROPERTY_RW(description, std::string, std::string("demo"))
+
     SSDBUS_SIGNAL(clear, int, int)
+
+    //! 注册本地属性变更监听
+    void listenVersion() {
+        session().onLocalPropertyChanged<int32_t>("version",
+            [this](const int32_t& v) {
+                std::cout << "[server] version property changed: " << v << std::endl;
+                mVerChanged = true;
+                mNewVer = v;
+            });
+    }
+
+    bool mVerChanged { false };
+    int32_t mNewVer { 0 };
 };
 
 // ── 同步辅助 ────────────────────────────────────────────────────────────
@@ -138,6 +156,85 @@ int main() {
     {
         auto r = c.callSync("testMultiArgs", 100, std::string("multi"));
         TEST("testMultiArgs", !r.isError());
+    }
+
+    // ④.⑤ 远程属性读取 — getProperty (RO + RW)
+    std::cout << "\n=== Step 4.5: getProperty (RO + RW) ===" << std::endl;
+    {
+        // RO: serverName
+        auto r = c.getProperty<std::string>("serverName");
+        TEST("getProperty RO string",
+            !r.isError() && r.value() == "demo-server");
+
+        // RW: version
+        auto r2 = c.getProperty<int32_t>("version");
+        TEST("getProperty RW int32_t", !r2.isError() && r2.value() == 1);
+
+        // RW: description
+        auto r3 = c.getProperty<std::string>("description");
+        TEST("getProperty RW string",
+            !r3.isError() && r3.value() == "demo");
+
+        // 不存在的属性
+        auto r4 = c.getProperty<int32_t>("nonexistent");
+        TEST("getProperty nonexistent", r4.isError());
+    }
+
+    // ④.⑥ 远程属性写入 — setProperty (RW OK, RO fail)
+    std::cout << "\n=== Step 4.6: setProperty (RW OK, RO fail) ===" << std::endl;
+    {
+        // RO: 尝试写入 serverName 应失败
+        auto st = c.setProperty<std::string>("serverName", std::string("hack"));
+        TEST("setProperty RO should fail", st.isError());
+        // RO: 确认值未变
+        auto r = c.getProperty<std::string>("serverName");
+        TEST("getProperty RO unchanged",
+            !r.isError() && r.value() == "demo-server");
+
+        // RW: 正常写入 version
+        auto st2 = c.setProperty<int32_t>("version", 99);
+        TEST("setProperty RW int32_t", st2.isSuccess());
+        auto r2 = c.getProperty<int32_t>("version");
+        TEST("getProperty RW after set", !r2.isError() && r2.value() == 99);
+
+        // RW: 正常写入 description
+        auto st3 = c.setProperty<std::string>("description", std::string("updated"));
+        TEST("setProperty RW string", st3.isSuccess());
+        auto r3 = c.getProperty<std::string>("description");
+        TEST("getProperty RW after set", !r3.isError() && r3.value() == "updated");
+
+        // 不存在的属性
+        auto st4 = c.setProperty<int32_t>("nonexistent", 42);
+        TEST("setProperty nonexistent", st4.isError());
+    }
+
+    // ④.⑦ 本地属性变更监听
+    std::cout << "\n=== Step 4.7: local property changed ===" << std::endl;
+    server.listenVersion();
+    {
+        auto st = c.setProperty<int32_t>("version", 77);
+        TEST("setProperty v=77", st.isSuccess());
+        TEST("onLocalPropertyChanged fired", server.mVerChanged && server.mNewVer == 77);
+    }
+
+    // ④.⑧ 远程属性变更监听 — onPropertyChanged
+    std::cout << "\n=== Step 4.8: remote property changed ===" << std::endl;
+    {
+        SyncFlag propChanged;
+        std::string changedValue;
+        Status st2 = c.onPropertyChanged("description",
+            [&](const std::string& v) {
+                std::cout << "  [client] description changed: " << v << std::endl;
+                changedValue = v;
+                propChanged.set();
+            });
+        TEST("onPropertyChanged register", st2.isSuccess());
+
+        auto st = c.setProperty<std::string>("description", std::string("remote-changed"));
+        TEST("setProperty trigger", st.isSuccess());
+        // 信号在 mAsyncPtr 的事件循环中派发，等待一下
+        propChanged.wait();
+        TEST("onPropertyChanged fired", changedValue == "remote-changed");
     }
 
     // ⑤ 信号监听

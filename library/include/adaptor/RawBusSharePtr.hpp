@@ -67,12 +67,12 @@ Status sendMessage(RawBusPtr aBus, RawBusMessagePtr aMsg) {
     return RawErrorConvert::makeStatus(sd_bus_send(aBus, aMsg, nullptr));
 }
 
-Status sendMessage(RawBusPtr aBus, RawBusMessagePtr aMsg, std::string_view aDestination) {
+Status sendMessage(RawBusPtr aBus, RawBusMessagePtr aMsg, std::string_view aDest) {
     if (!aBus || !aMsg) {
         return Status(StatusCode::INVALID_ARG);
     }
 
-    return RawErrorConvert::makeStatus(sd_bus_send_to(aBus, aMsg, aDestination.data(), nullptr));
+    return RawErrorConvert::makeStatus(sd_bus_send_to(aBus, aMsg, aDest.data(), nullptr));
 }
 
 Status callSync(RawBusPtr aBus, RawBusMessagePtr aMsg,

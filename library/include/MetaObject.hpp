@@ -15,7 +15,8 @@ class MetaObject {
     enum class EntryType : uint8_t {
         Method,
         Signal,
-        SignalListen
+        SignalListen,
+        Property
     };
 
     struct MethodEntry {
@@ -71,6 +72,32 @@ protected:
                 auto* self = static_cast<Self*>(aObj);                                      \
                 auto* session = static_cast<::SSDbus::Session*>(aSession);                  \
                 session->listenSignal(sender, path, iface, signal, self, &Self::method);    \
+            }                                                                               \
+        });                                                                                 \
+        return 0;                                                                           \
+    }();
+
+#define SSDBUS_PROPERTY_RO(name, Type, initValue)                                           \
+    static inline int _ssdbus_reg_prop_##name = [] {                                        \
+        Self::registry().push_back({                                                        \
+            #name,                                                                          \
+            3,                                                                              \
+            [](void* aBuilder, void* aObj) -> void {                                        \
+                auto* builder = static_cast<::SSDbus::Session::RegisterBuilder*>(aBuilder); \
+                builder->addProperty<Type>(#name, initValue, false);                        \
+            }                                                                               \
+        });                                                                                 \
+        return 0;                                                                           \
+    }();
+
+#define SSDBUS_PROPERTY_RW(name, Type, initValue)                                           \
+    static inline int _ssdbus_reg_prop_##name = [] {                                        \
+        Self::registry().push_back({                                                        \
+            #name,                                                                          \
+            3,                                                                              \
+            [](void* aBuilder, void* aObj) -> void {                                        \
+                auto* builder = static_cast<::SSDbus::Session::RegisterBuilder*>(aBuilder); \
+                builder->addProperty<Type>(#name, initValue, true);                         \
             }                                                                               \
         });                                                                                 \
         return 0;                                                                           \

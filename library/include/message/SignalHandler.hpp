@@ -2,8 +2,9 @@
 #define SSDBUS_SIGNAL_HANDLER_HPP
 
 #include "adaptor/RawCommon.hpp"
-#include "method/FunctionTrait.hpp"
 #include "adaptor/DbusArgs.hpp"
+#include "method/FunctionTrait.hpp"
+#include "message/MessagePrivate.hpp"
 
 namespace SSDbus {
 namespace Private {
@@ -13,14 +14,13 @@ struct SignalHandler {
     Callback callback;
     Adaptor::RawBusSlotPtr slot { nullptr };
 
+    using traits = Method::FuncTrait<std::decay_t<Callback>>;
+
     SignalHandler(Callback aCb) : callback(std::move(aCb)) {}
 
     static int onSignal(Adaptor::RawBusMessagePtr aMsg, void* aUsr, Adaptor::RawBusErrorPtr) {
         auto self = static_cast<SignalHandler*>(aUsr);
         Private::MessagePrivate message(Adaptor::RawMessageSharePtr(aMsg, false));
-
-        using callbackType = std::decay_t<Callback>;
-        using traits = Method::FuncTrait<callbackType>;
 
         auto impl = [&]<typename... Args>(std::tuple<Args...>*) {
             if constexpr (traits::argSize) {

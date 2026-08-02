@@ -1816,3 +1816,122 @@ session.callSync<std::string>(svc, path, iface, "method", "hello");
 // 指定 timeout
 session.callSync<std::string, 5'000'000>(svc, path, iface, "method", "hello");
 ```
+
+---
+
+## 33. `thread_local weak_ptr` + `shared_ptr` 引用计数池（2026-08-02）
+
+### 33.1 问题场景
+
+需要一个池（pool）在不同对象间共享，满足三个需求：
+1. **每个线程独立一份**（不同线程不共享）
+2. **同线程多对象复用同一份**（不重复创建）
+3. **最后使用者析构时自动清理**（非线程退出时清理）
+
+### 33.2 为什么不能用裸 `thread_local` 对象？
+
+```cpp
+// ❌ 达不到需求 3
+thread_local Pool t_pool;  // 线程退出才析构 —— 太晚了！
+
+// 线程退出时 t_pool 析构，但此时 main 已返回，
+// D-Bus daemon 可能已停，清理操作会异常
+```
+
+### 33.3 为什么不能用裸 `thread_local shared_ptr`？
+
+```cpp
+// ❌ 达不到需求 3
+thread_local auto t_pool = std::make_shared<Pool>();
+// shared_ptr 本身是 thread_local → 线程退出才释放最后一个引用
+// → refcount 永远 ≥ 1 → Pool 永远在线程退出时才析构
+```
+
+### 33.4 解决方案：`thread_local weak_ptr` + 每对象持 `shared_ptr`
+
+```cpp
+// TLS 存 weak_ptr —— 不增加引用计数，不阻止析构
+static std::weak_ptr<Pool>& poolWeak() {
+    thread_local std::weak_ptr<Pool> sWeak;
+    return sWeak;
+}
+
+// get-or-create：weak_ptr 过期 → 新建；否则复用
+static std::shared_ptr<Pool> getPool() {
+    auto& weak = poolWeak();
+    auto sp = weak.lock();               // 尝试提升
+    if (!sp) {
+        weak = sp = std::make_shared<Pool>();  // 新建，更新 weak
+    }
+    return sp;
+}
+
+// 每个 Client 持有一个 shared_ptr
+class Client {
+    std::shared_ptr<Pool> mPool{getPool()};  // 构造时获取
+    // 析构时 mPool 自动析构 → refcount--
+};
+
+// 生命周期：
+// Client A 构造 → Pool refcount=1
+// Client B 构造 → Pool refcount=2  (同一个 Pool)
+// Client C 构造 → Pool refcount=3
+// A 析构 → refcount=2
+// B 析构 → refcount=1
+// C 析构 → refcount=0 → Pool 析构 ✅ 最后一个 Client 释放即清理
+// 线程退出 → weak_ptr 析构（此时 Pool 早已清理） ✅
+```
+
+### 33.5 关键机制
+
+| 角色 | 作用 |
+|------|------|
+| `thread_local weak_ptr` | 记录本线程的池，不阻止析构，不增加引用计数 |
+| `shared_ptr` 成员 | 每对象持有引用，保证池在需要时存活 |
+| `weak_ptr.lock()` | 原子检查 + 提升，判断池是否已析构 |
+| `shared_ptr` 析构 | 引用计数归零时自动销毁池（调用 `~Pool()`） |
+
+### 33.6 实际应用（Client.hpp）
+
+```cpp
+struct SyncPool {
+    Session session;
+    explicit SyncPool(bool isSys) : session(isSys) {}
+};
+
+struct AsyncPool {
+    Session session;
+    Looper looper;
+    std::thread thread;
+    explicit AsyncPool(bool isSys)
+        : session(isSys), looper(session)
+        , thread(&Looper::run, &looper) {}
+    ~AsyncPool() { looper.stop(); thread.join(); }  // 析构时优雅关闭
+};
+
+// Client 成员
+std::shared_ptr<SyncPool>  mSyncPool;   // 持有引用
+std::shared_ptr<AsyncPool> mAsyncPool;  // 持有引用
+
+// 析构只需 = default —— shared_ptr 自动管理一切
+~Client() = default;
+```
+
+### 33.7 适用场景
+
+| 场景 | 适合？ |
+|------|--------|
+| 同线程多对象需共享重量级资源（连接、线程、缓存） | ✅ |
+| 资源需在最后使用者离开时立即释放（非延迟到线程退出） | ✅ |
+| 不同线程需完全隔离 | ✅ |
+| 需跨线程共享 | ❌ 用全局 `shared_ptr` + mutex |
+
+### 33.8 与裸 `thread_local` 的对比
+
+| | `thread_local T` | `thread_local weak_ptr<T>` + `shared_ptr` |
+|---|---|---|
+| 创建时机 | 首次访问 | 首次 `getPool()` |
+| 析构时机 | 线程退出 | 最后 `shared_ptr` 析构 |
+| 同线程共享 | 天然（唯一实例） | 天然（weak_ptr 指向同一实例） |
+| 引用计数 | 无 | 有，精确控制生命周期 |
+| 内存占用 | 1 实例/线程 | 1 实例 + 1 weak_ptr + N shared_ptr/线程 |

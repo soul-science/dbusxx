@@ -41,6 +41,26 @@ public:
 
         Status st;
         using rawType = std::decay_t<T>;
+
+        std::string nextType = Adaptor::RawMessage::nextType(mRawMsg.get());
+        if (nextType.front() == SD_BUS_TYPE_VARIANT) {
+            st = Adaptor::RawMessage::enterContainer(
+                mRawMsg.get(), SD_BUS_TYPE_VARIANT,
+                getSignature<rawType>().c_str()
+            );
+
+            if (st.isError()) {
+                return st;
+            }
+
+            st = read(aVal);
+            if (st.isError()) {
+                return st;
+            }
+
+            return Adaptor::RawMessage::exitContainer(mRawMsg.get());
+        }
+
         if constexpr (std::is_same_v<rawType, std::string>) {
             const char* str;
             st = Adaptor::RawMessage::popBasic(
@@ -50,7 +70,7 @@ public:
         else if constexpr (isVectorV<rawType>) {
             using ElemType = typename rawType::value_type;
             st = Adaptor::RawMessage::enterContainer(
-                mRawMsg.get(), 'a', getSignature<ElemType>().c_str());
+                mRawMsg.get(), SD_BUS_TYPE_ARRAY, getSignature<ElemType>().c_str());
             if (st.isError()) {
                 return st;
             }
@@ -70,7 +90,7 @@ public:
         else if constexpr (isArrayV<rawType>) {
             using ElemType = typename rawType::value_type;
             st = Adaptor::RawMessage::enterContainer(
-                mRawMsg.get(), 'a', getSignature<ElemType>().c_str());
+                mRawMsg.get(), SD_BUS_TYPE_ARRAY, getSignature<ElemType>().c_str());
             if (st.isError()) {
                 return st;
             }
@@ -95,6 +115,44 @@ public:
             if (idx != size) {
                 return Status(StatusCode::INVALID_ARG);
             }
+        }
+        else if constexpr (isMapV<rawType>) {
+            using keyType = typename rawType::key_type;
+            using valueType = typename rawType::mapped_type;
+            st = Adaptor::RawMessage::enterContainer(
+                mRawMsg.get(), SD_BUS_TYPE_ARRAY,
+                nextType.substr(1).c_str());
+            if (st.isError()) {
+                return st;
+            }
+
+            while (!Adaptor::RawMessage::isEnd(mRawMsg.get(), false)) {
+                st = Adaptor::RawMessage::enterContainer(
+                    mRawMsg.get(), SD_BUS_TYPE_DICT_ENTRY, nullptr);
+                if (st.isError()) {
+                    return st;
+                }
+
+                keyType key{};
+                st = read(key);
+                if (st.isError()) {
+                    return st;
+                }
+
+                valueType val{};
+                st = read(val);
+                if (st.isError()) {
+                    return st;
+                }
+
+                aVal[key] = std::move(val);
+                st = Adaptor::RawMessage::exitContainer(mRawMsg.get());
+                if (st.isError()) {
+                    return st;
+                }
+            }
+
+            st = Adaptor::RawMessage::exitContainer(mRawMsg.get());
         }
         else {
             st = Adaptor::RawMessage::popBasic(
@@ -160,13 +218,57 @@ public:
         else if constexpr (isVectorV<rawType> || isArrayV<rawType>) {
             using ElemType = typename rawType::value_type;
             st = Adaptor::RawMessage::openContainer(
-                mRawMsg.get(), 'a', getSignature<ElemType>().c_str());
+                mRawMsg.get(), SD_BUS_TYPE_ARRAY, getSignature<ElemType>().c_str());
             if (st.isError()) {
                 return st;
             }
 
             for (const auto& elem : aVal) {
                 st = write(elem);
+                if (st.isError()) {
+                    return st;
+                }
+            }
+
+            st = Adaptor::RawMessage::closeContainer(mRawMsg.get());
+        }
+        else if constexpr (isMapV<rawType>) {
+            using keyType = typename rawType::key_type;
+            using valueType = typename rawType::mapped_type;
+            std::string typeBuilder;
+            typeBuilder.append(1, SD_BUS_TYPE_DICT_ENTRY_BEGIN)
+                .append(getSignature<keyType>())
+                .append(getSignature<valueType>())
+                .append(1, SD_BUS_TYPE_DICT_ENTRY_END);
+
+            std::string innerTypeBuilder;
+            innerTypeBuilder.append(getSignature<keyType>())
+                .append(getSignature<valueType>());
+
+            st = Adaptor::RawMessage::openContainer(
+                mRawMsg.get(), SD_BUS_TYPE_ARRAY, typeBuilder.c_str());
+            if (st.isError()) {
+                return st;
+            }
+
+            for (const auto& [key, val] : aVal) {
+                st = Adaptor::RawMessage::openContainer(
+                    mRawMsg.get(), SD_BUS_TYPE_DICT_ENTRY, innerTypeBuilder.c_str());
+                if (st.isError()) {
+                    return st;
+                }
+
+                st = write(key);
+                if (st.isError()) {
+                    return st;
+                }
+
+                st = write(val);
+                if (st.isError()) {
+                    return st;
+                }
+
+                st = Adaptor::RawMessage::closeContainer(mRawMsg.get());
                 if (st.isError()) {
                     return st;
                 }

@@ -12,8 +12,10 @@ class Looper {
 public:
     Looper() = default;
 
-    explicit Looper(const Session& aSession)
-    : mPrivate(std::make_shared<Private::LooperPrivate>(aSession.mPrivate.get())) {}
+    explicit Looper(Session& aSession)
+        : mSession(&aSession)
+        , mPrivate(
+            std::make_shared<Private::LooperPrivate>(aSession.mPrivate.get())) {}
 
     void run() {
         mPrivate->run();
@@ -35,7 +37,12 @@ public:
         return mPrivate->status();
     }
 
+    Session* session() const {
+        return mSession;
+    }
+
 private:
+    Session* mSession {nullptr};
     std::shared_ptr<Private::LooperPrivate> mPrivate { nullptr };
 };
 

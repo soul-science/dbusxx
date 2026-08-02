@@ -13,7 +13,6 @@
 #include "adaptor/RawSlotSharePtr.hpp"
 #include "adaptor/RawBusSharePtr.hpp"
 #include "message/MessagePrivate.hpp" 
-#include "message/SignalHandler.hpp"
 
 namespace SSDbus {
 namespace Private {
@@ -141,7 +140,16 @@ public:
     }
 
     void addSignalHandler(std::shared_ptr<void> aHandler) {
-        mSigHandler.push_back(std::move(aHandler));
+        mSigHandlers.push_back(std::move(aHandler));
+    }
+
+    std::shared_ptr<void> getPropertyHandler(std::string_view aKey) const {
+        auto it = mPropHandlers.find(std::string(aKey));
+        return (it != mPropHandlers.end()) ? it->second : nullptr;
+    }
+
+    void setPropertyHandler(std::string_view aKey, std::shared_ptr<void> aHandler) {
+        mPropHandlers[std::string(aKey)] = std::move(aHandler);
     }
 
 private:
@@ -150,7 +158,8 @@ private:
     MethodMap mRegisteredMethods;
     SignalMap mRegisteredSignals;
     PropertyMap mRegisteredProperties;
-    std::vector<std::shared_ptr<void>> mSigHandler;
+    std::vector<std::shared_ptr<void>> mSigHandlers;
+    std::unordered_map<std::string, std::shared_ptr<void>> mPropHandlers;
 };
 
 }

@@ -12,6 +12,7 @@
 
 #include <array>
 #include <iostream>
+#include <map>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -155,7 +156,83 @@ public:
     }
     SSDBUS_METHOD(testMultiArgs)
 
+    // ─ Map 读写方法 ─
+
+    // 读取 map: echo 回显 int→int map
+    /*
+        busctl call com.example.myservice \
+        /com/example/myservice \
+        com.example.MyService \
+        testMapRead \
+        "a{si}" \
+        2 \
+        "name" 100  \
+        "age" 25 
+    */
+    std::map<std::string, int32_t> testMapRead(
+        const std::map<std::string, int32_t>& m) {
+        std::cout << "[MyService] testMapRead: { ";
+        for (const auto& [k, v] : m)
+            std::cout << k << ":" << v << " ";
+        std::cout << "}" << std::endl;
+        return m;
+    }
+    SSDBUS_METHOD(testMapRead)
+
+    // 写入 map: 接收 string→string map
+    void testMapWrite(const std::map<std::string, std::string>& m) {
+        std::cout << "[MyService] testMapWrite: { ";
+        for (const auto& [k, v] : m)
+            std::cout << k << ":\"" << v << "\" ";
+        std::cout << "}" << std::endl;
+    }
+    SSDBUS_METHOD(testMapWrite)
+
+    //! 嵌套 map: map<string, vector<int>>
+    /*
+        busctl --user call com.example.myservice \
+        /com/example/myservice \
+        com.example.MyService \
+        testMapNested \
+        "a{sai}" \
+        2 \
+        "key1" 3 1 2 3 \
+        "key2" 2 4 5
+
+    //! 属性测试:
+    //!   RO 属性 Get (status):
+    //!     busctl --user get-property com.example.myservice \
+    //!       /com/example/myservice com.example.MyService status
+    //!   RO 属性 Set 应失败:
+    //!     busctl --user set-property com.example.myservice \
+    //!       /com/example/myservice com.example.MyService status s "stopped"
+    //!   RW 属性 Get (version):
+    //!     busctl --user get-property com.example.myservice \
+    //!       /com/example/myservice com.example.MyService version
+    //!   RW 属性 Set:
+    //!     busctl --user set-property com.example.myservice \
+    //!       /com/example/myservice com.example.MyService version i 99
+    */
+    void testMapNested(
+        const std::map<std::string, std::vector<int>>& m) {
+        std::cout << "[MyService] testMapNested: { ";
+        for (const auto& [k, v] : m) {
+            std::cout << k << ":[";
+            for (auto x : v) std::cout << x << ",";
+            std::cout << "] ";
+        }
+        std::cout << "}" << std::endl;
+    }
+    SSDBUS_METHOD(testMapNested)
+
     SSDBUS_SIGNAL(clear, int, int)
+
+    // ─ 属性 ─
+    // RO: 只读属性，外部只能 Get 不能 Set
+    SSDBUS_PROPERTY_RO(status, std::string, std::string("running"))
+    // RW: 读写属性，外部可以 Get 也可以 Set
+    SSDBUS_PROPERTY_RW(version, int32_t, 1)
+    SSDBUS_PROPERTY_RW(description, std::string, std::string("meta-service"))
 };
 
 // ── 监听类：用宏声明信号监听 ─────────────────────────────────────────────
