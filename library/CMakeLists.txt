@@ -2,6 +2,7 @@ project(lib)
 
 set(SOURCES
     src/Utils.cpp
+    src/message/PropertyHandler.cpp
 )
 
 add_library(ssdbus SHARED ${SOURCES})

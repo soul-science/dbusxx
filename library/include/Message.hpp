@@ -75,6 +75,10 @@ public:
         return mPrivate->getStatus().isError();
     }
 
+    Status status() const {
+        return mPrivate->getStatus();
+    }
+
     std::string errorMessage() const {
         return mPrivate->getStatus().message();
     }

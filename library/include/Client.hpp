@@ -105,8 +105,16 @@ public:
 
     template<typename Ret=void, uint64_t TimeoutUsec=0, typename... Args>
     Reply<Ret> callSync(std::string_view aMethod, const Args&... aArgs) {
-        return mSyncPool->session.callSync<Ret, TimeoutUsec>(mInfo.name, mInfo.path, mInfo.interface,
-            aMethod, aArgs...);
+        auto reply = mSyncPool->session.callSync<Ret, TimeoutUsec>(
+            mInfo.name, mInfo.path, mInfo.interface, aMethod, aArgs...);
+        if (isConnectionError(reply.status().code())) {
+            auto st = mSyncPool->session.rebuild();
+            if (st.isSuccess()) {
+                reply = mSyncPool->session.callSync<Ret, TimeoutUsec>(
+                    mInfo.name, mInfo.path, mInfo.interface, aMethod, aArgs...);
+            }
+        }
+        return reply;
     }
 
     template<typename Ret=void, uint64_t TimeoutUsec=0, typename... Args>
@@ -177,16 +185,32 @@ public:
 
     template<typename Ret>
     Reply<Ret> getProperty(std::string_view aProp) {
-        return mSyncPool->session.getRemoteProperty<Ret>(
-            mInfo.name, mInfo.path, mInfo.interface, aProp
-        );
+        Reply<Ret> reply = mSyncPool->session.getRemoteProperty<Ret>(
+            mInfo.name, mInfo.path, mInfo.interface, aProp);
+        if (isConnectionError(reply.status().code())) {
+            auto st = mSyncPool->session.rebuild();
+            if (st.isSuccess()) {
+                reply = mSyncPool->session.getRemoteProperty<Ret>(
+                    mInfo.name, mInfo.path, mInfo.interface, aProp);
+            }
+        }
+
+        return reply;
     }
 
     template<typename T>
     Status setProperty(std::string_view aProp, const T& aValue) {
-        return mSyncPool->session.setRemoteProperty<>(
-            mInfo.name, mInfo.path, mInfo.interface, aProp, aValue
-        );
+        Status st = mSyncPool->session.setRemoteProperty<>(
+            mInfo.name, mInfo.path, mInfo.interface, aProp, aValue);
+        if (isConnectionError(st.code())) {
+            auto st = mSyncPool->session.rebuild();
+            if (st.isSuccess()) {
+                st = mSyncPool->session.setRemoteProperty<>(
+                    mInfo.name, mInfo.path, mInfo.interface, aProp, aValue);
+            }
+        }
+
+        return st;
     }
 
     template<typename Callback>
@@ -238,6 +262,12 @@ private:
         }
 
         return sharePtr;
+    }
+
+    static bool isConnectionError(StatusCode code) {
+        return code == StatusCode::NOT_CONNECTED
+            || code == StatusCode::DISCONNECTED
+            || code == StatusCode::CONN_RESET;
     }
 
     ServiceInfo mInfo;

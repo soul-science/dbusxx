@@ -13,33 +13,52 @@
 #include "adaptor/RawSlotSharePtr.hpp"
 #include "adaptor/RawBusSharePtr.hpp"
 #include "message/MessagePrivate.hpp" 
+#include "adaptor/VTableRegistrar.hpp"
 
 namespace SSDbus {
 namespace Private {
-
-class VTableContext;
 class SessionPrivate {
 public:
     struct MethodInfo {
         std::shared_ptr<void> data;
-        std::unique_ptr<VTableContext> context;
+        std::unique_ptr<Adaptor::VTableContext> context;
     };
 
     struct SignalInfo {
-        std::unique_ptr<VTableContext> context;
+        std::unique_ptr<Adaptor::VTableContext> context;
     };
 
     struct PropertyInfo {
         std::shared_ptr<void> data;
-        std::unique_ptr<VTableContext> context;
+        std::unique_ptr<Adaptor::VTableContext> context;
+    };
+
+    struct SignalHandlerInfo {
+        std::string sender;
+        std::string path;
+        std::string iface;
+        std::string signal;
+        Adaptor::RawBusMessageHandler callback;
+        std::shared_ptr<void> data;
+        Adaptor::RawSlotSharePtr slot;
+    };
+
+    struct PropertyHandlerInfo {
+        Adaptor::RawSlotSharePtr slot;
+        std::shared_ptr<void> handler; 
     };
 
     using MethodMap = std::unordered_map<std::string, MethodInfo>;
     using SignalMap = std::unordered_map<std::string, SignalInfo>;
     using PropertyMap = std::unordered_map<std::string, PropertyInfo>;
+    using PropertyHandlerMap = std::unordered_map<std::string, PropertyHandlerInfo>;
+    using SignalHandlerVector = std::vector<SignalHandlerInfo>;
 
     explicit SessionPrivate(bool aIsSystem)
-        : mRawBus(Adaptor::RawBusSharePtr::make(aIsSystem)) {}
+        : mRawBus(Adaptor::RawBusSharePtr::make(aIsSystem))
+        , mIsSystem(aIsSystem) {
+        setDaemonDeathWatcher();
+    }
 
     SessionPrivate() = default;
 
@@ -47,6 +66,45 @@ public:
         if (mRawBus.get()) {
             Adaptor::RawBus::closeBus(mRawBus.get());
         }
+    }
+
+    Status reconnect() {
+        //! Clear all slots
+        for (auto& [name, info] : mRegisteredMethods) {
+            info.context->slot = Adaptor::RawSlotSharePtr();
+        }
+            
+        for (auto& [name, info] : mRegisteredSignals) {
+            info.context->slot = Adaptor::RawSlotSharePtr();
+        }
+            
+        for (auto& [name, info] : mRegisteredProperties) {
+            info.context->slot = Adaptor::RawSlotSharePtr();
+        }
+            
+        for (auto& inf : mRegisteredSigHandlers) {
+            inf.slot = Adaptor::RawSlotSharePtr();
+        }
+            
+        for (auto& [key, inf] : mRegisteredPropHandlers) {
+            inf.slot = Adaptor::RawSlotSharePtr();
+        }
+
+        if (mRawBus) {
+            Adaptor::RawBus::closeBus(mRawBus.get());
+        }
+
+        mRawBus = Adaptor::RawBusSharePtr::make(mIsSystem);
+        if (!mRawBus) {
+            return Status(StatusCode::NOT_CONNECTED);
+        }
+
+        setDaemonDeathWatcher();
+        if (!mInfo.name.empty()) {
+            return setInfo(mInfo);
+        }
+
+        return Status(StatusCode::SUCCESS);
     }
 
     static bool isValidInfo(const ServiceInfo& aInfo) {
@@ -79,13 +137,20 @@ public:
         return mRegisteredProperties;
     }
 
+    SignalHandlerVector& signalHandlers() {
+        return mRegisteredSigHandlers;
+    }
+
+    PropertyHandlerMap& propertyHandlers() {
+        return mRegisteredPropHandlers;
+    }
+
     Status setInfo(ServiceInfo aInfo) {
         std::cout << "name:" << aInfo.name << ", path:" << aInfo.path << ", interface:" << aInfo.interface << std::endl;
         Status st = Adaptor::RawBus::setUniqueName(mRawBus.get(), aInfo.name.c_str(), 0);
         if (st.isSuccess()) {
             mInfo = aInfo;
-        }
-        else {
+        } else {
             std::cout << "setUniqueName failed, reason:" << st.message() << std::endl;
         }
 
@@ -139,27 +204,38 @@ public:
         Adaptor::RawBus::flushBus(mRawBus.get());
     }
 
-    void addSignalHandler(std::shared_ptr<void> aHandler) {
-        mSigHandlers.push_back(std::move(aHandler));
+    void addSignalHandlerInfo(SignalHandlerInfo aInf) {
+        mRegisteredSigHandlers.push_back(std::move(aInf));
     }
 
     std::shared_ptr<void> getPropertyHandler(std::string_view aKey) const {
-        auto it = mPropHandlers.find(std::string(aKey));
-        return (it != mPropHandlers.end()) ? it->second : nullptr;
+        auto it = mRegisteredPropHandlers.find(std::string(aKey));
+        if (it == mRegisteredPropHandlers.end()) { 
+            return nullptr;
+        }
+
+        return it->second.handler;
     }
 
-    void setPropertyHandler(std::string_view aKey, std::shared_ptr<void> aHandler) {
-        mPropHandlers[std::string(aKey)] = std::move(aHandler);
+    void setPropertyHandlerInfo(std::string_view aKey, PropertyHandlerInfo aInf) {
+        mRegisteredPropHandlers[std::string(aKey)] = std::move(aInf);
     }
 
 private:
+    void setDaemonDeathWatcher() {
+        Adaptor::RawBus::setWatchBind(mRawBus.get(), true);
+        Adaptor::RawBus::setExitOnDisconnect(mRawBus.get(), false);
+        Adaptor::RawBus::setConnectedSignal(mRawBus.get(), true);
+    }
+
     Adaptor::RawBusSharePtr mRawBus { nullptr };
+    bool mIsSystem { false };
     ServiceInfo mInfo;
     MethodMap mRegisteredMethods;
     SignalMap mRegisteredSignals;
     PropertyMap mRegisteredProperties;
-    std::vector<std::shared_ptr<void>> mSigHandlers;
-    std::unordered_map<std::string, std::shared_ptr<void>> mPropHandlers;
+    SignalHandlerVector mRegisteredSigHandlers;
+    PropertyHandlerMap mRegisteredPropHandlers;
 };
 
 }

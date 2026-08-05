@@ -12,7 +12,6 @@ namespace Private {
 template<typename Callback>
 struct SignalHandler {
     Callback callback;
-    Adaptor::RawBusSlotPtr slot { nullptr };
 
     using traits = Method::FuncTrait<std::decay_t<Callback>>;
 

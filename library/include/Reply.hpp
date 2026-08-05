@@ -32,6 +32,10 @@ public:
         return mValue;
     }
 
+    [[nodiscard]] Status status() const {
+        return Message::isError() ? Message::status() : mStatus;
+    }
+
     [[nodiscard]] bool isError() const {
         return mStatus.isError() || Message::isError();
     }

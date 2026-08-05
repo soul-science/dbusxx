@@ -26,6 +26,32 @@ struct FuncTrait<Ret(Cls::*)(Args...) const> : FuncTrait<Ret(*)(Args...)> {};
 template<typename Cls, typename Ret, typename... Args>
 struct FuncTrait<Ret(Cls::*)(Args...) const noexcept> : FuncTrait<Ret(*)(Args...)> {};
 
+template<typename Cls, typename Ret, typename... Args>
+struct FuncTrait<Ret(Cls::*)(Args...) noexcept> : FuncTrait<Ret(*)(Args...)> {};
+
+template<typename Cls, typename Ret, typename... Args>
+struct FuncTrait<Ret(Cls::*)(Args...) &> : FuncTrait<Ret(*)(Args...)> {};
+
+template<typename Cls, typename Ret, typename... Args>
+struct FuncTrait<Ret(Cls::*)(Args...) const &> : FuncTrait<Ret(*)(Args...)> {};
+
+template<typename Cls, typename Ret, typename... Args>
+struct FuncTrait<Ret(Cls::*)(Args...) & noexcept> : FuncTrait<Ret(*)(Args...)> {};
+
+template<typename Cls, typename Ret, typename... Args>
+struct FuncTrait<Ret(Cls::*)(Args...) const & noexcept> : FuncTrait<Ret(*)(Args...)> {};
+
+template<typename Cls, typename Ret, typename... Args>
+struct FuncTrait<Ret(Cls::*)(Args...) &&> : FuncTrait<Ret(*)(Args...)> {};
+
+template<typename Cls, typename Ret, typename... Args>
+struct FuncTrait<Ret(Cls::*)(Args...) const &&> : FuncTrait<Ret(*)(Args...)> {};
+
+template<typename Cls, typename Ret, typename... Args>
+struct FuncTrait<Ret(Cls::*)(Args...)  && noexcept> : FuncTrait<Ret(*)(Args...)> {};
+template<typename Cls, typename Ret, typename... Args>
+struct FuncTrait<Ret(Cls::*)(Args...)  const && noexcept> : FuncTrait<Ret(*)(Args...)> {};
+
 template<typename Ret, typename... Args>
 struct FuncTrait<std::function<Ret(Args...)>> : FuncTrait<Ret(*)(Args...)> {};
 

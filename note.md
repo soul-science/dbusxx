@@ -1935,3 +1935,88 @@ std::shared_ptr<AsyncPool> mAsyncPool;  // 持有引用
 | 同线程共享 | 天然（唯一实例） | 天然（weak_ptr 指向同一实例） |
 | 引用计数 | 无 | 有，精确控制生命周期 |
 | 内存占用 | 1 实例/线程 | 1 实例 + 1 weak_ptr + N shared_ptr/线程 |
+
+---
+
+## 34. D-Bus 重连实现 (P3-3) 及三个 Bug 修复
+
+### 34.1 架构设计
+
+重连采用分层实现：
+
+| 层 | 文件 | 职责 |
+|---|---|---|
+| 连接重建 | `SessionPrivate::reconnect()` | 关闭旧 bus → 创建新 bus → 重新请求 name（服务端） |
+| 资源重注册 | `Reconnect.hpp::reconnectSession()` | 遍历 methods/signals/properties 的 VTableContext 重调 `sd_bus_add_object_vtable`；遍历 signalHandlers/propertyHandlers 重调 `sd_bus_match_signal` |
+| 断线检测 | `LooperPrivate::bindDaemonDisconnectedSignal()` | 监听 `org.freedesktop.DBus.Local.Disconnected` 信号，收到后 `post()` 延迟执行重连 |
+| 客户端懒重连 | `Client::callSync()` | 检测连接错误 → `session.rebuild()` → 重试调用 |
+
+### 34.2 关键数据结构
+
+```cpp
+// Context 存配方 + shared_ptr<void> data 存模板实例 + slot 存注册句柄
+// handler 自身不再持有 slot——slot 在外层 Context 中，支持重连时替换
+struct VTableContext      { vtable; slot; name/input/output; };
+struct SignalHandlerInfo  { sender/path/iface/signal; callback; shared_ptr<void> data; slot; };
+struct PropertyHandlerInfo { slot; shared_ptr<void> handler; };
+```
+
+### 34.3 Bug ①：Disconnected 回调中同步操作 sd_bus → SIGSEGV
+
+**现象**：`systemctl restart dbus` 后服务端直接 SIGSEGV。
+
+**根因**：Disconnected 信号回调在 sd-bus 的消息分发过程中被调用。在此回调内同步执行 `detachEvent → reconnectSession → attachEvent` 替换了 sd-bus 正在使用的 `sd_bus*`。回调 return 后 sd-bus 继续操作已被替换的上下文 → 崩溃。
+
+**修复**：回调中只 `post(doReconnect)`，将重连逻辑推迟到当前消息分发完成后执行。
+
+```
+修复前（同步）：Disconnected 回调 → detach → reconnect → attach → return → 💥
+修复后（异步）：Disconnected 回调 → post(doReconnect) → return → 分发完成 → doReconnect()
+```
+
+### 34.4 Bug ②：旧 bus 释放时 slot double-free
+
+**现象**：PropertyWrapper 内存被覆写为 `0x63`（`counter` 属性值 99），ASan 未检测到 use-after-free。
+
+**根因**：`reconnect()` 中 `closeBus + sd_bus_unref` 释放旧 bus 时，sd-bus 内部会统一释放所有 slot。但 `VTableContext::slot`（`RawSlotSharePtr`）仍持有这些已释放 slot 的指针。后续 `reconnectSession` 替换 slot 时，`RawSlotSharePtr` 析构调用 `sd_bus_slot_unref` → double-free → 堆损坏。
+
+**修复**：在 `closeBus` 之前，先将所有 Context 的 slot 清空（`= Adaptor::RawSlotSharePtr()`），此时旧 bus 还活着，unref 是安全的：
+
+```cpp
+for (auto& [name, info] : mRegisteredMethods)
+    info.context->slot = Adaptor::RawSlotSharePtr();  // 安全 unref
+// ... signals, properties, signalHandlers, propertyHandlers 同理
+closeBus(old_bus);  // sd-bus 统一释放所有 slot
+```
+
+### 34.5 Bug ③：RegisterBuilder::commit() vtable context 错配 → 方法路由错误
+
+**现象**：重连后 `echoInt32` 被路由到 `shutdown` 处理器；`busctl introspect` 查询属性时 SIGSEGV。
+
+**根因**：`RegisterBuilder::commit()` 用 `mEntries` vector 的顺序生成 vtable context（`reg.commit(ctxs)`），但用 `mMethods`/`mSignals`/`mProperties` 这三个 `unordered_map` 的顺序分配 context。`unordered_map` 的迭代顺序 ≠ vector 的顺序，导致每个 method 拿到别的 method 的 vtable。
+
+```
+mEntries 顺序:     [echoInt32, echoString, triggerSignal, shutdown]
+ctxs[]:             [ctxInt32,  ctxString,  ctxTrigger,   ctxShutdown]
+
+mMethods 迭代:      [echoString, shutdown, triggerSignal, echoInt32]  ← hash 序
+ctxs[i++]:           ctxs[0]     ctxs[1]    ctxs[2]        ctxs[3]
+
+结果: echoString → ctxInt32(echoInt32的vtable)  ← 错配！
+      echoInt32  → ctxShutdown(shutdown的vtable) ← 错配！
+```
+
+`counter`(int32_t) 属性的 vtable 被错配到 `name`(std::string) 的 getter → `&self->prop` 把 int32_t 值 `99`(`0x63`) 当字符串指针 → `strlen(0x63)` → SIGSEGV。
+
+**修复**：按名称匹配 ctx 而非按 map 迭代索引：
+
+```cpp
+for (auto& ctx : ctxs) {
+    std::string name = ctx->name;
+    if (mMethods.count(name)) {
+        mMethods[name].context = std::move(ctx);
+        session->methods()[name] = std::move(mMethods[name]);
+    } else if (mSignals.count(name)) { ... }
+    else if (mProperties.count(name)) { ... }
+}
+```

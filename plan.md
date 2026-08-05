@@ -1,6 +1,6 @@
 # ssdbus 项目计划
 
-> 最后更新：2026-08-02（PROPERTY_RO/RW 拆分 + Client promise/future 线程安全 + 外部 Looper + 内嵌 self-client + TLS weak_ptr 共享池自动析构）
+> 最后更新：2026-08-06（MetaObject 藏入 session/ + 宏移入 Server.hpp + SSDBUS_LISTEN 移除 + example_meta 删除 + 重连完成）
 
 ---
 
@@ -25,12 +25,12 @@
 | 事件循环 | `Looper.hpp` / `LooperPrivate.hpp` | ✅ sd-event 集成，IO 驱动 + 优雅退出 + **跨线程 `post()` 投递（eventfd + 任务队列 + mutex）+ `isOwnerThread()`** |
 | 资源管理 | `RawSlotSharePtr` / SharePtr 系列 | ✅ RAII，移动语义完整 |
 | 类型推导 | `FunctionTrait.hpp` / `DbusArgs.hpp` | ✅ 编译期萃取 + **`getSignature` 支持 `std::map`（`a{KV}`）+ `isMapV` trait** |
-| 属性注册 | `Method.hpp` / `Session.hpp` / `VTableRegistrar.hpp` / `MetaObject.hpp` | ✅ 自拥有值 + `getLocalProperty`/`setLocalProperty` + `onLocalPropertyChanged` callback + `sd_bus_emit_properties_changed` + `typeid` 类型安全检查 + `SD_BUS_VTABLE_PROPERTY_EMITS_CHANGE` flag；**`SSDBUS_PROPERTY` 拆分为 `SSDBUS_PROPERTY_RO`（只读）和 `SSDBUS_PROPERTY_RW`（读写）** |
+| 属性注册 | `Method.hpp` / `Session.hpp` / `VTableRegistrar.hpp` / `MetaObject.hpp` | ✅ 自拥有值 + `getLocalProperty`/`setLocalProperty` + `onLocalPropertyChanged` callback + `sd_bus_emit_properties_changed` + `typeid` 类型安全检查 + `SD_BUS_VTABLE_PROPERTY_EMITS_CHANGE` flag；**`SSDBUS_PROPERTY` 拆分为 `SSDBUS_PROPERTY_RO`（只读）和 `SSDBUS_PROPERTY_RW`（读写）**；**PropertyWrapper 新增 `std::mutex` 保护跨线程 get/set 竞态** (2026-08-05) |
 | 远端属性 | `PropertyHandler.hpp` / `Method.hpp` | ✅ `getRemoteProperty`/`setRemoteProperty` 走 `Properties.Get/Set`；`MessagePrivate::read` variant 自动解包；`Client::getProperty`/`setProperty` |
 | 属性变更监听 | `PropertyHandler.hpp` / `Method.hpp` | ✅ `PropertiesChanged` 信号监听（sa{sv}as），**一个 handler 对应一个 (service, path) 对**（get-or-create），多次监听同一 destination 只注册一条信号匹配、多 callback 聚合；`Client::onPropertyChanged` |
-| 示例 | `example/*.cpp` | ✅ 覆盖主要 API：Session 直连、MetaObject 反射、Server 一站式、Client 代理（自管 `example_client_internal` 30 项 + 外部 Looper `example_client_external` 17 项含内嵌 self-client loopback）；**含 RO/RW property get/set/onChanged 全覆盖测试** |
-| 反射注册 | `MetaObject.hpp` | ✅ CRTP + 宏标注 → `registerObject` 一键注册：`SSDBUS_METHOD` / `SSDBUS_SIGNAL` / `SSDBUS_LISTEN` / `SSDBUS_PROPERTY_RO` / `SSDBUS_PROPERTY_RW` |
-| 服务端封装 | `Server.hpp` | ✅ `Server<Derived>` 捆绑 Session + Looper + registerObject，`run()` 一行启动；`emit()` 自动线程检测（同线程直调 / 跨线程 post）；**新增 `protected looper()` 访问器**，子类可用自身 Looper 构造 Client 做 loopback |
+| 示例 | `example/*.cpp` | ✅ 覆盖主要 API：Session 直连、Server 一站式（含反射注册+server property API）、Client 代理（自管 `example_client_internal` + 外部 Looper `example_client_external`）；**含 RO/RW property get/set/onChanged 全覆盖 + 重连测试**；`example_meta` 已删除（MetaObject 不对外暴露）(2026-08-06) |
+| 反射注册 | `session/MetaObject.hpp` + `Server.hpp` | ✅ CRTP + 宏标注 → `registerObject` 一键注册：`SSDBUS_METHOD` / `SSDBUS_SIGNAL` / `SSDBUS_PROPERTY_RO` / `SSDBUS_PROPERTY_RW`全部宏在 `Server.hpp` 中；`MetaObject` 移入 `session/` 子目录不对外暴露；`SSDBUS_LISTEN` 已移除，改为运行时 `session().listenSignal()` 手动注册 (2026-08-06) |
+| 服务端封装 | `Server.hpp` | ✅ `Server<Derived>` 捆绑 Session + Looper + registerObject，`run()` 一行启动；`emit()` 自动线程检测（同线程直调 / 跨线程 post）；**新增 `protected looper()` 访问器**，子类可用自身 Looper 构造 Client 做 loopback；**新增 `getProperty<T>`/`setProperty<T>`/`onPropertyChanged<T>` 直接操作本地属性** (2026-08-05) |
 | 遗留代码清理 | DbusContext/DbusManager/DbusInterface/DbusError | ✅ 全部删除 |
 
 ### 🔴 已知 Bug（按严重度）
@@ -57,7 +57,9 @@
 | B18 | 🟡 规避 | `MessagePrivate.hpp` | **systemd v249 `sd_bus_message_open_container(…, 'e', NULL)` 返回 `-EINVAL`**。v249 对 DICT_ENTRY 的 `child_type` 校验与数组打开行为冲突。**规避方案**：传内部类型字符串（如 `"si"`）代替 `nullptr`；`sd_bus_message_append("a{ss}", …)` 不受影响 (2026-07-30) |
 | B19 | ✅ 已修复 | `Method.hpp` / `VTableRegistrar.hpp` | **`sd_bus_emit_properties_changed` 在 method handler 回调内返回 `-EDEADLK`**。sd-bus 内部有重入保护，回调处理中不允许再发信号。**修复**：vtable 注册时加 `SD_BUS_VTABLE_PROPERTY_EMITS_CHANGE` flag，sd-bus 识别后会放行 (2026-07-31) |
 | B20 | ✅ 已修复 | `Client.hpp` | **`listenSignal`/`callAsync` 偶发阻塞**。sd-bus 非线程安全，`sd_bus_match_signal` 在 main 线程与 looper 线程的 `sd_bus_process` 竞争同一连接。**修复**：所有 async 操作通过 `promise/future` + `Looper::post()` 投递到事件循环线程串行执行 (2026-08-02) |
-| B21 | ✅ 已优化 | `Client.hpp` | **每 Client 独享 Session/Looper/thread 浪费资源 + TLS `thread_local` Session 析构时机过晚**。**优化**：`thread_local weak_ptr` + `shared_ptr` 引用计数池（SyncPool/AsyncPool），同线程多 Client 共享一套基础设施，最后 Client 析构时 refcount→0 自动 `looper.stop()` + `thread.join()`；`mSelfOwned` 移除，析构退化为 `= default` (2026-08-02) |
+| B22 | ✅ 已修复 | `LooperPrivate.hpp` | **Disconnected 回调内同步操作 sd_bus → SIGSEGV**。sd-bus 分发 Disconnected 信号时回调内执行 `detach→reconnect→attach` 替换了 sd_bus 正在操作的 `sd_bus*`，return 后崩溃。**修复**：回调只 `post(doReconnect)`，延迟到当前分发完成后执行 (2026-08-05) |
+| B23 | ✅ 已修复 | `SessionPrivate.hpp` | **旧 bus 释放时 slot double-free**。`closeBus + sd_bus_unref` 释放旧 bus 时 sd-bus 统一释放所有 slot，但 `VTableContext::slot` 仍持有已释放指针。后续 `reconnectSession` 替换 slot 时析构触发 `sd_bus_slot_unref` → double-free → 堆损坏。**修复**：`closeBus` 前将所有 Context 的 slot 清空（`= RawSlotSharePtr()`），此时旧 bus 还活着，unref 安全 (2026-08-05) |
+| B24 | ✅ 已修复 | `Session.hpp` (`RegisterBuilder::commit`) | **`RegisterBuilder::commit()` vtable context 错配**。`mEntries` vector 顺序生成 ctx，但 `mMethods`/`mSignals`/`mProperties` 三个 `unordered_map` 迭代顺序不同，导致 method 拿到别的 method 的 vtable。重连后 `echoInt32` 被路由到 `shutdown`。**修复**：ctx 按名称匹配而非按 map 迭代索引分配 (2026-08-05) |
 
 ---
 
@@ -113,13 +115,14 @@
 |---|------|------|
 | P3-1 | **API 文档** | Doxygen 注释 + README 快速入门 |
 | P3-2 | **Stub/Proxy 双向代码生成** | 自定义 `.xi` IDL（IPC 无关接口描述），`xi2cpp` 后端多目标：`--dbus` → `sd-bus` 的 Stub + Proxy；`--binder` / `--grpc` 等后续扩展。单一 IDL 真相源，接口变更编译期同步报错。类型系统用通用名（`i32`/`string`/`map<string, vector<i32>>`），后端各自映射到对应 IPC 签名 |
-| P3-3 | **连接重连** | 断线自动重连 + 重新注册 vtable |
+| P3-3 | ✅ 已完成 | **连接重连**：`SessionPrivate::reconnect()` 关闭旧 bus → 创建新 bus；`Reconnect.hpp::reconnectSession()` 遍历全部注册项重调 `sd_bus_add_object_vtable`/`sd_bus_match_signal`；`LooperPrivate` 监听 `Disconnected` 信号 + `post()` 异步重连 + 重连后重新注册 Disconnected 监听；`Client::callSync()` 检测连接错误 → `session.rebuild()` → 重试 (2026-08-05) |
 | P3-4 | **name owner 追踪** | 封装 `sd_bus_track` 或 `NameOwnerChanged` |
 | P3-5 | **peer-to-peer 连接** | `sd_bus_open()` P2P 模式 |
 | P3-6 | ✅ 已完成 | `RawCommon.hpp` 拆分 → RawBus/RawMessage/RawSlot/RawEvent/RawErrorConvert (2026-07-20) |
-| P3-7 | **`FuncTrait` 补全** | noexcept/volatile/引用限定符版本 |
-| P3-8 | **变体类型 (`v`)** | 按需实现：`std::any` 或 tagged union 包装，含运行时签名 |
+| P3-7 | ✅ 已完成 | **`FuncTrait` 补全**：noexcept/&/&&/const &/const && 及 noexcept 组合共 14 个偏特化，覆盖 lambda operator() 全部 cv-ref 限定符版本 (2026-08-05) |
+| P3-8 | 🟡 按需 | **变体类型 (`v`)**：已有 `MessagePrivate::read` variant 自动解包已覆盖 `Properties.Get` 场景，`PropertiesChanged` 由 PropertyHandler 手动解析。无外部 `a{sv}` 对接需求前不实施 |
 | P3-9 | ✅ std::map 已完成 | `std::map<K, V>` ↔ `a{KV}` — 完整 read/write + getSignature + 嵌套 map |
+| P3-10 | **单元测试** | 现有 `example/` 为集成测试（依赖 D-Bus daemon），缺无外部依赖的单元测试。覆盖项：Status 构造/比较、`getSignature` 类型→签名映射、`FuncTrait` 萃取正确性、`MessagePrivate::read/write` 基本类型/容器 round-trip、`PropertyWrapper` set/get 逻辑、`RawErrorConvert::fromErrno` 映射完整 |
 
 ---
 
@@ -137,7 +140,7 @@ P1 — ✅ 全部完成（2026-07-09）
 P2 — 完善阶段
   ├─ ✅ Lambda 注册                    ← 自由函数 + lambda
   ├─ ✅ 事件循环改进                    ← Looper 集成 sd_event，IO 驱动替代忙循环
-  ├─ ✅ MetaObject 反射注册             ← SSDBUS_METHOD / SSDBUS_SIGNAL / SSDBUS_LISTEN / SSDBUS_PROPERTY_RO / SSDBUS_PROPERTY_RW + registerObject
+  ├─ ✅ MetaObject 反射注册             ← SSDBUS_METHOD / SSDBUS_SIGNAL / SSDBUS_PROPERTY_RO / SSDBUS_PROPERTY_RW + registerObject（SSDBUS_LISTEN 已移除）
   ├─ ✅ Server 一站式封装               ← Server<T> = Session + Looper + registerObject；protected looper() 支持子类内嵌 Client
   ├─ ✅ Client 远端代理                 ← 双模式 + TLS weak_ptr 共享池 + promise/future 线程安全 + 内嵌 self-client loopback
   ├─ ✅ std::map<K,V> 支持             ← read/write + getSignature(a{KV}) + 嵌套 map
@@ -241,8 +244,7 @@ graph TD
     RawEvent -->|attach| RawBus
     S_RO --> MO
 
-    MO -->|SSDBUS_METHOD / _SIGNAL| RB
-    MO -->|SSDBUS_LISTEN| SP
+    MO -->|SSDBUS_METHOD / _SIGNAL / _PROPERTY| RB
     RB -->|session| SP
     RB -->|reg| VReg
     VReg -->|commit| VCTX
@@ -279,7 +281,7 @@ graph TD
 | 回调清理 | RAII Scope Guard + enable_shared_from_this |
 | 重载决议 | Callback 用独立模板参数 `Callback&&`，不用 `std::function` |
 | 声明注册分离 | 用 `SSDBUS_METHOD(name)` 紧挨声明标注，实现放 `.cpp` |
-| 反射注册 | CRTP `MetaObject<Derived>`逐类独立 registry + `RegisterFunc` 类型擦除，`Session::registerObject` 按 `EntryType` 分发 |
+| 反射注册 | CRTP `MetaObject<Derived>`逐类独立 registry + `RegisterFunc` 类型擦除，`Session::registerObject` 通过 `MetaObject<T>::registry()` 按名分发。`MetaObject` 藏于 `session/` 子目录作为 `Session` ↔ `Server` 的最小契约，用户不直接接触 (2026-08-06) |
 | 分层原则 | 依赖方向：不稳定（平台层）→ 稳定（类型层） |
 | 跨线程 emit | `Server::emit()` 在服务端层面做了跨线程适配：自动检测 `isOwnerThread()`，同线程直调 `Session::emitSignal()`（同步返回 Status），跨线程通过 `Looper::post()` 投递（eventfd + mutex 保护队列 + swap 最小化锁持有），返回 `SUCCESS` 表示已入队。**`Session` 本身仍单线程**——直接使用 `Session::emitSignal()` 需自行加锁 |
 | 双 Session 隔离 | 同一 `sd_bus*` 的 `sd_bus_call`（同步 poll）和 `sd_event_loop`（异步 epoll）不能跨线程共用——会竞争同一个内核 fd 导致回复丢失。正确做法：sync 调用用独立 `Session`（不绑事件循环），信号/async 用另一个 `Session`（绑事件循环） |
@@ -297,7 +299,7 @@ graph TD
 | Method/Signal key 策略 | 使用纯 name 作为 map key（非 name+input），因 D-Bus 协议层面同名 method/signal 只能有唯一签名。registerBuilder 内 `mMethods[aName]` 和 `mSignals[regName]` 统一用 name 索引 |
 | registerSingleSig/Method 可叠加 | `sd_bus_add_object_vtable` 支持多次调用叠加；注册 API 的 `registerMethod`/`registerSignal` 每个独立 commit vtable，依赖 sd-bus 自动合并 |
 | RegisterBuilder 生命周期 | `RegisterBuilder` 作为 `Session` 内嵌 struct，`commit()` 将 `MethodMap`/`SignalMap` 移入 `SessionPrivate`，Builder 析构不持有任何注册资源 |
-| Server 封装 | `Server<Derived>` 捆绑 Session + Looper + `registerObject(this)`，`run()` 一行启动完整服务。构造时传 ServiceInfo，`run()` 自动注册所有 SSDBUS_METHOD/SIGNAL/LISTEN。move-only（不可拷贝），`stop()` 优雅退出 |
+| Server 封装 | `Server<Derived>` 捆绑 Session + Looper + `registerObject(this)`，`run()` 一行启动完整服务。构造时传 ServiceInfo，`run()` 自动注册所有 SSDBUS_METHOD/SIGNAL/PROPERTY。move-only（不可拷贝），`stop()` 优雅退出。新增 `getProperty<T>`/`setProperty<T>`/`onPropertyChanged<T>` 暴露本地属性操作 (2026-08-05) |
 | Client 封装 | `Client` = sync Session（TLS 每线程 1 个） + async Session（自管或共享） + Looper（自管时）。`callSync` 走 TLS syncSession 避免 fd 竞争；`callAsync`/`listenSignal` 走 asyncPtr。构造后需 sleep 等 async Hello 握手完成（sync 不受影响，`sd_bus_call` 内部轮询） |
 | TLS sync Session | sync Session 用 `thread_local` 惰性创建，system/session bus 各一。100 个 Client 同线程 sync 调用只开 1 个 `sd_bus` 连接，避免 fd 浪费 |
 | callSync 重载合并 | `Ret=void` 设默认参数，消去 void 特化版本。timeout 从函数参数提升为模板参数 `<Ret=void, TimeoutUsec=0, Args>`，彻底消除 timeout/no-timeout 二义性。无回调 callAsync 同步统一；有回调 callAsync 复用同一模板参数模式 |
@@ -307,4 +309,5 @@ graph TD
 | MessagePrivate::read variant 自动解包 | `MessagePrivate::read` 开头通过 `sd_bus_message_peek_type` 嗅探当前位置类型：若为 `'v'`，自动 `enterContainer('v', getSignature<T>())` → 递归 `read` → `exitContainer`。这使得 `Reply<Ret>::value()` 对 `Properties.Get` 返回的 VARIANT 透明，`getRemoteProperty` 无需手动解包 (2026-07-31) |
 | SSDBUS_PROPERTY 宏 | 不创建成员变量——`PropertyWrapper<T>` 内部自持数据副本。宏注册 lambda 捕获 `initValue` 直接传给 `RegisterBuilder::addProperty<T>`。用法：`SSDBUS_PROPERTY(name, Type, initValue)`，与 `SSDBUS_METHOD` 并列 (2026-07-31) |
 | setRemoteProperty variant 包装 | `Properties.Set` D-Bus 签名 `ssv`（STRING iface, STRING prop, VARIANT value）。`setRemoteProperty` 先 `write(iface, prop)`，再 `openContainer('v', getSignature<T>())` → `write(value)` → `closeContainer`。对 `std::vector<T>` 等复杂类型同样适用 (2026-07-31) |
-| IDL 方案 | 自定义 `.xi` 而非 D-Bus introspection XML。XML 只面向 D-Bus；`.xi` 是 IPC 无关接口描述，`xi2cpp --dbus` / `--binder` 等多后端映射。语法：`method name(i32, string) → i32`、`signal name(i32, i32)`、`property name i32 readwrite`，正则级解析复杂度 (2026-07-31) |
+| 连接重连机制 | `SessionPrivate::reconnect()` 重建总线连接；`Reconnect.hpp::reconnectSession()` 遍历所有 maps/vectors 重放注册；`LooperPrivate::doReconnect()` 编排 detach→reconnect→attach→registerDisconnectedHandler 流程。Disconnected 回调 `post()` 异步执行避免 sd-bus 重入崩溃。Client sync session 通过 `callSync` 检测错误 + `session.rebuild()` 懒重连 (2026-08-05) |
+| RegisterBuilder commit ctx 错配 | `RegisterBuilder::commit()` 用 `mEntries`(vector) 顺序生成 ctx，但用 `mMethods`(unordered_map) 哈希序分配——必须按 ctx->name 匹配而非索引 (2026-08-05) |

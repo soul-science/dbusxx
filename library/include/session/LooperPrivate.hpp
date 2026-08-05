@@ -7,8 +7,10 @@
 #include <sys/eventfd.h>
 #include <thread>
 
-#include "session/SessionPrivate.hpp"
 #include "adaptor/RawEventSharePtr.hpp"
+#include "adaptor/RawSlotSharePtr.hpp"
+#include "session/SessionPrivate.hpp"
+#include "method/Reconnect.hpp"
 
 namespace SSDbus {
 namespace Private {
@@ -16,7 +18,7 @@ namespace Private {
 class LooperPrivate {
     static constexpr uint64_t EVENT_FD_SIGNAL { 1 };
 public:
-    LooperPrivate() {}
+    LooperPrivate() = default;
 
     explicit LooperPrivate(SessionPrivate* aSession)
         : mSession(aSession)
@@ -52,6 +54,11 @@ public:
     }
 
     void run() {
+        if (mStatus.isError()) {
+            return;
+        }
+
+        mStatus = bindDaemonDisconnectedSignal();
         if (mStatus.isError()) {
             return;
         }
@@ -180,7 +187,45 @@ private:
                 return 1;
             }, this
         );
+    }
 
+private:
+    Status bindDaemonDisconnectedSignal() {
+        mConnectedSlot = Adaptor::RawSlotSharePtr();
+        Adaptor::RawBusSlotPtr slot = nullptr;
+        auto st = Adaptor::RawBus::listenSignal(
+            mSession->rawBus().get(), slot,
+            "org.freedesktop.DBus.Local", "",
+            "org.freedesktop.DBus.Local", "Disconnected",
+            [] (Adaptor::RawBusMessagePtr, void* aData, Adaptor::RawBusErrorPtr) -> int {
+                auto* self = static_cast<LooperPrivate*>(aData);
+                self->post([self]() { self->doReconnect(); });
+                return 0;
+            }, this);
+        if (st.isSuccess()) {
+            mConnectedSlot = Adaptor::RawSlotSharePtr(slot);
+        }
+        return st;
+    }
+
+    void doReconnect() {
+        mConnectedSlot = Adaptor::RawSlotSharePtr();
+        if (mSession && mSession->rawBus() && mEvent.get()) {
+            Adaptor::RawBus::detachEvent(mSession->rawBus().get());
+        }
+
+        auto st = Method::reconnectSession(mSession);
+        if (st.isError()) {
+            return;
+        }
+
+        st = Adaptor::RawBus::attachEvent(
+            mSession->rawBus().get(), mEvent.get(), 0);
+        if (st.isError()) {
+            return;
+        }
+
+        bindDaemonDisconnectedSignal();
     }
 
     SessionPrivate* mSession;
@@ -192,6 +237,8 @@ private:
     std::deque<std::function<void()>> mTasks;
     int mWakeFd { -1 };
     Adaptor::RawBusEventSrcPtr mWakeSrc { nullptr };
+
+    Adaptor::RawSlotSharePtr mConnectedSlot;
 
     std::thread::id mThreadId;
 

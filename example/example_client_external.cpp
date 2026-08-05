@@ -31,9 +31,7 @@ class DemoServer : public Server<DemoServer> {
 public:
     DemoServer()
         : Server(ServiceInfo{"com.example.ext", "/com/example/ext",
-                             "com.example.External"}, false)
-        , mSelfClient(new Client(looper(),
-            "com.example.ext", "/com/example/ext", "com.example.External")) {}
+                             "com.example.External"}, false) {}
 
     int32_t echoInt32(int32_t i) {
         std::cout << "[server] echoInt32: " << i << std::endl;
@@ -59,46 +57,10 @@ public:
     }
     SSDBUS_METHOD(shutdown)
 
-    //! 通过内嵌 Client 监听自身信号（事件循环同线程，无竞争）
-    void listenSelfSignal() {
-        std::cout << "[server] listenSelfSignal via internal Client" << std::endl;
-        mSelfClient->listenSignal("mySignal",
-            [this](int a, int b) {
-                std::cout << "  [server::selfClient] mySignal: a=" << a
-                          << ", b=" << b << std::endl;
-                mSelfSigA = a;
-                mSelfSigB = b;
-                mSelfSigReceived = true;
-            });
-    }
-
-    //! 通过内嵌 Client 调用自身方法（loopback）
-    void callSelf() {
-        std::cout << "[server] callSelf via internal Client" << std::endl;
-        mSelfClient->callAsync<std::string>(
-            "echoString",
-            [this](Reply<std::string> rep) {
-                std::cout << "  [server::selfClient] echoString reply: "
-                          << rep.value() << std::endl;
-                mSelfCallResult = rep.value();
-                mSelfCallDone = true;
-            },
-            std::string("loopback-test"));
-    }
-
     SSDBUS_SIGNAL(mySignal, int, int)
 
     SSDBUS_PROPERTY_RO(name, std::string, std::string("external-demo"))
     SSDBUS_PROPERTY_RW(counter, int32_t, 0)
-
-    // 内嵌 Client：共用 Server 自身 Looper，连接自身做 loopback
-    std::unique_ptr<Client> mSelfClient;
-
-    // 内嵌 Client 回调结果
-    bool mSelfSigReceived { false };
-    int mSelfSigA { 0 }, mSelfSigB { 0 };
-    bool mSelfCallDone { false };
-    std::string mSelfCallResult;
 };
 
 // ── 同步辅助 ────────────────────────────────────────────────────────────
@@ -227,47 +189,94 @@ int main() {
     }
 
     // ⑨ 远程属性变更监听 — 任务投递到外部 Looper
+    //    注：propFlag/newVal 必须在 main() 作用域，因为重连后回调仍会触发
     std::cout << "\n=== Step 9: Remote property changed ===" << std::endl;
+    SyncFlag propFlag;
+    int32_t propNewVal = 0;
     {
-        SyncFlag propFlag;
-        int32_t newVal = 0;
         Status st2 = c.onPropertyChanged("counter",
             [&](const int32_t& v) {
                 std::cout << "  [client] counter changed: " << v << std::endl;
-                newVal = v;
+                propNewVal = v;
                 propFlag.set();
             });
         TEST("onPropertyChanged register", st2.isSuccess());
 
         c.setProperty<int32_t>("counter", 99);
         propFlag.wait();
-        TEST("onPropertyChanged fired", newVal == 99);
+        TEST("onPropertyChanged fired", propNewVal == 99);
     }
 
-    // ⑩ 内嵌 Client — 服务端内部用自身 Looper 监听自己信号
-    std::cout << "\n=== Step 10: Internal Client listens self signal ===" << std::endl;
-    server.listenSelfSignal();
+    // 重连测试 — 手动重启 dbus daemon
+    std::cout << "\n=== Step 12: Reconnect test ===" << std::endl;
+    std::cout << "[main] >>> Please run in another terminal:" << std::endl;
+    std::cout << "[main] >>>   systemctl --user restart dbus.service" << std::endl;
+    std::cout << "[main] >>> Then press Enter to continue..." << std::endl;
+    std::cin.get();
+
+    // 等待重连完成（Looper Disconnected → reconnectSession → signal/property 重注册）
+    std::cout << "[main] Waiting for reconnection..." << std::endl;
+
+    // 12a. 同步调用 — 测试 lazy reconnect
+    std::cout << "\n--- 12a: Sync call after reconnect ---" << std::endl;
     {
-        // 触发信号 → 先被 main 线程的 c.listenSignal 收到，也被 server 的 mSelfClient 收到
-        auto r = c.callSync("triggerSignal", 42, 43);
-        TEST("triggerSignal call", !r.isError());
-        // 等待 server 内部的 self-client 回调（在 server 事件循环线程）
-        std::this_thread::sleep_for(std::chrono::milliseconds(200));
-        TEST("selfClient signal received", server.mSelfSigReceived
-             && server.mSelfSigA == 42 && server.mSelfSigB == 43);
+        auto r = c.callSync<int32_t>("echoInt32", 123);
+        TEST("reconnect callSync echoInt32", !r.isError() && r.value() == 123);
     }
-
-    // ⑪ 内嵌 Client — 服务端 loopback 调用自身方法
-    std::cout << "\n=== Step 11: Internal Client calls self method ===" << std::endl;
     {
-        server.callSelf();
-        std::this_thread::sleep_for(std::chrono::milliseconds(200));
-        TEST("selfClient callAsync result",
-            server.mSelfCallDone && server.mSelfCallResult == "loopback-test");
+        auto r = c.callSync<std::string>("echoString", std::string("after-reconnect"));
+        TEST("reconnect callSync echoString",
+            !r.isError() && r.value() == "after-reconnect");
     }
 
-    // ⑫ 关闭
-    std::cout << "\n=== Step 12: Shutdown ===" << std::endl;
+    // 12b. 属性 — 测试 sync session 恢复
+    std::cout << "\n--- 12b: Properties after reconnect ---" << std::endl;
+    {
+        auto r = c.getProperty<std::string>("name");
+        TEST("reconnect getProperty RO", !r.isError() && r.value() == "external-demo");
+        auto st = c.setProperty<int32_t>("counter", 77);
+        TEST("reconnect setProperty RW", st.isSuccess());
+        auto r2 = c.getProperty<int32_t>("counter");
+        TEST("reconnect getProperty RW", !r2.isError() && r2.value() == 77);
+    }
+
+    // 12c. 信号监听 — 测试 async session 重注册 signal handler
+    std::cout << "\n--- 12c: Signal after reconnect ---" << std::endl;
+    {
+        SyncFlag sigFlag2;
+        int sigA2 = 0, sigB2 = 0;
+
+        Status st = c.listenSignal("mySignal", [&](int a, int b) {
+            sigA2 = a; sigB2 = b;
+            sigFlag2.set();
+        });
+        TEST("reconnect listenSignal", st.isSuccess());
+
+        auto r = c.callSync("triggerSignal", 55, 66);
+        TEST("reconnect triggerSignal", !r.isError());
+        sigFlag2.wait();
+        TEST("reconnect signal received", sigA2 == 55 && sigB2 == 66);
+    }
+
+    // 12d. 属性变更监听 — 测试 property handler 重注册
+    std::cout << "\n--- 12d: Property changed after reconnect ---" << std::endl;
+    {
+        SyncFlag propFlag2;
+        int32_t newVal2 = 0;
+        Status st = c.onPropertyChanged("counter",
+            [&](const int32_t& v) {
+                newVal2 = v;
+                propFlag2.set();
+            });
+        TEST("reconnect onPropertyChanged register", st.isSuccess());
+
+        c.setProperty<int32_t>("counter", 88);
+        propFlag2.wait();
+        TEST("reconnect onPropertyChanged fired", newVal2 == 88);
+    }
+
+    // ⑬ 关闭
+    std::cout << "\n=== Step 13: Shutdown ===" << std::endl;
     {
         auto r = c.callSync("shutdown");
         TEST("shutdown call", !r.isError());

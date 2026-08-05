@@ -2,6 +2,7 @@
 #define SSDBUS_DBUS_METHOD_HPP
 
 #include <map>
+#include <mutex>
 #include <iostream>
 
 #include "adaptor/RawRemoteError.hpp"
@@ -9,7 +10,7 @@
 #include "message/SignalHandler.hpp"
 #include "message/PropertyHandler.hpp"
 #include "session/SessionPrivate.hpp"
-#include "session/VTableRegistrar.hpp"
+#include "adaptor/VTableRegistrar.hpp"
 #include "FunctionTrait.hpp"
 #include "Status.hpp"
 
@@ -146,9 +147,9 @@ Status registerSingleMethod(
     methodInfo.data = data;
 
     //! Create vtable
-    Private::VTableRegistrar reg(aSession->rawBus(), aSession->info().path, aSession->info().interface);
+    Adaptor::VTableRegistrar reg(aSession->rawBus(), aSession->info().path, aSession->info().interface);
     reg.addMethod(aFuncName, input, output, &MethodWrapper<Func>::onCall, dataPtr);
-    std::vector<std::unique_ptr<Private::VTableContext>> v;
+    std::vector<std::unique_ptr<Adaptor::VTableContext>> v;
     auto st = reg.commit(v);
     std::cout << "VTableRegistrar code=" << static_cast<int>(st.code())
         << ", message=" << st.message() << std::endl;
@@ -180,9 +181,9 @@ Status registerSingleSignal(Private::SessionPrivate* aSession, std::string_view 
     aSession->signals()[aSignalName.data()] = {};
     auto& sigInfo = aSession->signals()[aSignalName.data()];
 
-    Private::VTableRegistrar reg(aSession->rawBus(), aSession->info().path, aSession->info().interface);
+    Adaptor::VTableRegistrar reg(aSession->rawBus(), aSession->info().path, aSession->info().interface);
     reg.addSiganl(aSignalName, input);
-    std::vector<std::unique_ptr<Private::VTableContext>> v;
+    std::vector<std::unique_ptr<Adaptor::VTableContext>> v;
     Status st = reg.commit(v);
     if (st.isError()) {
         aSession->signals().erase(input);
@@ -221,6 +222,7 @@ struct PropertyWrapper {
     Private::SessionPrivate* session;
     std::string propName;
     T prop;
+    mutable std::mutex mMutex;
     std::string_view type;
     std::function<void(const T&)> onChange {nullptr};
 
@@ -231,16 +233,25 @@ struct PropertyWrapper {
         , type(typeid(T).name()) {}
 
     T get() const {
+        std::lock_guard lock(mMutex);
         return prop;
     }
 
     void set(const T& aNew) {
-        if (prop == aNew) {
-            return;
+        T copy{};
+        {
+            std::lock_guard lock(mMutex);
+            if (prop == aNew) {
+                return;
+            }
+
+            prop = aNew;
+            copy = prop;
         }
 
-        prop = aNew;
-        if (onChange) onChange(prop);
+        if (onChange) {
+            onChange(copy);
+        }
 
         auto& info = session->info();
         sd_bus_emit_properties_changed(
@@ -263,7 +274,7 @@ struct PropertyWrapper {
         Private::MessagePrivate reply(
             Adaptor::RawMessageSharePtr(aReply, false));
         
-        Status st = reply.write(self->prop);
+        Status st = reply.write(self->get());
         if (st.isError()) {
             Adaptor::RawRemoteError::fromStatus(st.code()).moveTo(aErr); 
             return -1;
@@ -385,15 +396,25 @@ Status listenSignal(Private::SessionPrivate* aSession,
     auto handler = std::make_shared<Private::SignalHandler<Callback>>(
         std::forward<Callback>(aCallback));
 
+    Private::SessionPrivate::SignalHandlerInfo inf;
+    inf.sender = std::string(aSender);
+    inf.path = std::string(aPath);
+    inf.iface = std::string(aIface);
+    inf.signal = std::string(aSignal);
+    inf.callback = &Private::SignalHandler<Callback>::onSignal;
+    inf.data = handler;
+
+    Adaptor::RawBusSlotPtr raw;
     Status st = Adaptor::RawBus::listenSignal(
-        aSession->rawBus().get(), handler->slot,
+        aSession->rawBus().get(), raw,
         aSender, aPath, aIface, aSignal,
         &Private::SignalHandler<Callback>::onSignal,
         handler.get()
     );
 
     if (st.isSuccess()) {
-        aSession->addSignalHandler(std::move(handler));
+        inf.slot = Adaptor::RawSlotSharePtr(raw);
+        aSession->addSignalHandlerInfo(std::move(inf));
     }
 
     return st;
@@ -428,16 +449,20 @@ Status onRemotePropertyChanged(Private::SessionPrivate* aSession,
         newHandler->session = aSession;
         newHandler->service = std::string(aService);
         newHandler->path = std::string(aPath);
+        Adaptor::RawBusSlotPtr raw = nullptr;
         st = Adaptor::RawBus::listenSignal(
-            aSession->rawBus().get(), newHandler->slot,
+            aSession->rawBus().get(), raw,
             aService, aPath, "org.freedesktop.DBus.Properties", "PropertiesChanged",
             &Private::PropertyHandler::onPropertyChanged, newHandler.get()
         );
         if (st.isError()) {
             return st;
         }
-        
-        aSession->setPropertyHandler(key, newHandler);
+
+        Private::SessionPrivate::PropertyHandlerInfo inf;
+        inf.handler = newHandler;
+        inf.slot = Adaptor::RawSlotSharePtr(raw);
+        aSession->setPropertyHandlerInfo(key, std::move(inf));
         handler = newHandler;
     }
 

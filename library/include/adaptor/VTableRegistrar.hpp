@@ -11,7 +11,7 @@
 #include "adaptor/RawSlotSharePtr.hpp"
 
 namespace SSDbus {
-namespace Private {
+namespace Adaptor {
 
 struct VTableContext {
     using VTablePtr = std::unique_ptr<Adaptor::RawBusVTable[]>;
@@ -138,7 +138,6 @@ public:
 
         return Status(StatusCode::SUCCESS);
     }
-
 
 private:
     Adaptor::RawBusSharePtr mBus;

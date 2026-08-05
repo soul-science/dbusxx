@@ -9,12 +9,12 @@
 #include "Reply.hpp"
 #include "PendingReply.hpp"
 #include "Status.hpp"
-#include "MetaObject.hpp"
 
 #include "adaptor/RawBusSharePtr.hpp"
+#include "session/MetaObject.hpp"
 #include "session/SessionPrivate.hpp"
-#include "session/VTableRegistrar.hpp"
 #include "method/Method.hpp"
+#include "method/Reconnect.hpp"
 
 #include <iostream>
 
@@ -27,7 +27,7 @@ class Session {
 public:
     struct RegisterBuilder {
         Private::SessionPrivate* session;
-        Private::VTableRegistrar reg;
+        Adaptor::VTableRegistrar reg;
         Private::SessionPrivate::MethodMap mMethods;
         Private::SessionPrivate::SignalMap mSignals;
         Private::SessionPrivate::PropertyMap mProperties;
@@ -107,25 +107,31 @@ public:
                 }
             }
 
-            std::vector<std::unique_ptr<Private::VTableContext>> ctxs;
+            std::vector<std::unique_ptr<Adaptor::VTableContext>> ctxs;
             auto st = reg.commit(ctxs);
             if (st.isError()) {
                 return st;
             }
 
-            size_t i = 0;
+            std::unordered_map<std::string,
+                std::unique_ptr<Adaptor::VTableContext>> ctxsbyName;
+            for (auto& ctx : ctxs) {
+                std::string name = ctx->name;
+                ctxsbyName[name] = std::move(ctx);
+            }
+
             for (auto& [k, v] : mMethods) {
-                v.context = std::move(ctxs[i++]);
+                v.context = std::move(ctxsbyName[k]);
                 session->methods()[k] = std::move(v);
             }
 
             for (auto& [k, v] : mSignals) {
-                v.context = std::move(ctxs[i++]);
+                v.context = std::move(ctxsbyName[k]);
                 session->signals()[k] = std::move(v);
             }
 
             for (auto& [k, v] : mProperties) {
-                v.context = std::move(ctxs[i++]);
+                v.context = std::move(ctxsbyName[k]);
                 session->properties()[k] = std::move(v);
             }
 
@@ -157,6 +163,10 @@ public:
         return mPrivate->setInfo(aInfo);
     }
 
+    Status rebuild() {
+        return Method::reconnectSession(mPrivate.get());
+    }
+
     int process() {
         return mPrivate->process();
     }
@@ -176,7 +186,7 @@ public:
     auto registerBuilder() {
         return RegisterBuilder {
             mPrivate.get(),
-            Private::VTableRegistrar(
+            Adaptor::VTableRegistrar(
                 mPrivate.get()->rawBus(), mPrivate->info().path,
                 mPrivate->info().interface)
         };
@@ -207,15 +217,7 @@ public:
     Status registerObject(T* aObj) {
         auto builder = registerBuilder();
         for (auto& entry : MetaObject<T>::registry()) {
-            switch (static_cast<typename MetaObject<T>::EntryType>(entry.type)) {
-                case MetaObject<T>::EntryType::SignalListen: {
-                    entry.registerFn(this, aObj);
-                    break;
-                }
-                default: {
-                    entry.registerFn(&builder, aObj);
-                }
-            }
+            entry.registerFn(&builder, aObj);
         }
         return builder.commit();
     }

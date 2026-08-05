@@ -215,15 +215,6 @@ public:
     }
     bool mVerChanged { false };
     int32_t mNewVer { 0 };
-
-    // ─ 监听 DBus 总线信号 ─
-
-    void onNameAcquired(const std::string& name) {
-        std::cout << "[server] NameAcquired: " << name << std::endl;
-    }
-    SSDBUS_LISTEN(onNameAcquired,
-        "org.freedesktop.DBus", "/org/freedesktop/DBus",
-        "org.freedesktop.DBus", "NameAcquired")
 };
 
 // ── C++17 线程同步辅助（替代 C++20 atomic::wait）──────────────────────
@@ -445,7 +436,7 @@ int main() {
         TEST("setRemoteProperty nonexistent", st4.isError());
     }
 
-    // ④.⑧ 本地属性变更监听（服务端侧）
+    // ④.⑧ 本地属性变更监听（服务端侧）— 旧 session() API
     std::cout << "\n=== Step 4.8: Local property change listener ===" << std::endl;
     {
         server.listenVersion();
@@ -458,6 +449,45 @@ int main() {
         std::this_thread::sleep_for(std::chrono::milliseconds(200));
         TEST("onLocalPropertyChanged fired",
             server.mVerChanged && server.mNewVer == 77);
+    }
+
+    // ④.⑨ 服务端直接读写属性 — Server::getProperty / setProperty / onPropertyChanged
+    std::cout << "\n=== Step 4.9: Server direct property R/W ===" << std::endl;
+    {
+        // 读
+        int32_t v = 0;
+        TEST("Server::getProperty version", server.getProperty("version", v).isSuccess()
+             && v == 77);
+
+        std::string desc;
+        TEST("Server::getProperty description",
+            server.getProperty("description", desc).isSuccess()
+            && desc == "updated");
+
+        // 写
+        TEST("Server::setProperty description",
+            server.setProperty("description", std::string("server-side-set")).isSuccess());
+
+        // 验证
+        TEST("Server::getProperty after set",
+            server.getProperty("description", desc).isSuccess()
+            && desc == "server-side-set");
+
+        // 注册变更监听
+        SyncFlag srvPropFlag;
+        std::string newDesc;
+        TEST("Server::onPropertyChanged register",
+            server.onPropertyChanged<std::string>("description",
+                [&](const std::string& val) {
+                    newDesc = val;
+                    srvPropFlag.set();
+                }).isSuccess());
+
+        // 通过远端修改触发
+        syncClient.setRemoteProperty<std::string>(
+            svc, path, iface, "description", std::string("remote-set"));
+        srvPropFlag.wait();
+        TEST("Server::onPropertyChanged fired", newDesc == "remote-set");
     }
 
     // ⑤ 启动客户端事件循环（绑定 asyncClient，不与 syncClient 的 fd 冲突）

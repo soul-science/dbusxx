@@ -205,8 +205,12 @@ Status listenSignal(RawBusPtr aBus, RawBusSlotPtr& aSlot,
     std::string_view aSignal, RawBusMessageHandler aCallback, void* aData) {
     return RawErrorConvert::makeStatus(
         sd_bus_match_signal(
-            aBus, &aSlot, aSender.data(), aPath.data(), aIface.data(),
-            aSignal.data(), aCallback, aData
+            aBus, &aSlot,
+            aSender.data() != "" ? aSender.data() : nullptr,
+            aPath.data() != "" ? aPath.data() : nullptr,
+            aIface.data() != "" ? aIface.data() : nullptr,
+            aSignal.data() != "" ? aSignal.data() : nullptr,
+            aCallback, aData
         ));
 }
 
@@ -221,6 +225,38 @@ Status addObjectToVTable(RawBusPtr aBus, RawBusSlotPtr& aSlot,
 
     return RawErrorConvert::makeStatus(
         sd_bus_add_object_vtable(aBus, &aSlot, aPath.data(), aIface.data(), aVTable, aData)
+    );
+}
+
+//! Set if watch bus_daemon
+Status setWatchBind(RawBusPtr aBus, bool aIsEnabled) {
+    if (!aBus) {
+        return Status(StatusCode::INVALID_ARG);
+    }
+
+    return RawErrorConvert::makeStatus(
+        sd_bus_set_watch_bind(aBus, aIsEnabled)
+    );
+}
+
+//! Set auto close dbus when bus_daemon disconnect 
+Status setExitOnDisconnect(RawBusPtr aBus, bool aIsEnabled) {
+    if (!aBus) {
+        return Status(StatusCode::INVALID_ARG);
+    }
+
+    return RawErrorConvert::makeStatus(
+        sd_bus_set_exit_on_disconnect(aBus, aIsEnabled)
+    );
+}
+
+Status setConnectedSignal(RawBusPtr aBus, bool aIsEnabled) {
+    if (!aBus) {
+        return Status(StatusCode::INVALID_ARG);
+    }
+
+    return RawErrorConvert::makeStatus(
+        sd_bus_set_connected_signal(aBus, aIsEnabled)
     );
 }
 };

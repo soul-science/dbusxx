@@ -5,10 +5,6 @@ add_executable(example_session
     example_session.cpp
 )
 
-add_executable(example_meta
-    example_meta.cpp
-)
-
 add_executable(example_server
     example_server.cpp
 )
@@ -35,11 +31,6 @@ target_link_libraries(example_session PRIVATE
     ssdbus
 )
 
-target_link_libraries(example_meta PRIVATE
-    ${SYSTEMD_LIBRARIES}
-    ssdbus
-)
-
 target_link_libraries(example_server PRIVATE
     ${SYSTEMD_LIBRARIES}
     ssdbus
@@ -61,7 +52,6 @@ target_link_libraries(example_client_external PRIVATE
 )
 
 add_dependencies(example_session ssdbus)
-add_dependencies(example_meta ssdbus)
 add_dependencies(example_server ssdbus)
 add_dependencies(example_register ssdbus)
 add_dependencies(example_client_internal ssdbus)

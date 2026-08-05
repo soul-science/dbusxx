@@ -6,7 +6,6 @@
 
 #include "Session.hpp"
 #include "Looper.hpp"
-#include "MetaObject.hpp"
 
 #include <functional>
 #include <iostream>
@@ -26,36 +25,27 @@ static void staticVoid() {
     std::cout << "[static] staticVoid" << std::endl;
 }
 
-// ── 2. 成员函数类 ────────────────────────────────────────────────────────
+// ── 2. 成员函数类（普通类，不继承 MetaObject）────────────────────────────
 
-class Calc : public MetaObject<Calc> {
+class Calc {
 public:
     int32_t multiply(int32_t x, int32_t y) {
         std::cout << "[member] multiply(" << x << ", " << y << ") = " << (x * y) << std::endl;
         return x * y;
     }
-    SSDBUS_METHOD(multiply)
 
     void greet(const std::string& name) {
         std::cout << "[member] greet: Hello, " << name << "!" << std::endl;
     }
-    SSDBUS_METHOD(greet)
 };
 
-// ── 3. lambda / std::function 类 ─────────────────────────────────────────
-
-class LambdaTest : public MetaObject<LambdaTest> {
-public:
-    // 空壳 — 方法用 lambda / std::function 在外部注册
-};
+// ── 3. lambda / std::function — 方法在 main 里注册 ────────────────────
 
 // ── main ─────────────────────────────────────────────────────────────────
 
 int main() {
     Session session(false);
-
     Calc calc;
-    LambdaTest lt;
 
     session.setInfo(
         {"com.example.register", "/com/example/register", "com.example.Register"}
