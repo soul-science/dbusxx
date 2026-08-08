@@ -7,6 +7,22 @@ namespace SSDbus {
 namespace Adaptor {
 
 namespace RawBus {
+void unrefBus(RawBusPtr aBus) {
+    if (!aBus) {
+        return;
+    }
+
+    sd_bus_unref(aBus);
+}
+
+void refBus(RawBusPtr aBus) {
+    if (!aBus) {
+        return;
+    }
+
+    sd_bus_ref(aBus);
+}
+
 Status openBus(RawBusPtr& aBus) {
     return RawErrorConvert::makeStatus(sd_bus_open(&aBus));
 }
@@ -17,6 +33,27 @@ Status openSystemBus(RawBusPtr& aBus) {
 
 Status openUserBus(RawBusPtr& aBus) {
     return RawErrorConvert::makeStatus(sd_bus_open_user(&aBus));
+}
+
+Status openPeerBus(RawBusPtr& aBus, std::string_view aSocket) {
+    Status st = RawErrorConvert::makeStatus(sd_bus_new(&aBus));
+    if (st.isError()) {
+        return st;
+    }
+
+    st = RawErrorConvert::makeStatus(sd_bus_set_address(aBus, aSocket.data()));
+    if (st.isError()) {
+        unrefBus(aBus);
+        return st;
+    }
+
+    st = RawErrorConvert::makeStatus(sd_bus_start(aBus));
+    if (st.isError()) {
+        unrefBus(aBus);
+        return st;
+    }
+
+    return Status(StatusCode::SUCCESS);
 }
 
 bool isBusReady(RawBusPtr aBus) {
@@ -41,22 +78,6 @@ Status flushBus(RawBusPtr aBus) {
     }
 
     return RawErrorConvert::makeStatus(sd_bus_flush(aBus));
-}
-
-void unrefBus(RawBusPtr aBus) {
-    if (!aBus) {
-        return;
-    }
-
-    sd_bus_unref(aBus);
-}
-
-void refBus(RawBusPtr aBus) {
-    if (!aBus) {
-        return;
-    }
-
-    sd_bus_ref(aBus);
 }
 
 Status sendMessage(RawBusPtr aBus, RawBusMessagePtr aMsg) {
@@ -263,10 +284,9 @@ Status setConnectedSignal(RawBusPtr aBus, bool aIsEnabled) {
 
 class RawBusSharePtr {
 public:
-    explicit RawBusSharePtr(RawBusPtr aRawBusPtr, bool aIsOwned = false, bool aIsSystem = false)
+    explicit RawBusSharePtr(RawBusPtr aRawBusPtr, bool aIsOwned = false)
         : mRaw(aRawBusPtr)
-        , mIsOwned(aIsOwned)
-        , mIsSystem(aIsSystem) {}
+        , mIsOwned(aIsOwned) {}
 
     ~RawBusSharePtr() {
         if (mIsOwned && mRaw) {
@@ -277,8 +297,7 @@ public:
 
     RawBusSharePtr(const RawBusSharePtr& aPtr)
         : mRaw(aPtr.mRaw)
-        , mIsOwned(aPtr.mIsOwned)
-        , mIsSystem(aPtr.mIsSystem) {
+        , mIsOwned(aPtr.mIsOwned) {
         if (mRaw && mIsOwned) {
             RawBus::refBus(mRaw);
         }
@@ -286,11 +305,9 @@ public:
 
     RawBusSharePtr(RawBusSharePtr&& aPtr) noexcept
     : mRaw(aPtr.mRaw)
-    , mIsOwned(aPtr.mIsOwned)
-    , mIsSystem(aPtr.mIsSystem) {
+    , mIsOwned(aPtr.mIsOwned) {
         aPtr.mRaw = nullptr;
         aPtr.mIsOwned = false;
-        aPtr.mIsSystem = false;
     }
 
     RawBusSharePtr& operator=(const RawBusSharePtr& aPtr) {
@@ -304,7 +321,6 @@ public:
 
         mRaw = aPtr.mRaw;
         mIsOwned = aPtr.mIsOwned;
-        mIsSystem = aPtr.mIsSystem;
         if (mIsOwned && mRaw) {
             RawBus::refBus(mRaw);
         }
@@ -323,10 +339,8 @@ public:
 
         mRaw = aPtr.mRaw;
         mIsOwned = aPtr.mIsOwned;
-        mIsSystem = aPtr.mIsSystem;
         aPtr.mRaw = nullptr;
         aPtr.mIsOwned = false;
-        aPtr.mIsSystem = false;
 
         return *this;
     }
@@ -343,25 +357,36 @@ public:
         return mIsOwned;
     }
 
-    bool isSystem() const {
-        return mIsSystem;
-    }
-
-    static RawBusSharePtr make(bool aIsSystem) {
+    static RawBusSharePtr makeSystem() {
         RawBusPtr raw = nullptr;
-        int ret = aIsSystem ? sd_bus_open_system(&raw)
-            : sd_bus_open_user(&raw);
-        if (ret < 0) {
-            throw DbusException("Failed to open bus: ", strerror(-ret));
+        if (RawBus::openSystemBus(raw).isError()) {
+            return RawBusSharePtr(nullptr, false);
         }
 
-        return RawBusSharePtr(raw, true, aIsSystem);
+        return RawBusSharePtr(raw, true);
+    }
+
+    static RawBusSharePtr makeUser() {
+        RawBusPtr raw = nullptr;
+        if (RawBus::openUserBus(raw).isError()) {
+            return RawBusSharePtr(nullptr, false);
+        }
+
+        return RawBusSharePtr(raw, true);
+    }
+
+    static RawBusSharePtr makePeer(std::string_view aSocket) {
+        RawBusPtr raw = nullptr;
+        if (aSocket == "" || RawBus::openPeerBus(raw, aSocket).isError()) {
+            return RawBusSharePtr(nullptr, false);
+        }
+
+        return RawBusSharePtr(raw, true);
     }
 
 private:
     RawBusPtr mRaw { nullptr };
     bool mIsOwned { false };
-    bool mIsSystem { false };
 };
 
 }

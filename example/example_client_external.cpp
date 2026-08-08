@@ -31,7 +31,7 @@ class DemoServer : public Server<DemoServer> {
 public:
     DemoServer()
         : Server(ServiceInfo{"com.example.ext", "/com/example/ext",
-                             "com.example.External"}, false) {}
+                             "com.example.External"}) {}
 
     int32_t echoInt32(int32_t i) {
         std::cout << "[server] echoInt32: " << i << std::endl;
@@ -109,7 +109,7 @@ int main() {
 
     // ② 用户手动创建 Looper + Session（外部管理模式）
     std::cout << "\n=== Step 2: Manual Looper + Session setup ===" << std::endl;
-    Session asyncSession(false);
+    Session asyncSession = Session::userSession();
     Looper looper(asyncSession);
     std::thread looperThread([&looper] { looper.run(); });
     std::this_thread::sleep_for(std::chrono::milliseconds(200));

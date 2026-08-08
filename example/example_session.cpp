@@ -152,7 +152,7 @@ public:
 
 int main() {
     // ① 创建 Session（session bus）
-    Session session(false);
+    Session session = Session::userSession({"com.example.test", "/com/example/test", "com.example.Test"});
     Test t;
 
     // ② 监听外部信号 — 成员函数指针
@@ -170,10 +170,6 @@ int main() {
             std::cout << "[signal lambda] NameAcquired: " << name << std::endl;
         });
     std::cout << "listenSignal (lambda): " << st.message() << std::endl;
-
-    // ③ 设置服务身份 + 注册全部方法 / 信号 / 属性
-    session.setInfo(
-        {"com.example.test", "/com/example/test", "com.example.Test"});
 
     st = session.registerBuilder()
         .addMethod("testInt8",       &t, &Test::testInt8)

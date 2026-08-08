@@ -20,6 +20,14 @@ struct ServiceInfo {
     std::string path;
     std::string interface;
 };
+
+enum class SessionType : uint8_t {
+    SYSTEM,
+    USER,
+    PEER,
+    INVALID
+};
+
 }
 
 #endif //! SSDBUS_UTILS_HPP

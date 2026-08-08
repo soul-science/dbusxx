@@ -44,12 +44,10 @@ public:
 // ── main ─────────────────────────────────────────────────────────────────
 
 int main() {
-    Session session(false);
-    Calc calc;
-
-    session.setInfo(
+    auto session = Session::userSession(
         {"com.example.register", "/com/example/register", "com.example.Register"}
     );
+    Calc calc;
 
     // ── 注册静态函数 ─────────────────────────────────────────────────
     Status st = session.registerMethod("staticAdd", staticAdd);

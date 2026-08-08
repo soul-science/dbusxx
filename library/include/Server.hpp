@@ -18,17 +18,13 @@ public:
     Server() = delete;
 
     explicit Server(ServiceInfo aInfo, bool aIsSystem = false)
-        : mSession(aIsSystem)
-        , mLooper(mSession)
-        , mStatus(mSession.setInfo(aInfo)) {}
+        : mSession(aIsSystem ?
+            Session::systemSession(aInfo) : Session::userSession(aInfo))
+        , mLooper(mSession) {}
 
-    explicit Server(std::string aName, std::string aPath,
-        std::string aInterface, bool aIsSystem = false)
-        : mSession(aIsSystem)
-        , mLooper(mSession)
-        , mStatus(mSession.setInfo({
-            aName, aPath, aInterface
-        })) {}
+    explicit Server(std::string_view aSocket)
+        : mSession(Session::peerSession(aSocket))
+        , mLooper(mSession) {}
 
     Server(Server&& aOther) noexcept
         : mSession(std::move(aOther.mSession))
@@ -117,6 +113,10 @@ public:
 
     [[nodiscard]] Status status() const {
         return mStatus.isError() ? mStatus : mLooper.status();
+    }
+
+    [[nodiscard]] SessionType type() const {
+        return mSession.type();
     }
 
 protected:

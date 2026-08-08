@@ -54,13 +54,15 @@ public:
     using PropertyHandlerMap = std::unordered_map<std::string, PropertyHandlerInfo>;
     using SignalHandlerVector = std::vector<SignalHandlerInfo>;
 
-    explicit SessionPrivate(bool aIsSystem)
-        : mRawBus(Adaptor::RawBusSharePtr::make(aIsSystem))
-        , mIsSystem(aIsSystem) {
-        setDaemonDeathWatcher();
-    }
 
     SessionPrivate() = default;
+
+    explicit SessionPrivate(SessionType aType, std::string_view aSocket)
+        : mRawBus(makePrivate(aType, aSocket))
+        , mType(aType)
+        , mSocket(aSocket) {
+        setDaemonDeathWatcher();
+    }
 
     ~SessionPrivate() {
         if (mRawBus.get()) {
@@ -94,7 +96,7 @@ public:
             Adaptor::RawBus::closeBus(mRawBus.get());
         }
 
-        mRawBus = Adaptor::RawBusSharePtr::make(mIsSystem);
+        mRawBus = makePrivate(mType);
         if (!mRawBus) {
             return Status(StatusCode::NOT_CONNECTED);
         }
@@ -119,6 +121,14 @@ public:
 
     const ServiceInfo& info() const {
         return mInfo;
+    }
+
+    std::string socket() const {
+        return mSocket;
+    }
+
+    SessionType type() const {
+        return mType;
     }
 
     ServiceInfo& info() {
@@ -222,6 +232,19 @@ public:
     }
 
 private:
+    static Adaptor::RawBusSharePtr makePrivate(SessionType aType, std::string_view aSocket = "") {
+        switch (aType) {
+            case SessionType::USER:
+                return Adaptor::RawBusSharePtr::makeUser();
+            case SessionType::SYSTEM:
+                return Adaptor::RawBusSharePtr::makeSystem();
+            case SessionType::PEER:
+                return Adaptor::RawBusSharePtr::makePeer(aSocket);
+            default:
+                return Adaptor::RawBusSharePtr(nullptr, false);
+        }
+    }
+
     void setDaemonDeathWatcher() {
         Adaptor::RawBus::setWatchBind(mRawBus.get(), true);
         Adaptor::RawBus::setExitOnDisconnect(mRawBus.get(), false);
@@ -229,7 +252,8 @@ private:
     }
 
     Adaptor::RawBusSharePtr mRawBus { nullptr };
-    bool mIsSystem { false };
+    SessionType mType { false };
+    std::string mSocket;
     ServiceInfo mInfo;
     MethodMap mRegisteredMethods;
     SignalMap mRegisteredSignals;

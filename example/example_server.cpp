@@ -31,7 +31,7 @@ class DemoServer : public Server<DemoServer> {
 public:
     DemoServer()
         : Server(ServiceInfo{"com.example.demo", "/com/example/demo",
-                             "com.example.Demo"}, false /* session bus */) {}
+                             "com.example.Demo"}) {}
 
     // ─ 基础类型方法 (echo 回显) ─
 
@@ -290,8 +290,8 @@ int main() {
     //  syncClient: 纯 callSync，不绑事件循环，避免与 sd_bus_call 竞争 fd
     //  asyncClient: 绑事件循环，用于收信号 + callAsync
     std::cout << "\n=== Step 2: Creating client sessions ===" << std::endl;
-    Session syncClient(false);
-    Session asyncClient(false);
+    Session syncClient = Session::userSession();
+    Session asyncClient = Session::userSession();
 
     const char* svc  = "com.example.demo";
     const char* path = "/com/example/demo";

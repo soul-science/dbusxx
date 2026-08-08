@@ -139,10 +139,6 @@ public:
         }
     };
 
-    explicit Session(bool aIsSystem = false)
-        : mPrivate(std::make_shared<Private::SessionPrivate>(aIsSystem))
-        , mRepsPtr(std::make_shared<PendingRepsV>()) {}
-
     ~Session() = default;
 
     Session(const Session& aOther) = default;
@@ -151,16 +147,36 @@ public:
     Session(Session&& aOther) noexcept = default;
     Session& operator=(Session&& aOther) noexcept = default;
 
-    static Session systemBus() {
-        return Session(true);
+    static Session systemSession() {
+        return Session(SessionType::SYSTEM);
     }
 
-    static Session sessionBus() {
-        return Session(false);
+    static Session systemSession(ServiceInfo aInfo) {
+        Session s(SessionType::SYSTEM);
+        s.mPrivate->setInfo(aInfo);
+        return s;
     }
 
-    Status setInfo(ServiceInfo aInfo) {
-        return mPrivate->setInfo(aInfo);
+    static Session userSession() {
+        return Session(SessionType::USER);
+    }
+
+    static Session userSession(ServiceInfo aInfo) {
+        Session s(SessionType::USER);
+        s.mPrivate->setInfo(aInfo);
+        return s;
+    }
+
+    static Session peerSession(std::string_view aSocket) {
+        return Session(SessionType::PEER, aSocket);
+    }
+
+    SessionType type() const {
+        return mPrivate->type();
+    }
+
+    std::string socket() const {
+        return mPrivate->socket();
     }
 
     Status rebuild() {
@@ -363,6 +379,10 @@ public:
     }
 
 private:
+    explicit Session(SessionType aType, std::string_view aSocket = "")
+        : mPrivate(std::make_shared<Private::SessionPrivate>(aType, aSocket))
+        , mRepsPtr(std::make_shared<PendingRepsV>()) {}
+
     template<typename T>
     Method::PropertyWrapper<T>* getPropPrivate(std::string_view aName) {
         auto it = mPrivate->properties().find(aName.data());
@@ -377,7 +397,6 @@ private:
         
         return p;
     }
-
 
     std::shared_ptr<Private::SessionPrivate> mPrivate { nullptr };
     std::shared_ptr<PendingRepsV> mRepsPtr { nullptr };

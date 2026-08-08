@@ -2,6 +2,7 @@
 #define SSDBUS_CLIENT_HPP
 
 #include <memory>
+#include <mutex>
 #include <future>
 #include <string>
 #include <thread>
@@ -14,20 +15,13 @@
 namespace SSDbus {
 
 class Client {
-struct SyncPool {
-    Session session;
-
-    explicit SyncPool(bool aIsSystem)
-        : session(aIsSystem) {}
-};
-
 struct AsyncPool {
     Session session;
     Looper looper;
     std::thread thread;
 
-    explicit AsyncPool(bool aIsSystem)
-        : session(aIsSystem)
+    explicit AsyncPool(Session s)
+        : session(std::move(s))
         , looper(session)
         , thread(&Looper::run, &looper) {}
 
@@ -38,47 +32,48 @@ struct AsyncPool {
 };
 
 public:
+    Client() = default;
+
     explicit Client(std::string aService,
         std::string aPath, std::string aInterface, bool aIsSystem = false)
-        : mInfo({aService, aPath, aInterface})
-        , mSyncPool(getSyncPool(aIsSystem))
-        , mAsyncPool(getAsyncPool(aIsSystem))
+        : mAsyncPool(getAsyncPool(
+            aIsSystem ? SessionType::SYSTEM : SessionType::USER))
         , mAsyncPtr(&mAsyncPool->session)
         , mLooper(&mAsyncPool->looper)
-        , mIsSystem(aIsSystem) {}
+        , mType(aIsSystem ? SessionType::SYSTEM : SessionType::USER)
+        , mInfo({aService, aPath, aInterface}){}
 
-    explicit Client(ServiceInfo aInfo, bool aIsSystem = false)
-        : mInfo(aInfo)
-        , mSyncPool(getSyncPool(aIsSystem))
-        , mAsyncPool(getAsyncPool(aIsSystem))
+    explicit Client(std::string_view aSocket)
+        : mAsyncPool(getAsyncPool(SessionType::PEER, aSocket))
         , mAsyncPtr(&mAsyncPool->session)
         , mLooper(&mAsyncPool->looper)
-        , mIsSystem(aIsSystem) {}
+        , mType(SessionType::PEER)
+        , mSocket(aSocket.data()) {}
 
     explicit Client(Looper& aLooper, std::string aService,
-        std::string aPath, std::string aInterface, bool aIsSystem = false)
+        std::string aPath, std::string aInterface)
         : mInfo({aService, aPath, aInterface})
-        , mSyncPool(getSyncPool(aIsSystem))
         , mLooper(&aLooper)
         , mAsyncPtr(aLooper.session())
-        , mIsSystem(aIsSystem) {}
+        , mType(aLooper.session()->type())
+        , mSocket(aLooper.session()->socket()) {}
 
-    explicit Client(Looper& aLooper, ServiceInfo aInfo, bool aIsSystem = false)
+    explicit Client(Looper& aLooper, ServiceInfo aInfo)
         : mInfo(aInfo)
-        , mSyncPool(getSyncPool(aIsSystem))
         , mLooper(&aLooper)
         , mAsyncPtr(aLooper.session())
-        , mIsSystem(aIsSystem) {}
+        , mType(aLooper.session()->type())
+        , mSocket(aLooper.session()->socket()) {}
 
     ~Client() = default;
 
     Client(Client&& aOther) noexcept
-        : mInfo(std::move(aOther.mInfo))
-        , mSyncPool(std::move(aOther.mSyncPool))
-        , mAsyncPool(std::move(aOther.mAsyncPool))
+        : mAsyncPool(std::move(aOther.mAsyncPool))
         , mAsyncPtr(aOther.mAsyncPtr)
         , mLooper(aOther.mLooper)
-        , mIsSystem(aOther.mIsSystem) {
+        , mType(aOther.mType)
+        , mInfo(std::move(aOther.mInfo))
+        , mSocket(aOther.mSocket) {
         aOther.mLooper = nullptr;
         aOther.mAsyncPtr = nullptr;
     }
@@ -88,12 +83,12 @@ public:
             return *this;
         }
 
-        mInfo = std::move(aOther.mInfo);
-        mSyncPool  = std::move(aOther.mSyncPool);
         mAsyncPool = std::move(aOther.mAsyncPool);
         mAsyncPtr = aOther.mAsyncPtr;
         mLooper = aOther.mLooper;
-        mIsSystem = aOther.mIsSystem;
+        mType = aOther.mType;
+        mInfo = std::move(aOther.mInfo);
+        mSocket = aOther.mSocket;
 
         aOther.mLooper = nullptr;
         aOther.mAsyncPtr = nullptr;
@@ -105,16 +100,18 @@ public:
 
     template<typename Ret=void, uint64_t TimeoutUsec=0, typename... Args>
     Reply<Ret> callSync(std::string_view aMethod, const Args&... aArgs) {
-        auto reply = mSyncPool->session.callSync<Ret, TimeoutUsec>(
-            mInfo.name, mInfo.path, mInfo.interface, aMethod, aArgs...);
-        if (isConnectionError(reply.status().code())) {
-            auto st = mSyncPool->session.rebuild();
-            if (st.isSuccess()) {
-                reply = mSyncPool->session.callSync<Ret, TimeoutUsec>(
-                    mInfo.name, mInfo.path, mInfo.interface, aMethod, aArgs...);
-            }
-        }
-        return reply;
+        std::promise<Reply<Ret>> promise;
+        std::future<Reply<Ret>> future = promise.get_future();
+        mLooper->post(
+            [this, &promise, method = std::string(aMethod),
+             aArgs = std::make_tuple(aArgs...)] () mutable -> void {
+                std::apply([this, &promise, &method](auto&&... aUnpack) {
+                    promise.set_value(mAsyncPtr->callSync<Ret, TimeoutUsec>(
+                        mInfo.name, mInfo.path, mInfo.interface, method, aUnpack...));
+            }, aArgs);
+        });
+
+        return future.get();
     }
 
     template<typename Ret=void, uint64_t TimeoutUsec=0, typename... Args>
@@ -123,10 +120,10 @@ public:
         std::future<PendingReply<Ret>> future = promise.get_future();
         mLooper->post(
             [this, &promise, method = std::string(aMethod),
-            aArgs = std::make_tuple(aArgs...)] () mutable -> void {
-            std::apply([this, &promise, &method](auto&&... aUnpack) {
-                promise.set_value(mAsyncPtr->callAsync<Ret, TimeoutUsec>(
-                    mInfo.name, mInfo.path, mInfo.interface, method, aUnpack...));
+             aArgs = std::make_tuple(aArgs...)] () mutable -> void {
+                std::apply([this, &promise, &method](auto&&... aUnpack) {
+                    promise.set_value(mAsyncPtr->callAsync<Ret, TimeoutUsec>(
+                        mInfo.name, mInfo.path, mInfo.interface, method, aUnpack...));
             }, aArgs);
         });
 
@@ -185,32 +182,33 @@ public:
 
     template<typename Ret>
     Reply<Ret> getProperty(std::string_view aProp) {
-        Reply<Ret> reply = mSyncPool->session.getRemoteProperty<Ret>(
-            mInfo.name, mInfo.path, mInfo.interface, aProp);
-        if (isConnectionError(reply.status().code())) {
-            auto st = mSyncPool->session.rebuild();
-            if (st.isSuccess()) {
-                reply = mSyncPool->session.getRemoteProperty<Ret>(
-                    mInfo.name, mInfo.path, mInfo.interface, aProp);
-            }
-        }
+        std::promise<Reply<Ret>> promise;
+        std::future<Reply<Ret>> future = promise.get_future();
+        mLooper->post(
+            [this, &promise,
+             prop = std::string(aProp)] () mutable -> void {
+            promise.set_value(mAsyncPtr->getRemoteProperty<Ret>(
+                mInfo.name, mInfo.path, mInfo.interface, prop
+            ));
+        });
 
-        return reply;
+        return future.get();
     }
 
     template<typename T>
     Status setProperty(std::string_view aProp, const T& aValue) {
-        Status st = mSyncPool->session.setRemoteProperty<>(
-            mInfo.name, mInfo.path, mInfo.interface, aProp, aValue);
-        if (isConnectionError(st.code())) {
-            auto st = mSyncPool->session.rebuild();
-            if (st.isSuccess()) {
-                st = mSyncPool->session.setRemoteProperty<>(
-                    mInfo.name, mInfo.path, mInfo.interface, aProp, aValue);
-            }
-        }
+        std::promise<Status> promise;
+        std::future<Status> future = promise.get_future();
+        mLooper->post(
+            [this, &promise, prop = std::string(aProp),
+             value = aValue] () mutable -> void {
+            promise.set_value(mAsyncPtr->setRemoteProperty<T>(
+                mInfo.name, mInfo.path, mInfo.interface,
+                prop, value
+            ));
+        });
 
-        return st;
+        return future.get();
     }
 
     template<typename Callback>
@@ -230,53 +228,52 @@ public:
     }
 
 private:
-    static std::weak_ptr<SyncPool>& syncPoolweak(bool aIsSystem) {
-        thread_local std::weak_ptr<SyncPool> sSyncUser;
-        thread_local std::weak_ptr<SyncPool> sSyncSystem;
-
-        return aIsSystem ? sSyncSystem : sSyncUser;
+    static Session createSession(SessionType aType, std::string_view aSocket) {
+        switch (aType) {
+            case SessionType::SYSTEM:
+                return Session::systemSession();
+            case SessionType::PEER:
+                return Session::peerSession(aSocket);
+            case SessionType::USER:
+            default:
+                return Session::userSession();
+        }
     }
 
-    static std::weak_ptr<AsyncPool>& asyncPoolweak(bool aIsSystem) {
-        thread_local std::weak_ptr<AsyncPool> sAsyncUser;
-        thread_local std::weak_ptr<AsyncPool> sAsyncSystem;
+    static std::shared_ptr<AsyncPool> getAsyncPool(
+        SessionType aType, std::string_view aSocket = "") {
+        // 函数内 static —— 懒初始化，线程安全
+        static std::weak_ptr<AsyncPool> sUserPool;
+        static std::weak_ptr<AsyncPool> sSystemPool;
+        static std::mutex sPeerLock;
+        static std::map<std::string, std::weak_ptr<AsyncPool>> sPeerPools;
 
-        return aIsSystem ? sAsyncSystem : sAsyncUser;
-    }
-
-    static std::shared_ptr<SyncPool> getSyncPool(bool aIsSystem) {
-        auto& weakPtr = syncPoolweak(aIsSystem);
-        auto sharePtr = weakPtr.lock();
-        if (!sharePtr) {
-            weakPtr = sharePtr = std::make_shared<SyncPool>(aIsSystem);
+        if (aType == SessionType::PEER) {
+            std::lock_guard lock(sPeerLock);
+            auto& weak = sPeerPools[aSocket.data()];
+            auto sp = weak.lock();
+            if (!sp) {
+                weak = sp = std::make_shared<AsyncPool>(
+                    createSession(aType, aSocket));
+            }
+            return sp;
         }
 
-        return sharePtr;
-    }
-
-    static std::shared_ptr<AsyncPool> getAsyncPool(bool aIsSystem) {
-        auto& weakPtr = asyncPoolweak(aIsSystem);
-        auto sharePtr = weakPtr.lock();
-        if (!sharePtr) {
-            weakPtr = sharePtr = std::make_shared<AsyncPool>(aIsSystem);
+        auto& weak = (aType == SessionType::SYSTEM) ? sSystemPool : sUserPool;
+        auto sp = weak.lock();
+        if (!sp) {
+            weak = sp = std::make_shared<AsyncPool>(
+                createSession(aType, aSocket));
         }
-
-        return sharePtr;
+        return sp;
     }
 
-    static bool isConnectionError(StatusCode code) {
-        return code == StatusCode::NOT_CONNECTED
-            || code == StatusCode::DISCONNECTED
-            || code == StatusCode::CONN_RESET;
-    }
-
-    ServiceInfo mInfo;
-    std::shared_ptr<SyncPool> mSyncPool { nullptr };
     std::shared_ptr<AsyncPool> mAsyncPool { nullptr };
-
     Session* mAsyncPtr { nullptr };
     Looper* mLooper { nullptr };
-    bool mIsSystem { false };
+    SessionType mType { SessionType::INVALID };
+    ServiceInfo mInfo;
+    std::string mSocket;
 };
 
 }
