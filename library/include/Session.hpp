@@ -28,9 +28,8 @@ public:
     struct RegisterBuilder {
         Private::SessionPrivate* session;
         Adaptor::VTableRegistrar reg;
-        Private::SessionPrivate::MethodMap mMethods;
-        Private::SessionPrivate::SignalMap mSignals;
-        Private::SessionPrivate::PropertyMap mProperties;
+        std::string key;
+        Private::SessionPrivate::ObjectInfo info;
 
         template<typename Func>
         RegisterBuilder& addMethod(std::string_view aName, Func aFunc) {
@@ -40,11 +39,17 @@ public:
             std::string regName = aName.data() + std::string("_") + input;
             std::cout << "addMethod: " << regName << std::endl;
             auto data = std::make_shared<wrapper>(session, aFunc);
-            mMethods[aName.data()] = {
-                std::move(data), nullptr
+            void* dataPtr = data.get();
+
+            info.methods[aName.data()] = {
+                std::move(data),
+                input,
+                output,
+                &wrapper::onCall
             };
+
             reg.addMethod(aName, std::move(input), std::move(output),
-                &wrapper::onCall, mMethods[aName.data()].data.get());
+                &wrapper::onCall, dataPtr);
 
             return *this;
         }
@@ -63,8 +68,8 @@ public:
             std::string input = Method::getArgsString<Args...>();
             std::string regName = aName.data() + std::string("_") + input;
             std::cout << "addSignal: " << regName << std::endl;
-            mSignals[aName.data()] = {nullptr};
-            reg.addSiganl(aName.data(), std::move(input));
+            info.signals[aName.data()] = {input};
+            reg.addSiganl(aName, std::move(input));
 
             return *this;
         }
@@ -76,63 +81,76 @@ public:
             
             auto data = std::make_shared<wrapper>(
                 session, aName.data(), aValue);
-            mProperties[aName.data()] = {std::move(data), nullptr};
+            void* dataPtr = data.get();
+
+            info.properties[aName.data()] = {
+                std::move(data),
+                sig,
+                &wrapper::onGetter,
+                &wrapper::onSetter,
+                writable
+            };
             
-            reg.addProperty(aName, sig,
+            reg.addProperty(aName, std::move(sig),
                 &wrapper::onGetter, &wrapper::onSetter,
-                mProperties[aName.data()].data.get(), writable);
+                dataPtr, writable);
 
             return *this;
         }
 
         Status commit() {
-            for (auto& [name, _] : mMethods) {
-                if (session->methods().count(name)) {
-                    std::cout << "Method <" << name << "> already registered" << std::endl;
-                    return Status(StatusCode::NAME_EXISTS);
+            auto& objects = session->objects();
+            auto it = objects.find(key);
+            if (it != objects.end()) {
+                for (auto& [name, entry] : it->second.methods) {
+                    if (info.methods.count(name)) {
+                        continue;
+                    }
+                    reg.addMethod(name, entry.input, entry.output,
+                        entry.callback, entry.data.get());
+                }
+
+                for (auto& [name, entry] : it->second.signals) {
+                    if (info.signals.count(name)) {
+                        continue;
+                    }
+
+                    reg.addSiganl(name, entry.input);
+                }
+
+                for (auto& [name, entry] : it->second.properties) {
+                    if (info.properties.count(name)) {
+                        continue;
+                    }
+
+                    reg.addProperty(name, entry.signature,
+                        entry.getter, entry.setter,
+                        entry.data.get(), entry.writable);
                 }
             }
 
-            for (auto& [name, _] : mSignals) {
-                if (session->signals().count(name)) {
-                    std::cout << "Signal <" << name << "> already registered" << std::endl;
-                    return Status(StatusCode::NAME_EXISTS);
-                }
-            }
 
-            for (auto& [name, _] : mProperties) {
-                if (session->properties().count(name)) {
-                    std::cout << "Property <" << name << "> already registered" << std::endl;
-                    return Status(StatusCode::NAME_EXISTS);
-                }
-            }
-
-            std::vector<std::unique_ptr<Adaptor::VTableContext>> ctxs;
-            auto st = reg.commit(ctxs);
+            std::unique_ptr<Adaptor::VTableContext> ctx;
+            auto st = reg.commit(ctx);
             if (st.isError()) {
                 return st;
             }
 
-            std::unordered_map<std::string,
-                std::unique_ptr<Adaptor::VTableContext>> ctxsbyName;
-            for (auto& ctx : ctxs) {
-                std::string name = ctx->name;
-                ctxsbyName[name] = std::move(ctx);
-            }
-
-            for (auto& [k, v] : mMethods) {
-                v.context = std::move(ctxsbyName[k]);
-                session->methods()[k] = std::move(v);
-            }
-
-            for (auto& [k, v] : mSignals) {
-                v.context = std::move(ctxsbyName[k]);
-                session->signals()[k] = std::move(v);
-            }
-
-            for (auto& [k, v] : mProperties) {
-                v.context = std::move(ctxsbyName[k]);
-                session->properties()[k] = std::move(v);
+            if (it != objects.end()) {
+                auto& obj = it->second;
+                for (auto& [name, entry] : info.methods) {
+                    obj.methods[name] = std::move(entry);   // 覆盖旧 entry
+                }
+                for (auto& [name, entry] : info.signals) {
+                    obj.signals[name] = std::move(entry);
+                }
+                for (auto& [name, entry] : info.properties) {
+                    obj.properties[name] = std::move(entry);
+                }
+                obj.context = std::move(ctx);
+            } else {
+                info.context = std::move(ctx);
+                objects[key] = std::move(info);
             }
 
             return Status(StatusCode::SUCCESS);
@@ -151,9 +169,9 @@ public:
         return Session(SessionType::SYSTEM);
     }
 
-    static Session systemSession(ServiceInfo aInfo) {
-        Session s(SessionType::SYSTEM);
-        s.mPrivate->setInfo(aInfo);
+    static Session systemSession(std::string_view aServiceName) {
+        Session s(SessionType::SYSTEM, aServiceName);
+        s.mPrivate->requestNameToDaemon();
         return s;
     }
 
@@ -161,22 +179,37 @@ public:
         return Session(SessionType::USER);
     }
 
-    static Session userSession(ServiceInfo aInfo) {
-        Session s(SessionType::USER);
-        s.mPrivate->setInfo(aInfo);
+    static Session userSession(std::string_view aServiceName) {
+        Session s(SessionType::USER, aServiceName);
+        s.mPrivate->requestNameToDaemon();
         return s;
     }
 
-    static Session peerSession(std::string_view aSocket) {
-        return Session(SessionType::PEER, aSocket);
+    static Session peerSession(std::string_view aServiceName) {
+        return Session(SessionType::PEER, aServiceName);
+    }
+
+    static Session createSession(SessionType aType = SessionType::USER,
+        std::string_view aServiceName = "") {
+        switch (aType) {
+            case SessionType::SYSTEM:
+                return aServiceName.empty() ?
+                    systemSession() : systemSession(aServiceName);
+            case SessionType::PEER:
+                return peerSession(aServiceName);
+            case SessionType::USER:
+            default:
+                return aServiceName.empty() ?
+                    userSession() : userSession(aServiceName);
+        }
     }
 
     SessionType type() const {
         return mPrivate->type();
     }
 
-    std::string socket() const {
-        return mPrivate->socket();
+    std::string serviceName() const {
+        return mPrivate->serviceName();
     }
 
     Status rebuild() {
@@ -199,39 +232,41 @@ public:
         mPrivate->flush();
     }
 
-    auto registerBuilder() {
+    auto registerBuilder(std::string_view aPath, std::string aIface) {
         return RegisterBuilder {
             mPrivate.get(),
             Adaptor::VTableRegistrar(
-                mPrivate.get()->rawBus(), mPrivate->info().path,
-                mPrivate->info().interface)
+                mPrivate.get()->rawBus(), aPath, aIface),
+            Private::SessionPrivate::makeKey(aPath, aIface)
         };
     }
 
-    template<typename Func>
-    Status registerMethod(std::string_view aFuncName, Func aFunc) {
-        return Method::registerSingleMethod(mPrivate.get(), aFuncName, aFunc);
-    }
+    // template<typename Func>
+    // Status registerMethod(std::string_view aPath, std::string aIface,
+    //     std::string_view aFuncName, Func aFunc) {
+    //     return Method::registerSingleMethod(mPrivate.get(), aFuncName, aFunc);
+    // }
 
-    template<typename Cls, typename Ret, typename... Args>
-    Status registerMethod(std::string_view aFuncName,
-        Cls* aCls, Ret(Cls::*aFunc)(Args...)) {
-        return Method::registerSingleMethod(
-            mPrivate.get(), aFuncName,
-            [aCls, aFunc] (Args... aArgs) -> Ret {
-                return (aCls->*aFunc)(std::forward<Args>(aArgs)...);
-            }
-        );
-    }
+    // template<typename Cls, typename Ret, typename... Args>
+    // Status registerMethod(std::string_view aPath, std::string aIface,
+    //     std::string_view aFuncName, Cls* aCls, Ret(Cls::*aFunc)(Args...)) {
+    //     return Method::registerSingleMethod(
+    //         mPrivate.get(), aFuncName,
+    //         [aCls, aFunc] (Args... aArgs) -> Ret {
+    //             return (aCls->*aFunc)(std::forward<Args>(aArgs)...);
+    //         }
+    //     );
+    // }
 
-    template<typename... Args>
-    Status registerSignal(std::string_view aSignalName) {
-        return Method::registerSingleSignal<Args...>(mPrivate.get(), aSignalName);
-    }
+    // template<typename... Args>
+    // Status registerSignal(std::string_view aPath, std::string aIface,
+    //         std::string_view aSignalName) {
+    //     return Method::registerSingleSignal<Args...>(mPrivate.get(), aSignalName);
+    // }
 
     template<typename T>
-    Status registerObject(T* aObj) {
-        auto builder = registerBuilder();
+    Status registerObject(std::string_view aPath, std::string aIface, T* aObj) {
+        auto builder = registerBuilder(aPath, aIface);
         for (auto& entry : MetaObject<T>::registry()) {
             entry.registerFn(&builder, aObj);
         }
@@ -322,8 +357,9 @@ public:
     }
 
     template<typename T>
-    Status getLocalProperty(std::string_view aName, T& aValue) {
-        auto p = getPropPrivate<T>(aName);
+    Status getLocalProperty(std::string_view aPath, std::string_view aIface,
+        std::string_view aName, T& aValue) {
+        auto p = getPropPrivate<T>(aPath, aIface, aName);
         if (!p) {
             return Status(StatusCode::INVALID_ARG);
         }
@@ -333,8 +369,9 @@ public:
     }
 
     template<typename T>
-    Status setLocalProperty(std::string_view aName, T aValue) {
-        auto p = getPropPrivate<T>(aName);
+    Status setLocalProperty(std::string_view aPath, std::string_view aIface,
+        std::string_view aName, T aValue) {
+        auto p = getPropPrivate<T>(aPath, aIface, aName);
         if (!p) {
             return Status(StatusCode::INVALID_ARG);
         }
@@ -344,8 +381,9 @@ public:
     }
 
     template<typename T>
-    Status onLocalPropertyChanged(std::string_view aName, std::function<void(const T&)>&& aCallback) {
-        auto p = getPropPrivate<T>(aName);
+    Status onLocalPropertyChanged(std::string_view aPath, std::string_view aIface,
+        std::string_view aName, std::function<void(const T&)>&& aCallback) {
+        auto p = getPropPrivate<T>(aPath, aIface, aName);
         if (!p) {
             return Status(StatusCode::INVALID_ARG);
         }
@@ -379,18 +417,26 @@ public:
     }
 
 private:
-    explicit Session(SessionType aType, std::string_view aSocket = "")
-        : mPrivate(std::make_shared<Private::SessionPrivate>(aType, aSocket))
+    explicit Session(SessionType aType, std::string_view aServiceName = "")
+        : mPrivate(std::make_shared<Private::SessionPrivate>(aType, aServiceName))
         , mRepsPtr(std::make_shared<PendingRepsV>()) {}
 
     template<typename T>
-    Method::PropertyWrapper<T>* getPropPrivate(std::string_view aName) {
-        auto it = mPrivate->properties().find(aName.data());
-        if (it == mPrivate->properties().end()) {
+    Method::PropertyWrapper<T>* getPropPrivate(std::string_view aPath,
+        std::string_view aIface, std::string_view aName) {
+        auto objIter = mPrivate->objects().find(
+            Private::SessionPrivate::makeKey(aPath, aIface));
+        if (objIter == mPrivate->objects().end()) {
             return nullptr;
         }
 
-        auto p = static_cast<Method::PropertyWrapper<T>*>(it->second.data.get());
+        auto& properties = objIter->second.properties;
+        auto propIter = properties.find(aName.data());
+        if (propIter == properties.end()) {
+            return nullptr;
+        }
+
+        auto p = static_cast<Method::PropertyWrapper<T>*>(propIter->second.data.get());
         if (p->type != typeid(T).name()) {
             return nullptr;
         }

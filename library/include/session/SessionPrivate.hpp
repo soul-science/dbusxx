@@ -3,6 +3,7 @@
 
 #include <string>
 #include <memory>
+#include <set>
 #include <unordered_map>
 #include <iostream>
 
@@ -19,18 +20,31 @@ namespace SSDbus {
 namespace Private {
 class SessionPrivate {
 public:
-    struct MethodInfo {
+    struct MethodEntry {
         std::shared_ptr<void> data;
-        std::unique_ptr<Adaptor::VTableContext> context;
+        std::string input;
+        std::string output;
+        Adaptor::RawBusMessageHandler callback;
     };
 
-    struct SignalInfo {
-        std::unique_ptr<Adaptor::VTableContext> context;
+    struct SignalEntry {
+        std::string input;
     };
 
-    struct PropertyInfo {
+    struct PropertyEntry {
         std::shared_ptr<void> data;
+        std::string signature;
+        Adaptor::RawBusPropertyGetter getter;
+        Adaptor::RawBusPropertySetter setter;
+        bool writable;
+    };
+
+    //! (path, interface) : ObjectInfo
+    struct ObjectInfo {
         std::unique_ptr<Adaptor::VTableContext> context;
+        std::unordered_map<std::string, MethodEntry> methods;
+        std::unordered_map<std::string, SignalEntry> signals;
+        std::unordered_map<std::string, PropertyEntry> properties;
     };
 
     struct SignalHandlerInfo {
@@ -48,19 +62,34 @@ public:
         std::shared_ptr<void> handler; 
     };
 
-    using MethodMap = std::unordered_map<std::string, MethodInfo>;
-    using SignalMap = std::unordered_map<std::string, SignalInfo>;
-    using PropertyMap = std::unordered_map<std::string, PropertyInfo>;
+    inline static std::string makeKey(std::string_view path, std::string_view iface) {
+        std::string key;
+        key.reserve(path.size() + iface.size() + 1);
+        key.append(path).append(":").append(iface);
+        return key;
+    }
+
+    inline static std::pair<std::string_view, std::string_view>
+        parseKey(std::string_view key) {
+        auto pos = key.rfind(':');
+        if (pos == std::string_view::npos) {
+            return {key, {}};
+        }
+
+        return {key.substr(0, pos), key.substr(pos + 1)};
+    }
+
+    using ObjectMap = std::unordered_map<std::string, ObjectInfo>;
     using PropertyHandlerMap = std::unordered_map<std::string, PropertyHandlerInfo>;
     using SignalHandlerVector = std::vector<SignalHandlerInfo>;
 
 
     SessionPrivate() = default;
 
-    explicit SessionPrivate(SessionType aType, std::string_view aSocket)
-        : mRawBus(makePrivate(aType, aSocket))
+    explicit SessionPrivate(SessionType aType, std::string_view aServiceName)
+        : mRawBus(makePrivate(aType, aServiceName))
         , mType(aType)
-        , mSocket(aSocket) {
+        , mServiceName(aServiceName) {
         setDaemonDeathWatcher();
     }
 
@@ -72,16 +101,8 @@ public:
 
     Status reconnect() {
         //! Clear all slots
-        for (auto& [name, info] : mRegisteredMethods) {
-            info.context->slot = Adaptor::RawSlotSharePtr();
-        }
-            
-        for (auto& [name, info] : mRegisteredSignals) {
-            info.context->slot = Adaptor::RawSlotSharePtr();
-        }
-            
-        for (auto& [name, info] : mRegisteredProperties) {
-            info.context->slot = Adaptor::RawSlotSharePtr();
+        for (auto& [name, object] : mRegisteredObjects) {
+            object.context->slot = Adaptor::RawSlotSharePtr();
         }
             
         for (auto& inf : mRegisteredSigHandlers) {
@@ -102,8 +123,10 @@ public:
         }
 
         setDaemonDeathWatcher();
-        if (!mInfo.name.empty()) {
-            return setInfo(mInfo);
+        if ((mType == SessionType::USER
+            || mType == SessionType::SYSTEM)
+            && !mServiceName.empty()) {
+            return requestNameToDaemon();
         }
 
         return Status(StatusCode::SUCCESS);
@@ -123,8 +146,8 @@ public:
         return mInfo;
     }
 
-    std::string socket() const {
-        return mSocket;
+    std::string serviceName() const {
+        return mServiceName;
     }
 
     SessionType type() const {
@@ -135,16 +158,8 @@ public:
         return mInfo;
     }
 
-    MethodMap& methods() {
-        return mRegisteredMethods;
-    }
-
-    SignalMap& signals() {
-        return mRegisteredSignals;
-    }
-
-    PropertyMap& properties() {
-        return mRegisteredProperties;
+    ObjectMap& objects() {
+        return mRegisteredObjects;
     }
 
     SignalHandlerVector& signalHandlers() {
@@ -153,6 +168,14 @@ public:
 
     PropertyHandlerMap& propertyHandlers() {
         return mRegisteredPropHandlers;
+    }
+
+    Status requestNameToDaemon() {
+        Status st = Adaptor::RawBus::setUniqueName(mRawBus.get(), mServiceName, 0);
+        if (st.isError()) {
+            std::cout << "setUniqueName failed, reason:" << st.message() << std::endl;
+        }
+        return st;
     }
 
     Status setInfo(ServiceInfo aInfo) {
@@ -232,14 +255,15 @@ public:
     }
 
 private:
-    static Adaptor::RawBusSharePtr makePrivate(SessionType aType, std::string_view aSocket = "") {
+    static Adaptor::RawBusSharePtr makePrivate(SessionType aType,
+        std::string_view aServiceName = "") {
         switch (aType) {
             case SessionType::USER:
                 return Adaptor::RawBusSharePtr::makeUser();
             case SessionType::SYSTEM:
                 return Adaptor::RawBusSharePtr::makeSystem();
             case SessionType::PEER:
-                return Adaptor::RawBusSharePtr::makePeer(aSocket);
+                return Adaptor::RawBusSharePtr::makePeer(aServiceName);
             default:
                 return Adaptor::RawBusSharePtr(nullptr, false);
         }
@@ -253,11 +277,13 @@ private:
 
     Adaptor::RawBusSharePtr mRawBus { nullptr };
     SessionType mType { false };
-    std::string mSocket;
+    std::string mServiceName;
+
     ServiceInfo mInfo;
-    MethodMap mRegisteredMethods;
-    SignalMap mRegisteredSignals;
-    PropertyMap mRegisteredProperties;
+    // MethodMap mRegisteredMethods;
+    // SignalMap mRegisteredSignals;
+    // PropertyMap mRegisteredProperties;
+    ObjectMap mRegisteredObjects;
     SignalHandlerVector mRegisteredSigHandlers;
     PropertyHandlerMap mRegisteredPropHandlers;
 };

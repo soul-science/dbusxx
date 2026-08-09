@@ -48,7 +48,7 @@ public:
         , mAsyncPtr(&mAsyncPool->session)
         , mLooper(&mAsyncPool->looper)
         , mType(SessionType::PEER)
-        , mSocket(aSocket.data()) {}
+        , mServiceName(aSocket.data()) {}
 
     explicit Client(Looper& aLooper, std::string aService,
         std::string aPath, std::string aInterface)
@@ -56,14 +56,14 @@ public:
         , mLooper(&aLooper)
         , mAsyncPtr(aLooper.session())
         , mType(aLooper.session()->type())
-        , mSocket(aLooper.session()->socket()) {}
+        , mServiceName(aService) {}
 
     explicit Client(Looper& aLooper, ServiceInfo aInfo)
         : mInfo(aInfo)
         , mLooper(&aLooper)
         , mAsyncPtr(aLooper.session())
         , mType(aLooper.session()->type())
-        , mSocket(aLooper.session()->socket()) {}
+        , mServiceName(aInfo.name) {}
 
     ~Client() = default;
 
@@ -73,7 +73,7 @@ public:
         , mLooper(aOther.mLooper)
         , mType(aOther.mType)
         , mInfo(std::move(aOther.mInfo))
-        , mSocket(aOther.mSocket) {
+        , mServiceName(aOther.mServiceName) {
         aOther.mLooper = nullptr;
         aOther.mAsyncPtr = nullptr;
     }
@@ -88,7 +88,7 @@ public:
         mLooper = aOther.mLooper;
         mType = aOther.mType;
         mInfo = std::move(aOther.mInfo);
-        mSocket = aOther.mSocket;
+        mServiceName = aOther.mServiceName;
 
         aOther.mLooper = nullptr;
         aOther.mAsyncPtr = nullptr;
@@ -273,7 +273,7 @@ private:
     Looper* mLooper { nullptr };
     SessionType mType { SessionType::INVALID };
     ServiceInfo mInfo;
-    std::string mSocket;
+    std::string mServiceName;
 };
 
 }

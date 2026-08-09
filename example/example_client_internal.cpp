@@ -27,8 +27,10 @@ using namespace SSDbus;
 class DemoServer : public Server<DemoServer> {
 public:
     DemoServer()
-        : Server(ServiceInfo{"com.example.demo", "/com/example/demo",
-                             "com.example.Demo"}) {}
+        : Server(
+            "com.example.demo"
+            // ServiceInfo{"com.example.demo", "/com/example/demo","com.example.Demo"}
+        ) {}
 
     int32_t testInt32(int32_t i) {
         std::cout << "[server] testInt32: " << i << std::endl;

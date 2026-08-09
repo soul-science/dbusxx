@@ -17,13 +17,12 @@ class Server : public MetaObject<Derived> {
 public:
     Server() = delete;
 
-    explicit Server(ServiceInfo aInfo, bool aIsSystem = false)
-        : mSession(aIsSystem ?
-            Session::systemSession(aInfo) : Session::userSession(aInfo))
+    explicit Server(SessionType aType, std::string_view aServiceName)
+        : mSession(Session::createSession(aType, aServiceName))
         , mLooper(mSession) {}
 
-    explicit Server(std::string_view aSocket)
-        : mSession(Session::peerSession(aSocket))
+    explicit Server(std::string_view aServiceName)
+        : mSession(Session::createSession(SessionType::USER, aServiceName))
         , mLooper(mSession) {}
 
     Server(Server&& aOther) noexcept

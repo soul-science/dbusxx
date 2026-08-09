@@ -3,6 +3,7 @@
 
 #include "message/PropertyHandler.hpp"
 #include "session/SessionPrivate.hpp"
+#include "adaptor/VTableRegistrar.hpp"
 #include "Status.hpp"
 #include "Utils.hpp"
 
@@ -15,49 +16,37 @@ Status reconnectSession(Private::SessionPrivate* aSession) {
         return st;
     }
 
-    Adaptor::RawBusPtr bus = aSession->rawBus().get();
-    const char* path = aSession->info().path.c_str();
-    const char* iface = aSession->info().interface.c_str();
+    Adaptor::RawBusSharePtr busSp = aSession->rawBus();
+    for (auto& [key, object] : aSession->objects()) {
+        auto [path, iface] = Private::SessionPrivate::parseKey(key);
+        Adaptor::VTableRegistrar reg(busSp, path, iface);
+        for (auto& [name, entry] : object.methods) {
+            reg.addMethod(name, entry.input, entry.output,
+                entry.callback, entry.data.get());
+        }
 
-    for (auto& [name, inf] : aSession->methods()) {
-        Adaptor::RawBusSlotPtr newSlot = nullptr;
-        st = Adaptor::RawBus::addObjectToVTable(
-            bus, newSlot, path, iface,
-            inf.context->vtable.get(),
-            inf.data.get()
-        );
+        for (auto& [name, entry] : object.signals) {
+            reg.addSiganl(name, entry.input);
+        }
+
+        for (auto& [name, entry] : object.properties) {
+            reg.addProperty(name, entry.signature,
+                entry.getter, entry.setter,
+                entry.data.get(), entry.writable);
+        }
+
+        std::unique_ptr<Adaptor::VTableContext> ctx;
+        st = reg.commit(ctx);
         if (st.isError()) {
             return st;
         }
-        inf.context->slot = Adaptor::RawSlotSharePtr(newSlot);
-    }
-
-    for (auto& [name, inf] : aSession->signals()) {
-        Adaptor::RawBusSlotPtr newSlot = nullptr;
-        st = Adaptor::RawBus::addObjectToVTable(
-            bus, newSlot, path, iface,
-            inf.context->vtable.get(), nullptr);
-        if (st.isError()) {
-            return st;
-        }
-        inf.context->slot = Adaptor::RawSlotSharePtr(newSlot);
-    }
-
-    for (auto& [name, inf] : aSession->properties()) {
-        Adaptor::RawBusSlotPtr newSlot = nullptr;
-        st = Adaptor::RawBus::addObjectToVTable(
-            bus, newSlot, path, iface,
-            inf.context->vtable.get(), inf.data.get());
-        if (st.isError()) {
-            return st;
-        }
-        inf.context->slot = Adaptor::RawSlotSharePtr(newSlot);
+        object.context = std::move(ctx);
     }
 
     for (auto& inf : aSession->signalHandlers()) {
         Adaptor::RawBusSlotPtr raw = nullptr;
         st = Adaptor::RawBus::listenSignal(
-            bus, raw,
+            busSp.get(), raw,
             inf.sender, inf.path, inf.iface,
             inf.signal, inf.callback, inf.data.get());
         if (st.isError()) {
@@ -70,7 +59,7 @@ Status reconnectSession(Private::SessionPrivate* aSession) {
         auto* handler = static_cast<Private::PropertyHandler*>(inf.handler.get());
         Adaptor::RawBusSlotPtr raw = nullptr;
         st = Adaptor::RawBus::listenSignal(
-            bus, raw,
+            busSp.get(), raw,
             handler->service, handler->path,
             "org.freedesktop.DBus.Properties", "PropertiesChanged",
             &Private::PropertyHandler::onPropertyChanged, handler);

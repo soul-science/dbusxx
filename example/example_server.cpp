@@ -30,8 +30,10 @@ using namespace SSDbus;
 class DemoServer : public Server<DemoServer> {
 public:
     DemoServer()
-        : Server(ServiceInfo{"com.example.demo", "/com/example/demo",
-                             "com.example.Demo"}) {}
+        : Server(
+            "com.example.demo"
+            // ServiceInfo{"com.example.demo", "/com/example/demo","com.example.Demo"}
+        ) {}
 
     // ─ 基础类型方法 (echo 回显) ─
 

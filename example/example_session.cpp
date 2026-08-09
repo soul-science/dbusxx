@@ -152,7 +152,10 @@ public:
 
 int main() {
     // ① 创建 Session（session bus）
-    Session session = Session::userSession({"com.example.test", "/com/example/test", "com.example.Test"});
+    Session session = Session::userSession(
+        "com.example.test"
+        // {"com.example.test", "/com/example/test", "com.example.Test"}
+    );
     Test t;
 
     // ② 监听外部信号 — 成员函数指针
@@ -171,7 +174,7 @@ int main() {
         });
     std::cout << "listenSignal (lambda): " << st.message() << std::endl;
 
-    st = session.registerBuilder()
+    st = session.registerBuilder("/com/example/test", "com.example.Test")
         .addMethod("testInt8",       &t, &Test::testInt8)
         .addMethod("testUint8",      &t, &Test::testUint8)
         .addMethod("testInt16",      &t, &Test::testInt16)
@@ -200,19 +203,24 @@ int main() {
 
     // ④ 读取属性
     int p1 = 0;
-    st = session.getLocalProperty("property1", p1);
+    st = session.getLocalProperty(
+        "/com/example/test", "com.example.Test", "property1", p1);
     std::cout << "getLocalProperty(property1) = " << p1
               << "  (" << st.message() << ")" << std::endl;
 
     std::string p2;
-    st = session.getLocalProperty("property2", p2);
+    st = session.getLocalProperty(
+        "/com/example/test", "com.example.Test", "property2", p2);
     std::cout << "getLocalProperty(property2) = " << p2
               << "  (" << st.message() << ")" << std::endl;
 
     // ⑤ 监听属性变化
-    st = session.onLocalPropertyChanged<int>("property1", [](int v) {
-        std::cout << "[property] property1 -> " << v << std::endl;
-    });
+    st = session.onLocalPropertyChanged<int>(
+        "/com/example/test", "com.example.Test", "property1",
+        [] (int v) {
+            std::cout << "[property] property1 -> " << v << std::endl;
+        }
+    );
     std::cout << "onLocalPropertyChanged(property1): " << st.message() << std::endl;
 
     // ⑥ 同步调用远程方法

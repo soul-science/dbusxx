@@ -45,7 +45,8 @@ public:
 
 int main() {
     auto session = Session::userSession(
-        {"com.example.register", "/com/example/register", "com.example.Register"}
+        "com.example.register"
+        // {"com.example.register", "/com/example/register", "com.example.Register"}
     );
     Calc calc;
 

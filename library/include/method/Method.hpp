@@ -123,76 +123,76 @@ struct MethodWrapper {
     }
 };
 
-template<typename Func>
-Status registerSingleMethod(
-    Private::SessionPrivate* aSession, std::string_view aFuncName, Func aFunc) {
-    using wrapper = MethodWrapper<Func>;
-    auto data = std::make_shared<wrapper>(
-        aSession, aFunc
-    );
-    auto dataPtr = data.get();
+// template<typename Func>
+// Status registerSingleMethod(
+//     Private::SessionPrivate* aSession, std::string_view aFuncName, Func aFunc) {
+//     using wrapper = MethodWrapper<Func>;
+//     auto data = std::make_shared<wrapper>(
+//         aSession, aFunc
+//     );
+//     auto dataPtr = data.get();
 
-    std::string input = wrapper::input();
-    std::string output = wrapper::output();
+//     std::string input = wrapper::input();
+//     std::string output = wrapper::output();
 
-    std::cout << "input: " << input << ", output:" << output << std::endl;
+//     std::cout << "input: " << input << ", output:" << output << std::endl;
 
-    if (aSession->methods().count(aFuncName.data())) {
-        return Status(StatusCode::NAME_EXISTS);
-    }
+//     if (aSession->methods().count(aFuncName.data())) {
+//         return Status(StatusCode::NAME_EXISTS);
+//     }
 
-    aSession->methods()[aFuncName.data()] = {};
-    auto& methodInfo = aSession->methods()[aFuncName.data()];
+//     aSession->methods()[aFuncName.data()] = {};
+//     auto& methodInfo = aSession->methods()[aFuncName.data()];
 
-    methodInfo.data = data;
+//     methodInfo.data = data;
 
-    //! Create vtable
-    Adaptor::VTableRegistrar reg(aSession->rawBus(), aSession->info().path, aSession->info().interface);
-    reg.addMethod(aFuncName, input, output, &MethodWrapper<Func>::onCall, dataPtr);
-    std::vector<std::unique_ptr<Adaptor::VTableContext>> v;
-    auto st = reg.commit(v);
-    std::cout << "VTableRegistrar code=" << static_cast<int>(st.code())
-        << ", message=" << st.message() << std::endl;
+//     //! Create vtable
+//     Adaptor::VTableRegistrar reg(aSession->rawBus(), aSession->info().path, aSession->info().interface);
+//     reg.addMethod(aFuncName, input, output, &MethodWrapper<Func>::onCall, dataPtr);
+//     std::vector<std::unique_ptr<Adaptor::VTableContext>> v;
+//     auto st = reg.commit(v);
+//     std::cout << "VTableRegistrar code=" << static_cast<int>(st.code())
+//         << ", message=" << st.message() << std::endl;
 
-    if (st.isError()) {
-        aSession->methods().erase(input);
-        return st;
-    }
+//     if (st.isError()) {
+//         aSession->methods().erase(input);
+//         return st;
+//     }
 
-    methodInfo.context = std::move(v.front());
-    v.pop_back();
+//     methodInfo.context = std::move(v.front());
+//     v.pop_back();
 
-    return Status(StatusCode::SUCCESS);
-}
+//     return Status(StatusCode::SUCCESS);
+// }
 
-template<typename... Args>
-Status registerSingleSignal(Private::SessionPrivate* aSession, std::string_view aSignalName) {
+// template<typename... Args>
+// Status registerSingleSignal(Private::SessionPrivate* aSession, std::string_view aSignalName) {
 
-    if (aSession->info().name.empty() || aSession->info().path.empty()
-        || aSession->info().interface.empty()) {
-        return Status(StatusCode::INVALID_ARG);
-    }
+//     if (aSession->info().name.empty() || aSession->info().path.empty()
+//         || aSession->info().interface.empty()) {
+//         return Status(StatusCode::INVALID_ARG);
+//     }
 
-    std::string input = Method::getArgsString<Args...>();
-    if (aSession->signals().count(aSignalName.data())) {
-        return Status(StatusCode::NAME_EXISTS);
-    }
+//     std::string input = Method::getArgsString<Args...>();
+//     if (aSession->signals().count(aSignalName.data())) {
+//         return Status(StatusCode::NAME_EXISTS);
+//     }
 
-    aSession->signals()[aSignalName.data()] = {};
-    auto& sigInfo = aSession->signals()[aSignalName.data()];
+//     aSession->signals()[aSignalName.data()] = {};
+//     auto& sigInfo = aSession->signals()[aSignalName.data()];
 
-    Adaptor::VTableRegistrar reg(aSession->rawBus(), aSession->info().path, aSession->info().interface);
-    reg.addSiganl(aSignalName, input);
-    std::vector<std::unique_ptr<Adaptor::VTableContext>> v;
-    Status st = reg.commit(v);
-    if (st.isError()) {
-        aSession->signals().erase(input);
-        return st;
-    }
+//     Adaptor::VTableRegistrar reg(aSession->rawBus(), aSession->info().path, aSession->info().interface);
+//     reg.addSiganl(aSignalName, input);
+//     std::vector<std::unique_ptr<Adaptor::VTableContext>> v;
+//     Status st = reg.commit(v);
+//     if (st.isError()) {
+//         aSession->signals().erase(input);
+//         return st;
+//     }
 
-    sigInfo.context = std::move(v.front());
-    return Status(StatusCode::SUCCESS);
-}
+//     sigInfo.context = std::move(v.front());
+//     return Status(StatusCode::SUCCESS);
+// }
 
 template<typename... Args>
 Status emitSignal(Private::SessionPrivate* aSession, std::string_view aPath, std::string_view aIface,

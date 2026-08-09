@@ -13,13 +13,27 @@
 namespace SSDbus {
 namespace Adaptor {
 
+// struct VTableContext {
+//     using VTablePtr = std::unique_ptr<Adaptor::RawBusVTable[]>;
+//     VTablePtr vtable;
+//     Adaptor::RawSlotSharePtr slot;
+//     std::string name;
+//     std::string input;
+//     std::string output;
+// };
+
+struct VTableData {
+    Adaptor::RawBusVTable vtable;
+    void* userdata;
+};
+
 struct VTableContext {
-    using VTablePtr = std::unique_ptr<Adaptor::RawBusVTable[]>;
+    using VTablePtr = std::unique_ptr<Adaptor::VTableData[]>;
     VTablePtr vtable;
     Adaptor::RawSlotSharePtr slot;
-    std::string name;
-    std::string input;
-    std::string output;
+    std::vector<std::string> names;
+    std::vector<std::string> inputs;
+    std::vector<std::string> outputs;
 };
 
 class VTableRegistrar {
@@ -43,7 +57,8 @@ class VTableRegistrar {
     };
 
 public:
-    VTableRegistrar(const Adaptor::RawBusSharePtr& aBus, std::string_view aPath, std::string_view aIface)
+    VTableRegistrar(const Adaptor::RawBusSharePtr& aBus,
+        std::string_view aPath, std::string_view aIface)
         : mBus(aBus)
         , mPath(aPath)
         , mIface(aIface) {}
@@ -81,37 +96,64 @@ public:
         return *this;
     }
 
-    Status commit(std::vector<std::unique_ptr<VTableContext>>& aVTables) {
-        for (auto& entry: mEntries) {
-            auto ctx = std::make_unique<VTableContext>();
-            ctx->name = std::move(entry.name);
-            ctx->input = std::move(entry.input);
-            ctx->output = std::move(entry.output);
+    Status commit(std::unique_ptr<VTableContext>& aCtx) {
+        aCtx = std::make_unique<VTableContext>();
+        auto vtables = std::make_unique<VTableData[]>(mEntries.size() + 2);
 
-            Adaptor::RawBusVTable item;
+        vtables[0].vtable = {};
+        vtables[0].vtable.type = _SD_BUS_VTABLE_START;
+        vtables[0].vtable.flags = 0;
+        vtables[0].vtable.x.start = {
+            .element_size = sizeof(VTableData),
+            .features = _SD_BUS_VTABLE_PARAM_NAMES,
+            .vtable_format_reference = &sd_bus_object_vtable_format,
+        };
+        vtables[0].userdata = nullptr;
+
+        size_t n = mEntries.size();
+        for (size_t i = 0; i < n; ++i) {
+            auto& entry = mEntries[i];
+            aCtx->names.push_back(std::move(entry.name));
+            aCtx->inputs.push_back(std::move(entry.input));
+            aCtx->outputs.push_back(std::move(entry.output));
+
+            size_t offset = offsetof(VTableData, userdata);
             switch (entry.type) {
                 case Type::METHOD: {
-                    item = SD_BUS_METHOD(ctx->name.c_str(), ctx->input.c_str(),
-                        ctx->output.c_str(), entry.callback, 0);
+                    vtables[i + 1].vtable = SD_BUS_METHOD_WITH_OFFSET(
+                        aCtx->names.back().c_str(),
+                        aCtx->inputs.back().c_str(),
+                        aCtx->outputs.back().c_str(),
+                        entry.callback,
+                        offset,
+                        SD_BUS_VTABLE_ABSOLUTE_OFFSET
+                    );
                     break;
                 }
                 case Type::SIGNAL: {
-                    item = SD_BUS_SIGNAL(ctx->name.c_str(), ctx->input.c_str(), 0);
+                    vtables[i + 1].vtable = SD_BUS_SIGNAL(
+                        aCtx->names.back().c_str(),
+                        aCtx->inputs.back().c_str(), 0
+                    );
                     break;
                 }
                 case Type::PROPERTY_RO: {
-                    item = SD_BUS_PROPERTY(
-                        ctx->name.c_str(), ctx->input.c_str(),
-                        entry.getter, 0,
-                        SD_BUS_VTABLE_PROPERTY_EMITS_CHANGE
+                    vtables[i + 1].vtable = SD_BUS_PROPERTY(
+                        aCtx->names.back().c_str(),
+                        aCtx->inputs.back().c_str(),
+                        mEntries[i].getter,
+                        offset,
+                        SD_BUS_VTABLE_PROPERTY_EMITS_CHANGE | SD_BUS_VTABLE_ABSOLUTE_OFFSET
                     );
                     break;
                 }
                 case Type::PROPERTY_RW: {
-                    item = SD_BUS_WRITABLE_PROPERTY(
-                        ctx->name.c_str(), ctx->input.c_str(),
-                        entry.getter, entry.setter, 0,
-                        SD_BUS_VTABLE_PROPERTY_EMITS_CHANGE
+                    vtables[i + 1].vtable = SD_BUS_WRITABLE_PROPERTY(
+                        aCtx->names.back().c_str(),
+                        aCtx->inputs.back().c_str(),
+                        mEntries[i].getter, mEntries[i].setter,
+                        offset,
+                        SD_BUS_VTABLE_PROPERTY_EMITS_CHANGE | SD_BUS_VTABLE_ABSOLUTE_OFFSET
                     );
                     break;
                 }
@@ -119,22 +161,23 @@ public:
                     break;
             }
 
-            ctx->vtable.reset(new Adaptor::RawBusVTable[3] {
-                SD_BUS_VTABLE_START(0), item, SD_BUS_VTABLE_END
-            });
-
-            Adaptor::RawBusSlotPtr rawSlot{nullptr};
-            Status st = Adaptor::RawBus::addObjectToVTable(
-               mBus.get(), rawSlot, mPath.c_str(), mIface.c_str(),
-               ctx->vtable.get(), entry.data
-            );
-            if (st.isError()) {
-                return st;
-            }
-
-            ctx->slot = Adaptor::RawSlotSharePtr(rawSlot);
-            aVTables.push_back(std::move(ctx));
+            vtables[i + 1].userdata = entry.data;
         }
+
+        vtables[n + 1].vtable = SD_BUS_VTABLE_END;
+        vtables[n + 1].userdata = nullptr;
+        Adaptor::RawBusSlotPtr rawSlot{nullptr};
+        Status st = Adaptor::RawBus::addObjectToVTable(
+            mBus.get(), rawSlot, mPath.c_str(), mIface.c_str(),
+            &vtables[0].vtable, nullptr
+        );
+        if (st.isError()) {
+            return st;
+        }
+
+        aCtx->slot = Adaptor::RawSlotSharePtr(rawSlot);
+        aCtx->vtable.reset(
+            reinterpret_cast<VTableData*>(vtables.release()));
 
         return Status(StatusCode::SUCCESS);
     }
