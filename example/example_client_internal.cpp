@@ -27,11 +27,10 @@ using namespace SSDbus;
 class DemoServer : public Server<DemoServer> {
 public:
     DemoServer()
-        : Server(
-            "com.example.demo"
-            // ServiceInfo{"com.example.demo", "/com/example/demo","com.example.Demo"}
-        ) {}
+        : Server("com.example.demo") {}
 
+    SSDBUS_PATH("/com/example/demo")
+    SSDBUS_IFACE("com.example.Demo")
     int32_t testInt32(int32_t i) {
         std::cout << "[server] testInt32: " << i << std::endl;
         return i;
@@ -56,7 +55,8 @@ public:
 
     void triggerClear(int a, int b) {
         std::cout << "[server] triggerClear(" << a << ", " << b << ")" << std::endl;
-        emit("clear", a, b);
+        emit("/com/example/demo", "com.example.Demo",
+            "clear", a, b);
     }
     SSDBUS_METHOD(triggerClear)
 
@@ -74,7 +74,8 @@ public:
 
     //! 注册本地属性变更监听
     void listenVersion() {
-        session().onLocalPropertyChanged<int32_t>("version",
+        session().onLocalPropertyChanged<int32_t>(
+            "/com/example/demo", "com.example.Demo", "version",
             [this](const int32_t& v) {
                 std::cout << "[server] version property changed: " << v << std::endl;
                 mVerChanged = true;
@@ -266,7 +267,9 @@ int main() {
     std::cout << "\n=== Step 7: Cross-thread emit ===" << std::endl;
     {
         signalReceived.reset();
-        Status stEmit = server.emit("clear", 99, 100);
+        Status stEmit = server.emit(
+            "/com/example/demo", "com.example.Demo",
+            "clear", 99, 100);
         TEST("cross-thread emit posted", stEmit.isSuccess());
 
         signalReceived.wait();

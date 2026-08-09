@@ -30,11 +30,10 @@ using namespace SSDbus;
 class DemoServer : public Server<DemoServer> {
 public:
     DemoServer()
-        : Server(
-            "com.example.ext"
-            // ServiceInfo{"com.example.ext", "/com/example/ext", "com.example.External"}
-        ) {}
+        : Server("com.example.ext") {}
 
+    SSDBUS_PATH("/com/example/ext")
+    SSDBUS_IFACE("com.example.External")
     int32_t echoInt32(int32_t i) {
         std::cout << "[server] echoInt32: " << i << std::endl;
         return i;
@@ -49,7 +48,8 @@ public:
 
     void triggerSignal(int a, int b) {
         std::cout << "[server] triggerSignal(" << a << ", " << b << ")" << std::endl;
-        emit("mySignal", a, b);
+        emit("/com/example/ext", "com.example.External",
+            "mySignal", a, b);
     }
     SSDBUS_METHOD(triggerSignal)
 

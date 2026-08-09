@@ -72,19 +72,22 @@ public:
     }
 
     template<typename... Args>
-    Status emit(std::string_view aSignal, Args&&... aArgs) {
+    Status emit(std::string_view aPath, std::string_view aIface,
+        std::string_view aSignal, Args&&... aArgs) {
         if (mLooper.isOwnerThread()) {
-            return mSession.emitSignal(aSignal, std::forward<Args>(aArgs)...);
+            return mSession.emitSignal(aPath, aIface, aSignal, std::forward<Args>(aArgs)...);
         }
 
         auto argsTuple = std::make_tuple(std::forward<Args>(aArgs)...);
         mLooper.post(
             [session = mSession,
+             path = std::string(aPath),
+             iface = std::string(aIface),
              signal = std::string(aSignal),
              args = std::move(argsTuple)] () mutable -> void {
                 std::apply(
                     [&](auto&&... aUnpacked) {
-                        session.emitSignal(signal, aUnpacked...);
+                        session.emitSignal(path, iface, signal, aUnpacked...);
                     }, std::move(args)
                 );
             }
@@ -94,19 +97,24 @@ public:
     }
 
     template<typename T>
-    Status getProperty(std::string_view aName, T& aValue) {
-        return session().template getLocalProperty<T>(aName, aValue);
+    Status getProperty(std::string_view aPath, std::string_view aIface,
+        std::string_view aName, T& aValue) {
+        return session().
+            template getLocalProperty<T>(aPath, aIface, aName, aValue);
     }
 
     template<typename T>
-    Status setProperty(std::string_view aName, T aValue) {
-        return session().template setLocalProperty<T>(aName, aValue);
+    Status setProperty(std::string_view aPath, std::string_view aIface,
+        std::string_view aName, T aValue) {
+        return session().
+            template setLocalProperty<T>(aPath, aIface, aName, aValue);
     }
 
     template<typename T>
-    Status onPropertyChanged(std::string_view aName, 
-                            std::function<void(const T&)>&& aCallback) {
-        return session().template onLocalPropertyChanged<T>(aName,
+    Status onPropertyChanged(std::string_view aPath, std::string_view aIface,
+        std::string_view aName, std::function<void(const T&)>&& aCallback) {
+        return session().
+            template onLocalPropertyChanged<T>(aPath, aIface, aName,
                 std::forward<std::function<void(const T&)>>(aCallback));
     }
 
@@ -133,8 +141,29 @@ private:
             return;
         }
 
-        mStatus = mSession.registerObject(static_cast<Derived*>(this));
-        mInited = !mStatus.isError();
+        auto& entries = Derived::registry();
+        using Entry = typename std::decay_t<decltype(entries)>::value_type;
+
+        std::map<
+            std::pair<std::string_view, std::string_view>,
+            std::vector<Entry>
+        > groups;
+        for (auto it = entries.begin(); it != entries.end(); ++it) {
+            groups[{it->path, it->iface}].push_back(*it);
+        }
+
+        for (auto& [key, group] : groups) {
+            auto builder = mSession.registerBuilder(key.first, key.second);
+            for (auto& e : group) {
+                e.registerFn(&builder, static_cast<Derived*>(this));
+            }
+
+            mStatus = builder.commit();
+            if (mStatus.isError()) {
+                return;
+            }
+        }
+        mInited = true;
     }
 
     Session mSession;
@@ -144,10 +173,24 @@ private:
     bool mInited { false };
 };
 
+#define SSDBUS_PATH(p)                                                                      \
+    static inline int _ssdbus_path_##__LINE__ = [] {                                        \
+        Self::sPath = p;                                                                    \
+        return 0;                                                                           \
+    }();
+
+#define SSDBUS_IFACE(i)                                                                     \
+    static inline int _ssdbus_iface_##__LINE__ = [] {                                       \
+        Self::sIface = i;                                                                   \
+        return 0;                                                                           \
+    }();
+
 #define SSDBUS_METHOD(method)                                                               \
     static inline int _ssdbus_reg_##method = [] {                                           \
         Self::registry().push_back({                                                        \
             #method,                                                                        \
+            Self::sPath,                                                                    \
+            Self::sIface,                                                                   \
             [](void* aBuilder, void* aObj) -> void {                                        \
                 auto* self = static_cast<Self*>(aObj);                                      \
                 auto* builder = static_cast<::SSDbus::Session::RegisterBuilder*>(aBuilder); \
@@ -161,6 +204,8 @@ private:
     static inline int _ssdbus_reg_##signal = [] {                                           \
         Self::registry().push_back({                                                        \
             #signal,                                                                        \
+            Self::sPath,                                                                    \
+            Self::sIface,                                                                   \
             [](void* aBuilder, void* aObj) -> void {                                        \
                 auto* self = static_cast<Self*>(aObj);                                      \
                 auto* builder = static_cast<::SSDbus::Session::RegisterBuilder*>(aBuilder); \
@@ -174,6 +219,8 @@ private:
     static inline int _ssdbus_reg_prop_##name = [] {                                        \
         Self::registry().push_back({                                                        \
             #name,                                                                          \
+            Self::sPath,                                                                    \
+            Self::sIface,                                                                   \
             [](void* aBuilder, void* aObj) -> void {                                        \
                 auto* builder = static_cast<::SSDbus::Session::RegisterBuilder*>(aBuilder); \
                 builder->addProperty<Type>(#name, initValue, false);                        \
@@ -186,6 +233,8 @@ private:
     static inline int _ssdbus_reg_prop_##name = [] {                                        \
         Self::registry().push_back({                                                        \
             #name,                                                                          \
+            Self::sPath,                                                                    \
+            Self::sIface,                                                                   \
             [](void* aBuilder, void* aObj) -> void {                                        \
                 auto* builder = static_cast<::SSDbus::Session::RegisterBuilder*>(aBuilder); \
                 builder->addProperty<Type>(#name, initValue, true);                         \

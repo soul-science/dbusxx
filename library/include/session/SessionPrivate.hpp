@@ -142,20 +142,12 @@ public:
         return mRawBus;
     }
 
-    const ServiceInfo& info() const {
-        return mInfo;
-    }
-
     std::string serviceName() const {
         return mServiceName;
     }
 
     SessionType type() const {
         return mType;
-    }
-
-    ServiceInfo& info() {
-        return mInfo;
     }
 
     ObjectMap& objects() {

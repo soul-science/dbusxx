@@ -14,11 +14,16 @@ class MetaObject {
 
     struct MethodEntry {
         std::string_view name;
+        std::string_view path;
+        std::string_view iface;
         RegisterFunc registerFn;
     };
 
 protected:
     using Self = Derived;
+
+    inline static const char* sPath  = nullptr;
+    inline static const char* sIface = nullptr;
 
     static std::vector<MethodEntry>& registry() {
         static std::vector<MethodEntry> reg;

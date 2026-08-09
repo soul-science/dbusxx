@@ -278,7 +278,7 @@ int main() {
         });
 
     // ⑨ 发射信号
-    st = session.emitSignal("clear");
+    st = session.emitSignal("/com/example/test", "com.example.Test", "clear");
     std::cout << "emitSignal(clear): " << st.message() << std::endl;
 
     // ⑩ 启动事件循环

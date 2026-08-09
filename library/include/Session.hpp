@@ -80,7 +80,9 @@ public:
             std::string sig = wrapper::signature();
             
             auto data = std::make_shared<wrapper>(
-                session, aName.data(), aValue);
+                session, aName.data(),
+                reg.path(), reg.interface(), aValue
+            );
             void* dataPtr = data.get();
 
             info.properties[aName.data()] = {
@@ -232,7 +234,7 @@ public:
         mPrivate->flush();
     }
 
-    auto registerBuilder(std::string_view aPath, std::string aIface) {
+    auto registerBuilder(std::string_view aPath, std::string_view aIface) {
         return RegisterBuilder {
             mPrivate.get(),
             Adaptor::VTableRegistrar(
@@ -349,10 +351,10 @@ public:
     }
 
     template<typename... Args>
-    Status emitSignal(std::string_view aSignal, const Args&... aArgs) {
-        ServiceInfo info = mPrivate->info();
+    Status emitSignal(std::string_view aPath, std::string_view aIface,
+        std::string_view aSignal, const Args&... aArgs) {
         return Method::emitSignal(
-            mPrivate.get(), info.path, info.interface, aSignal, aArgs...
+            mPrivate.get(), aPath, aIface, aSignal, aArgs...
         );
     }
 

@@ -30,13 +30,12 @@ using namespace SSDbus;
 class DemoServer : public Server<DemoServer> {
 public:
     DemoServer()
-        : Server(
-            "com.example.demo"
-            // ServiceInfo{"com.example.demo", "/com/example/demo","com.example.Demo"}
-        ) {}
+        : Server("com.example.demo") {}
 
     // ─ 基础类型方法 (echo 回显) ─
 
+    SSDBUS_PATH("/com/example/demo")
+    SSDBUS_IFACE("com.example.Demo")
     int8_t testInt8(int8_t i) {
         std::cout << "[server] testInt8: " << +i << std::endl;
         return i;
@@ -182,7 +181,8 @@ public:
     void triggerClear(int a, int b) {
         std::cout << "[server] triggerClear(" << a << ", " << b
                   << ") → emit from event loop thread" << std::endl;
-        Status st = emit("clear", a, b);
+        Status st = emit("/com/example/demo","com.example.Demo",
+            "clear", a, b);
         std::cout << "[server] emit result: " << st.message() << std::endl;
     }
     SSDBUS_METHOD(triggerClear)
@@ -208,7 +208,8 @@ public:
 
     //! 注册本地属性变更监听（供外部 main 调用）
     void listenVersion() {
-        session().onLocalPropertyChanged<int32_t>("version",
+        session().onLocalPropertyChanged<int32_t>(
+            "/com/example/demo","com.example.Demo","version",
             [this](const int32_t& v) {
                 std::cout << "[server] version changed: " << v << std::endl;
                 mVerChanged = true;
@@ -458,28 +459,35 @@ int main() {
     {
         // 读
         int32_t v = 0;
-        TEST("Server::getProperty version", server.getProperty("version", v).isSuccess()
-             && v == 77);
+        TEST("Server::getProperty version",
+            server.getProperty("/com/example/demo",
+                "com.example.Demo", "version", v).isSuccess()
+                && v == 77);
 
         std::string desc;
         TEST("Server::getProperty description",
-            server.getProperty("description", desc).isSuccess()
-            && desc == "updated");
+            server.getProperty("/com/example/demo",
+                "com.example.Demo", "description", desc).isSuccess()
+                && desc == "updated");
 
         // 写
         TEST("Server::setProperty description",
-            server.setProperty("description", std::string("server-side-set")).isSuccess());
+            server.setProperty("/com/example/demo",
+                "com.example.Demo", "description",
+                std::string("server-side-set")).isSuccess());
 
         // 验证
         TEST("Server::getProperty after set",
-            server.getProperty("description", desc).isSuccess()
-            && desc == "server-side-set");
+            server.getProperty("/com/example/demo",
+                "com.example.Demo", "description", desc).isSuccess()
+                && desc == "server-side-set");
 
         // 注册变更监听
         SyncFlag srvPropFlag;
         std::string newDesc;
         TEST("Server::onPropertyChanged register",
-            server.onPropertyChanged<std::string>("description",
+            server.onPropertyChanged<std::string>(
+                "/com/example/demo", "com.example.Demo", "description",
                 [&](const std::string& val) {
                     newDesc = val;
                     srvPropFlag.set();
@@ -492,16 +500,8 @@ int main() {
         TEST("Server::onPropertyChanged fired", newDesc == "remote-set");
     }
 
-    // ⑤ 启动客户端事件循环（绑定 asyncClient，不与 syncClient 的 fd 冲突）
-    std::cout << "\n=== Step 5: Starting client event loop ===" << std::endl;
-    Looper clientLooper(asyncClient);
-    std::thread clientThread([&clientLooper] {
-        clientLooper.run();
-    });
-    std::this_thread::sleep_for(std::chrono::milliseconds(200));
-
-    // ⑥ 信号监听
-    std::cout << "\n=== Step 6: Signal listening ===" << std::endl;
+    // ⑤ 信号监听 — 在事件循环启动前注册（避免线程竞争）
+    std::cout << "\n=== Step 5: Signal listening ===" << std::endl;
     SyncFlag signalReceived;
     int sigA = 0, sigB = 0;
 
@@ -509,12 +509,20 @@ int main() {
         svc, path, iface, "clear",
         [&](int a, int b) {
             std::cout << "  [client] signal 'clear' received: a=" << a
-                      << ", b=" << b << std::endl;
+                    << ", b=" << b << std::endl;
             sigA = a;
             sigB = b;
             signalReceived.set();
         });
     TEST("listenSignal clear", stListen.isSuccess());
+
+    // ⑥ 启动客户端事件循环
+    std::cout << "\n=== Step 6: Starting client event loop ===" << std::endl;
+    Looper clientLooper(asyncClient);
+    std::thread clientThread([&clientLooper] {
+        clientLooper.run();
+    });
+    std::this_thread::sleep_for(std::chrono::milliseconds(200));
 
     // ⑦ 同线程 emit — 用 syncClient 调用（无事件循环，不会竞争）
     std::cout << "\n=== Step 7: In-thread emit (via D-Bus method) ==="
@@ -538,7 +546,8 @@ int main() {
         signalReceived.reset();
 
         // server.emit() 自动检测到不是事件循环线程，走 post 路径
-        Status stEmit = server.emit("clear", 99, 100);
+        Status stEmit = server.emit("/com/example/demo","com.example.Demo",
+            "clear", 99, 100);
         TEST("cross-thread emit posted", stEmit.isSuccess());
 
         signalReceived.wait();

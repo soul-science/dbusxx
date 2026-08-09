@@ -221,14 +221,20 @@ template<typename T>
 struct PropertyWrapper {
     Private::SessionPrivate* session;
     std::string propName;
+    std::string propPath;
+    std::string propIface;
     T prop;
     mutable std::mutex mMutex;
     std::string_view type;
     std::function<void(const T&)> onChange {nullptr};
 
-    PropertyWrapper(Private::SessionPrivate* aSession, std::string aPropName, T aProp)
+    PropertyWrapper(Private::SessionPrivate* aSession,
+        const std::string& aPropName, const std::string& aPath,
+        const std::string& aIface, T aProp)
         : session(aSession)
-        , propName(aPropName)
+        , propName(std::move(aPropName))
+        , propPath(std::move(aPath))
+        , propIface(std::move(aIface))
         , prop(aProp)
         , type(typeid(T).name()) {}
 
@@ -253,10 +259,9 @@ struct PropertyWrapper {
             onChange(copy);
         }
 
-        auto& info = session->info();
         sd_bus_emit_properties_changed(
             session->rawBus().get(),
-            info.path.c_str(), info.interface.c_str(),
+            propPath.c_str(), propIface.c_str(),
             propName.c_str(), nullptr);
     }
 
