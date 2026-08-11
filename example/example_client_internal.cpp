@@ -135,7 +135,7 @@ int main() {
     // ② 创建 Client（自管模式：内部管理 Session + Looper + thread）
     std::cout << "\n=== Step 2: Creating Client (self-contained) ==="
               << std::endl;
-    Client c("com.example.demo", "/com/example/demo", "com.example.Demo");
+    Client c(SessionType::USER, "com.example.demo", "/com/example/demo", "com.example.Demo");
     // 等待 async 连接的 Hello 握手完成（syncSession 不受影响）
     std::this_thread::sleep_for(std::chrono::milliseconds(500));
 

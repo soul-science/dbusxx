@@ -3,6 +3,11 @@
 
 #include "adaptor/RawCommon.hpp"
 
+#include <sys/un.h>
+#include <sys/socket.h>
+#include <unistd.h>
+#include <cstring>
+
 namespace SSDbus {
 namespace Adaptor {
 
@@ -23,39 +28,6 @@ void refBus(RawBusPtr aBus) {
     sd_bus_ref(aBus);
 }
 
-Status openBus(RawBusPtr& aBus) {
-    return RawErrorConvert::makeStatus(sd_bus_open(&aBus));
-}
-
-Status openSystemBus(RawBusPtr& aBus) {
-    return RawErrorConvert::makeStatus(sd_bus_open_system(&aBus));
-}
-
-Status openUserBus(RawBusPtr& aBus) {
-    return RawErrorConvert::makeStatus(sd_bus_open_user(&aBus));
-}
-
-Status openPeerBus(RawBusPtr& aBus, std::string_view aSocket) {
-    Status st = RawErrorConvert::makeStatus(sd_bus_new(&aBus));
-    if (st.isError()) {
-        return st;
-    }
-
-    st = RawErrorConvert::makeStatus(sd_bus_set_address(aBus, aSocket.data()));
-    if (st.isError()) {
-        unrefBus(aBus);
-        return st;
-    }
-
-    st = RawErrorConvert::makeStatus(sd_bus_start(aBus));
-    if (st.isError()) {
-        unrefBus(aBus);
-        return st;
-    }
-
-    return Status(StatusCode::SUCCESS);
-}
-
 bool isBusReady(RawBusPtr aBus) {
     if (!aBus) {
         return false;
@@ -70,6 +42,64 @@ bool isBusOpen(RawBusPtr aBus) {
     }
 
     return sd_bus_is_open(aBus) > 0;
+}
+
+Status openBus(RawBusPtr& aBus) {
+    return RawErrorConvert::makeStatus(sd_bus_open(&aBus));
+}
+
+Status openSystemBus(RawBusPtr& aBus) {
+    return RawErrorConvert::makeStatus(sd_bus_open_system(&aBus));
+}
+
+Status openUserBus(RawBusPtr& aBus) {
+    return RawErrorConvert::makeStatus(sd_bus_open_user(&aBus));
+}
+
+Status openPeerBus(RawBusPtr& aBus,
+    std::string_view aSocket, bool isServer) {
+    Status st = RawErrorConvert::makeStatus(sd_bus_new(&aBus));
+    if (st.isError()) {
+        return st;
+    }
+
+    if (isServer) {
+        sd_id128_t id;
+        st = RawErrorConvert::makeStatus(sd_id128_randomize(&id));
+        if (st.isError()) {
+            unrefBus(aBus);
+            return st;
+        }
+
+        st = RawErrorConvert::makeStatus(
+            sd_bus_set_server(aBus, 1, id));
+    } else {
+        st = RawErrorConvert::makeStatus(sd_bus_set_bus_client(aBus, 0));
+    }
+
+    if (st.isError()) {
+        unrefBus(aBus);
+        return st;
+    }
+
+    std::string addr(aSocket);
+    st = RawErrorConvert::makeStatus(sd_bus_set_address(aBus, addr.c_str()));
+    if (st.isError()) {
+        unrefBus(aBus);
+        return st;
+    }
+
+    st = RawErrorConvert::makeStatus(sd_bus_start(aBus));
+    if (st.isError()) {
+    std::cerr << "[openPeerBus] sd_bus_start → ret=" << static_cast<int>(st.code())
+                << ", messge=" << st.message() << std::endl;
+        unrefBus(aBus);
+        return st;
+    }
+
+    std::cerr << "isBusReady: " << isBusReady(aBus) << std::endl;
+
+    return Status(StatusCode::SUCCESS);
 }
 
 Status flushBus(RawBusPtr aBus) {
@@ -375,9 +405,10 @@ public:
         return RawBusSharePtr(raw, true);
     }
 
-    static RawBusSharePtr makePeer(std::string_view aSocket) {
+    static RawBusSharePtr makePeer(std::string_view aSocket, bool aIsServer = false) {
         RawBusPtr raw = nullptr;
-        if (aSocket == "" || RawBus::openPeerBus(raw, aSocket).isError()) {
+        if (aSocket == "" || RawBus::openPeerBus(
+            raw, aSocket, aIsServer).isError()) {
             return RawBusSharePtr(nullptr, false);
         }
 

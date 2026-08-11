@@ -191,6 +191,10 @@ private:
 
 private:
     Status bindDaemonDisconnectedSignal() {
+        if (mSession->type() == SessionType::PEER) {
+            return Status(StatusCode::SUCCESS);
+        }
+
         mConnectedSlot = Adaptor::RawSlotSharePtr();
         Adaptor::RawBusSlotPtr slot = nullptr;
         auto st = Adaptor::RawBus::listenSignal(

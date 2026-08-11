@@ -1,6 +1,6 @@
 # ssdbus 项目计划
 
-> 最后更新：2026-08-09（VTable systemd v250+ 兼容 + Server 多 path/iface 宏支持 + PropertyWrapper path/iface 自持）
+> 最后更新：2026-08-10（RegisterBuilder 重复 commit use-after-free 修复 + PropertyWrapper mutex 移除 + Server property 线程安全 + Method.hpp 清理）
 
 ---
 
@@ -15,23 +15,23 @@
 | 消息读写 | `Message.hpp` / `MessagePrivate.hpp` | ✅ 基本类型 read/write 模板完整，**扩展 `std::map<K,V>` 读写 + dict entry 序列化** |
 | 返回值封装 | `Reply.hpp` / `PendingReply.hpp` | ✅ sync/async 统一，**`static_assert` 放宽支持 vector/array/map 返回值** |
 | 客户端调用 | `Method.hpp` (callSync ×1 / callAsync ×2) | ✅ **timeout 模板参数化**（`<Ret, TimeoutUsec, Args>` 单重载，零歧义）；回调 callAsync 同样统一 |
-| 服务端注册 | `Method.hpp` (registerMethod / registerBuilder) | ✅ vtable 自动生成，支持链式批量注册 |
+| 服务端注册 | `Session.hpp` (RegisterBuilder) / `Method.hpp` (MethodWrapper) | ✅ vtable 自动生成，支持链式批量注册；**同一 key 重复注册自动合并旧条目 + 释放旧 slot 防 use-after-free** (2026-08-10) |
 | 信号发送 | `Method.hpp` (emitSignal) | ✅ 带参/无参 |
-| 信号注册 | `Method.hpp` / `RegisterBuilder` (registerSignal / addSignal) | ✅ vtable 注册 + 链式，introspect 可见 |
-| VTable 管理 | `VTableRegistrar.hpp` / `RegisterBuilder` | ✅ 链式 API + commit 一次提交完整 vtable；**systemd v250+ 兼容**（`SD_BUS_VTABLE_START(0)` 宏 + `ABSOLUTE_OFFSET` + `reinterpret_cast<size_t>(ptr)` 传 userdata）；`reserve(n)` 防字符串扩容悬空；`slot` 析构顺序修正；**暴露 `path()`/`interface()` 供 PropertyWrapper 自持** (2026-08-09) |
+| 信号注册 | `Session.hpp` (RegisterBuilder::addSignal) | ✅ vtable 注册 + 链式，introspect 可见 |
+| VTable 管理 | `VTableRegistrar.hpp` / `RegisterBuilder` | ✅ 链式 API + commit 一次提交完整 vtable；**systemd v250+ 兼容**（`SD_BUS_VTABLE_START(0)` 宏 + `ABSOLUTE_OFFSET` + `reinterpret_cast<size_t>(ptr)` 传 userdata）；`reserve(n)` 防字符串扩容悬空；`slot` 析构顺序修正；**暴露 `path()`/`interface()` 供 PropertyWrapper 自持** (2026-08-09)；**重复 commit 前先释放旧 slot 防 use-after-free** (2026-08-10) |
 | 信号监听 | `Method.hpp` / `SignalHandler.hpp` | ✅ 类型安全回调 |
 | 会话管理 | `Session.hpp` / `SessionPrivate.hpp` | ✅ 开/关/发/收/注册；**构造函数 private**，统一通过 `systemSession()` / `userSession()` / `peerSession()` 工厂方法创建（含 `ServiceInfo` 重载）；`setInfo` 移至 private，Server 通过 friend 工厂方法调用 |
 | 客户端封装 | `Client.hpp` | ✅ `Client` 远端接口代理：**双构造模式**（自管 + 外部 Looper），**全局 `static` `weak_ptr` 共享单 `AsyncPool`**（system/user/peer 各一），sync 调用通过 `post()` + `promise/future` 走 looper 线程，**SyncPool 已移除**；P2P 天然单连接无冲突；`callSync`/`callAsync`/`listenSignal`/`getProperty`/`setProperty`/`onPropertyChanged` |
 | 事件循环 | `Looper.hpp` / `LooperPrivate.hpp` | ✅ sd-event 集成，IO 驱动 + 优雅退出 + **跨线程 `post()` 投递（eventfd + 任务队列 + mutex）+ `isOwnerThread()`** |
 | 资源管理 | `RawSlotSharePtr` / SharePtr 系列 | ✅ RAII，移动语义完整 |
 | 类型推导 | `FunctionTrait.hpp` / `DbusArgs.hpp` | ✅ 编译期萃取 + **`getSignature` 支持 `std::map`（`a{KV}`）+ `isMapV` trait** |
-| 属性注册 | `Method.hpp` / `Session.hpp` / `VTableRegistrar.hpp` / `MetaObject.hpp` | ✅ 自拥有值 + `getLocalProperty`/`setLocalProperty` + `onLocalPropertyChanged` callback + `sd_bus_emit_properties_changed` + `typeid` 类型安全检查 + `SD_BUS_VTABLE_PROPERTY_EMITS_CHANGE` flag；**`SSDBUS_PROPERTY` 拆分为 `SSDBUS_PROPERTY_RO`（只读）和 `SSDBUS_PROPERTY_RW`（读写）**；**PropertyWrapper 新增 `std::mutex` 保护跨线程 get/set 竞态**；**PropertyWrapper 自持 `propPath`/`propIface`**（从 `VTableRegistrar` 传入，替代废弃的 `session->info()`）(2026-08-09) |
+| 属性注册 | `Method.hpp` / `Session.hpp` / `VTableRegistrar.hpp` / `MetaObject.hpp` | ✅ 自拥有值 + `getLocalProperty`/`setLocalProperty` + `onLocalPropertyChanged` callback + `sd_bus_emit_properties_changed` + `typeid` 类型安全检查 + `SD_BUS_VTABLE_PROPERTY_EMITS_CHANGE` flag；**`SSDBUS_PROPERTY` 拆分为 `SSDBUS_PROPERTY_RO`（只读）和 `SSDBUS_PROPERTY_RW`（读写）**；**PropertyWrapper 自持 `propPath`/`propIface`**（从 `VTableRegistrar` 传入，替代废弃的 `session->info()`）(2026-08-09)；**移除 mutex**：Server 保证属性操作均在 owner 线程，无线程竞争 (2026-08-10) |
 | 远端属性 | `PropertyHandler.hpp` / `Method.hpp` | ✅ `getRemoteProperty`/`setRemoteProperty` 走 `Properties.Get/Set`；`MessagePrivate::read` variant 自动解包；`Client::getProperty`/`setProperty` |
 | 属性变更监听 | `PropertyHandler.hpp` / `Method.hpp` | ✅ `PropertiesChanged` 信号监听（sa{sv}as），**一个 handler 对应一个 (service, path) 对**（get-or-create），多次监听同一 destination 只注册一条信号匹配、多 callback 聚合；`Client::onPropertyChanged` |
-| 示例 | `example/*.cpp` | ✅ 覆盖主要 API：Session 直连、Server 一站式（含反射注册+server property API）、Client 代理（自管 `example_client_internal` + 外部 Looper `example_client_external`）；**含 RO/RW property get/set/onChanged 全覆盖 + 重连测试**；`example_meta` 已删除（MetaObject 不对外暴露）(2026-08-06) |
+| 示例 | `example/*.cpp` | ✅ 覆盖主要 API：Session 直连、Server 一站式（含反射注册+server property API）、Client 代理（自管 `example_client_internal` + 外部 Looper `example_client_external`）；**含 RO/RW property get/set/onChanged 全覆盖 + 重连测试**；`example_meta` 已删除（MetaObject 不对外暴露）(2026-08-06)；`example_register` 测试 registerMethod/registerSignal 多种 callable 类型（静态函数、成员函数、lambda、std::function）(2026-08-10) |
 | 反射注册 | `session/MetaObject.hpp` + `Server.hpp` | ✅ CRTP + 宏标注 → `registerObject` 一键注册：`SSDBUS_METHOD` / `SSDBUS_SIGNAL` / `SSDBUS_PROPERTY_RO` / `SSDBUS_PROPERTY_RW` 全部宏在 `Server.hpp` 中；**新增 `SSDBUS_PATH`/`SSDBUS_IFACE` 上下文宏**，支持同一 Server 多 path/iface，`init()` 自动按分组注册；`MetaObject` 移入 `session/` 子目录不对外暴露；`SSDBUS_LISTEN` 已移除，改为运行时 `session().listenSignal()` 手动注册 (2026-08-09) |
-| 服务端封装 | `Server.hpp` | ✅ `Server<Derived>` 捆绑 Session + Looper + registerObject，`run()` 一行启动；`emit()` 自动线程检测（同线程直调 / 跨线程 post）；**`SSDBUS_PATH`/`SSDBUS_IFACE` 宏支持多 path/iface**，`init()` 自动按分组注册；`emit`/`getProperty`/`setProperty`/`onPropertyChanged` 均需显式传 path/iface (2026-08-09) |
-| 遗留代码清理 | DbusContext/DbusManager/DbusInterface/DbusError | ✅ 全部删除 |
+| 服务端封装 | `Server.hpp` | ✅ `Server<Derived>` 捆绑 Session + Looper + registerObject，`run()` 一行启动；`emit()`/`getProperty()`/`setProperty()`/`onPropertyChanged()` 自动线程检测（同线程直调 / 跨线程 promise+future+post）；**`SSDBUS_PATH`/`SSDBUS_IFACE` 宏支持多 path/iface**，`init()` 自动按分组注册；接口均需显式传 path/iface (2026-08-10) |
+| 遗留代码清理 | DbusContext/DbusManager/DbusInterface/DbusError + Method.hpp 旧 registerSingle* | ✅ 全部删除 (2026-08-10) |
 
 ### 🔴 已知 Bug（按严重度）
 
@@ -64,6 +64,8 @@
 | B26 | ✅ 已修复 | `VTableRegistrar.hpp` | **vtable c_str() 悬空**。循环内 `aCtx->names.push_back` 触发 vector 扩容，前面条目的 `c_str()` 指向被释放的旧内存 → sd-bus 读到垃圾。**修复**：`reserve(n)` 预分配后批量搬入字符串，再建 vtable (2026-08-09) |
 | B27 | ✅ 已修复 | `VTableRegistrar.hpp` | **VTableContext 析构顺序 use-after-free**。`slot` 声明在 `names` 之前，析构时 `slot.sd_bus_slot_unref()` 访问已析构的 vtable 字符串。**修复**：`slot` 移至结构体末尾（最先析构）(2026-08-09) |
 | B28 | ✅ 已修复 | `Method.hpp` / `Session.hpp` | **`PropertyWrapper::set()` 取不到 path/iface**。新 `Server` 不再调 `setInfo()`，`session->info()` 返回空。`sd_bus_emit_properties_changed` 发空 path → 客户端 `onPropertyChanged` 收不到。**修复**：`VTableRegistrar` 暴露 `path()`/`interface()`，`RegisterBuilder::addProperty` 传给 `PropertyWrapper` 自持 (2026-08-09) |
+| B29 | ✅ 已修复 | `Session.hpp` (`RegisterBuilder::commit`) | **`RegisterBuilder::commit()` heap-use-after-free**。同一 (path, iface) 多次调用 `registerMethod` 时，每次 commit 都调 `sd_bus_add_object_vtable` 替换旧 vtable。sd-bus 内部 strdup 旧字符串后 free，再 strlen 访问 → ASAN 报错。**修复**：新 vtable 注册前先释放旧 `context->slot`，强制 sd-bus 清理旧 vtable 的 strdup 字符串 (2026-08-10) |
+| B30 | ✅ 已修复 | `Method.hpp` | **`PropertyWrapper` mutex 冗余**。`Server` 已确保 `getProperty`/`setProperty`/`onGetter`/`onSetter` 均在 owner 线程执行，无并发访问。**修复**：移除 `std::mutex mMutex` 及 `lock_guard`，同时删除 `#include <mutex>` (2026-08-10) |
 
 ---
 

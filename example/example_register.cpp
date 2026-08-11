@@ -44,24 +44,29 @@ public:
 // ── main ─────────────────────────────────────────────────────────────────
 
 int main() {
-    auto session = Session::userSession(
-        "com.example.register"
-        // {"com.example.register", "/com/example/register", "com.example.Register"}
-    );
+    auto session = Session::userSession("com.example.register");
     Calc calc;
 
     // ── 注册静态函数 ─────────────────────────────────────────────────
-    Status st = session.registerMethod("staticAdd", staticAdd);
+    Status st = session.registerMethod(
+        "/com/example/register", "com.example.Register",
+        "staticAdd", staticAdd);
     std::cout << "register staticAdd: " << st.message() << std::endl;
 
-    st = session.registerMethod("staticVoid", staticVoid);
+    st = session.registerMethod(
+        "/com/example/register", "com.example.Register",
+        "staticVoid", staticVoid);
     std::cout << "register staticVoid: " << st.message() << std::endl;
 
     // ── 注册成员函数 ─────────────────────────────────────────────────
-    st = session.registerMethod("multiply", &calc, &Calc::multiply);
+    st = session.registerMethod(
+        "/com/example/register", "com.example.Register",
+        "multiply", &calc, &Calc::multiply);
     std::cout << "register multiply(member ptr): " << st.message() << std::endl;
 
-    st = session.registerMethod("greet", &calc, &Calc::greet);
+    st = session.registerMethod(
+        "/com/example/register", "com.example.Register",
+        "greet", &calc, &Calc::greet);
     std::cout << "register greet(member ptr): " << st.message() << std::endl;
 
     // ── 注册 lambda ──────────────────────────────────────────────────
@@ -69,10 +74,13 @@ int main() {
         std::cout << "[lambda] div(" << a << ", " << b << ") = " << (a / b) << std::endl;
         return a / b;
     };
-    st = session.registerMethod("lambdaDiv", lambdaDiv);
+    st = session.registerMethod(
+        "/com/example/register", "com.example.Register",
+        "lambdaDiv", lambdaDiv);
     std::cout << "register lambdaDiv: " << st.message() << std::endl;
 
-    st = session.registerMethod("lambdaGreet",
+    st = session.registerMethod(
+        "/com/example/register", "com.example.Register", "lambdaGreet",
         [](const std::string& name) {
             std::cout << "[lambda] Hello, " << name << "!" << std::endl;
         });
@@ -86,14 +94,18 @@ int main() {
             std::cout << "[std::function] upper: " << r << std::endl;
             return r;
         };
-    st = session.registerMethod("stdFnUpper", fnUpper);
+    st = session.registerMethod(
+        "/com/example/register", "com.example.Register",
+        "stdFnUpper", fnUpper);
     std::cout << "register stdFnUpper: " << st.message() << std::endl;
 
     // ── 注册信号 ─────────────────────────────────────────────────────
-    st = session.registerSignal<int64_t, std::string>("onResult");
+    st = session.registerSignal<int64_t, std::string>(
+        "/com/example/register", "com.example.Register", "onResult");
     std::cout << "registerSignal(onResult): " << st.message() << std::endl;
 
-    st = session.registerSignal<>("onTick");
+    st = session.registerSignal<>(
+        "/com/example/register", "com.example.Register", "onTick");
     std::cout << "registerSignal(onTick): " << st.message() << std::endl;
 
     // ── 启动事件循环 ─────────────────────────────────────────────────

@@ -1,8 +1,6 @@
 #ifndef SSDBUS_DBUS_METHOD_HPP
 #define SSDBUS_DBUS_METHOD_HPP
 
-#include <map>
-#include <mutex>
 #include <iostream>
 
 #include "adaptor/RawRemoteError.hpp"
@@ -10,7 +8,6 @@
 #include "message/SignalHandler.hpp"
 #include "message/PropertyHandler.hpp"
 #include "session/SessionPrivate.hpp"
-#include "adaptor/VTableRegistrar.hpp"
 #include "FunctionTrait.hpp"
 #include "Status.hpp"
 
@@ -123,77 +120,6 @@ struct MethodWrapper {
     }
 };
 
-// template<typename Func>
-// Status registerSingleMethod(
-//     Private::SessionPrivate* aSession, std::string_view aFuncName, Func aFunc) {
-//     using wrapper = MethodWrapper<Func>;
-//     auto data = std::make_shared<wrapper>(
-//         aSession, aFunc
-//     );
-//     auto dataPtr = data.get();
-
-//     std::string input = wrapper::input();
-//     std::string output = wrapper::output();
-
-//     std::cout << "input: " << input << ", output:" << output << std::endl;
-
-//     if (aSession->methods().count(aFuncName.data())) {
-//         return Status(StatusCode::NAME_EXISTS);
-//     }
-
-//     aSession->methods()[aFuncName.data()] = {};
-//     auto& methodInfo = aSession->methods()[aFuncName.data()];
-
-//     methodInfo.data = data;
-
-//     //! Create vtable
-//     Adaptor::VTableRegistrar reg(aSession->rawBus(), aSession->info().path, aSession->info().interface);
-//     reg.addMethod(aFuncName, input, output, &MethodWrapper<Func>::onCall, dataPtr);
-//     std::vector<std::unique_ptr<Adaptor::VTableContext>> v;
-//     auto st = reg.commit(v);
-//     std::cout << "VTableRegistrar code=" << static_cast<int>(st.code())
-//         << ", message=" << st.message() << std::endl;
-
-//     if (st.isError()) {
-//         aSession->methods().erase(input);
-//         return st;
-//     }
-
-//     methodInfo.context = std::move(v.front());
-//     v.pop_back();
-
-//     return Status(StatusCode::SUCCESS);
-// }
-
-// template<typename... Args>
-// Status registerSingleSignal(Private::SessionPrivate* aSession, std::string_view aSignalName) {
-
-//     if (aSession->info().name.empty() || aSession->info().path.empty()
-//         || aSession->info().interface.empty()) {
-//         return Status(StatusCode::INVALID_ARG);
-//     }
-
-//     std::string input = Method::getArgsString<Args...>();
-//     if (aSession->signals().count(aSignalName.data())) {
-//         return Status(StatusCode::NAME_EXISTS);
-//     }
-
-//     aSession->signals()[aSignalName.data()] = {};
-//     auto& sigInfo = aSession->signals()[aSignalName.data()];
-
-//     Adaptor::VTableRegistrar reg(aSession->rawBus(), aSession->info().path, aSession->info().interface);
-//     reg.addSiganl(aSignalName, input);
-//     std::vector<std::unique_ptr<Adaptor::VTableContext>> v;
-//     Status st = reg.commit(v);
-//     if (st.isError()) {
-//         aSession->signals().erase(input);
-//         return st;
-//     }
-
-//     sigInfo.context = std::move(v.front());
-//     return Status(StatusCode::SUCCESS);
-// }
-
 template<typename... Args>
 Status emitSignal(Private::SessionPrivate* aSession, std::string_view aPath, std::string_view aIface,
     std::string_view aSignal, const Args&... aArgs) {
@@ -224,7 +150,6 @@ struct PropertyWrapper {
     std::string propPath;
     std::string propIface;
     T prop;
-    mutable std::mutex mMutex;
     std::string_view type;
     std::function<void(const T&)> onChange {nullptr};
 
@@ -239,24 +164,17 @@ struct PropertyWrapper {
         , type(typeid(T).name()) {}
 
     T get() const {
-        std::lock_guard lock(mMutex);
         return prop;
     }
 
     void set(const T& aNew) {
-        T copy{};
-        {
-            std::lock_guard lock(mMutex);
-            if (prop == aNew) {
-                return;
-            }
-
-            prop = aNew;
-            copy = prop;
+        if (prop == aNew) {
+            return;
         }
 
+        prop = aNew;
         if (onChange) {
-            onChange(copy);
+            onChange(prop);
         }
 
         sd_bus_emit_properties_changed(

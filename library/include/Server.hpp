@@ -2,6 +2,7 @@
 #define SSDBUS_DBUS_SERVER_HPP
 
 #include <string_view>
+#include <future>
 #include <tuple>
 
 #include "Looper.hpp"
@@ -18,7 +19,7 @@ public:
     Server() = delete;
 
     explicit Server(SessionType aType, std::string_view aServiceName)
-        : mSession(Session::createSession(aType, aServiceName))
+        : mSession(Session::createSession(aType, aServiceName, true))
         , mLooper(mSession) {}
 
     explicit Server(std::string_view aServiceName)
@@ -80,14 +81,13 @@ public:
 
         auto argsTuple = std::make_tuple(std::forward<Args>(aArgs)...);
         mLooper.post(
-            [session = mSession,
-             path = std::string(aPath),
+            [this, path = std::string(aPath),
              iface = std::string(aIface),
              signal = std::string(aSignal),
              args = std::move(argsTuple)] () mutable -> void {
                 std::apply(
                     [&](auto&&... aUnpacked) {
-                        session.emitSignal(path, iface, signal, aUnpacked...);
+                        mSession.emitSignal(path, iface, signal, aUnpacked...);
                     }, std::move(args)
                 );
             }
@@ -99,23 +99,81 @@ public:
     template<typename T>
     Status getProperty(std::string_view aPath, std::string_view aIface,
         std::string_view aName, T& aValue) {
-        return session().
-            template getLocalProperty<T>(aPath, aIface, aName, aValue);
+        if (mLooper.isOwnerThread()) {
+            return mSession.template getLocalProperty<T>(
+                aPath, aIface, aName, aValue);
+        }
+
+        std::promise<Status> promise;
+        std::future<Status> future = promise.get_future();
+        mLooper.post(
+            [this, &promise,
+             path = std::string(aPath),
+             iface = std::string(aIface),
+             name = std::string(aName), &aValue] () mutable -> void {
+                promise.set_value(
+                    mSession.template getLocalProperty<T>(
+                        path, iface, name, aValue)
+                );
+             }
+        );
+
+        return future.get();
     }
 
     template<typename T>
     Status setProperty(std::string_view aPath, std::string_view aIface,
-        std::string_view aName, T aValue) {
-        return session().
-            template setLocalProperty<T>(aPath, aIface, aName, aValue);
+        std::string_view aName, const T& aValue) {
+        if (mLooper.isOwnerThread()) {
+            return mSession.template setLocalProperty<T>(
+                aPath, aIface, aName, aValue);
+        }
+
+        std::promise<Status> promise;
+        std::future<Status> future = promise.get_future();
+        mLooper.post(
+            [this, &promise,
+             path = std::string(aPath),
+             iface = std::string(aIface),
+             name = std::string(aName),
+             value = aValue] () mutable -> void {
+                promise.set_value(
+                    mSession.template setLocalProperty<T>(
+                        path, iface, name, value)
+                );
+             }
+        );
+
+        return future.get();
     }
 
     template<typename T>
     Status onPropertyChanged(std::string_view aPath, std::string_view aIface,
         std::string_view aName, std::function<void(const T&)>&& aCallback) {
-        return session().
-            template onLocalPropertyChanged<T>(aPath, aIface, aName,
+        if (mLooper.isOwnerThread()) {
+            return mSession.template onLocalPropertyChanged<T>(
+                aPath, aIface, aName,
                 std::forward<std::function<void(const T&)>>(aCallback));
+        }
+
+        std::promise<Status> promise;
+        std::future<Status> future = promise.get_future();
+        mLooper.post(
+            [this, &promise,
+             path = std::string(aPath),
+             iface = std::string(aIface),
+             name = std::string(aName),
+             cb = std::forward<std::function<void(const T&)>>(aCallback)
+            ] () mutable -> void {
+                promise.set_value(
+                    mSession.template onLocalPropertyChanged<T>(
+                        path, iface, name,
+                        std::forward<std::function<void(const T&)>>(cb))
+                );
+             }
+        );
+
+        return future.get();
     }
 
     [[nodiscard]] Status status() const {

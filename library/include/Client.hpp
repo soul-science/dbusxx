@@ -34,21 +34,13 @@ struct AsyncPool {
 public:
     Client() = default;
 
-    explicit Client(std::string aService,
-        std::string aPath, std::string aInterface, bool aIsSystem = false)
-        : mAsyncPool(getAsyncPool(
-            aIsSystem ? SessionType::SYSTEM : SessionType::USER))
+    explicit Client(SessionType aType, std::string aService,
+        std::string aPath, std::string aInterface)
+        : mAsyncPool(getAsyncPool(aType, aService))
         , mAsyncPtr(&mAsyncPool->session)
         , mLooper(&mAsyncPool->looper)
-        , mType(aIsSystem ? SessionType::SYSTEM : SessionType::USER)
-        , mInfo({aService, aPath, aInterface}){}
-
-    explicit Client(std::string_view aSocket)
-        : mAsyncPool(getAsyncPool(SessionType::PEER, aSocket))
-        , mAsyncPtr(&mAsyncPool->session)
-        , mLooper(&mAsyncPool->looper)
-        , mType(SessionType::PEER)
-        , mServiceName(aSocket.data()) {}
+        , mType(aType)
+        , mInfo({aService, aPath, aInterface}) {}
 
     explicit Client(Looper& aLooper, std::string aService,
         std::string aPath, std::string aInterface)
@@ -100,6 +92,11 @@ public:
 
     template<typename Ret=void, uint64_t TimeoutUsec=0, typename... Args>
     Reply<Ret> callSync(std::string_view aMethod, const Args&... aArgs) {
+        if (mLooper->isOwnerThread()) {
+            return mAsyncPtr->callSync<Ret, TimeoutUsec>(
+                mInfo.name, mInfo.path, mInfo.interface, aMethod, aArgs...);
+        }
+
         std::promise<Reply<Ret>> promise;
         std::future<Reply<Ret>> future = promise.get_future();
         mLooper->post(
@@ -116,6 +113,11 @@ public:
 
     template<typename Ret=void, uint64_t TimeoutUsec=0, typename... Args>
     PendingReply<Ret> callAsync(std::string_view aMethod, const Args&... aArgs) {
+        if (mLooper->isOwnerThread()) {
+            return mAsyncPtr->callAsync<Ret, TimeoutUsec>(
+                mInfo.name, mInfo.path, mInfo.interface, aMethod, aArgs...);
+        }
+        
         std::promise<PendingReply<Ret>> promise;
         std::future<PendingReply<Ret>> future = promise.get_future();
         mLooper->post(
@@ -132,6 +134,12 @@ public:
 
     template<typename Ret=void, uint64_t TimeoutUsec=0, typename Callback, typename... Args>
     Status callAsync(std::string_view aMethod, Callback&& aCallback, const Args&... aArgs) {
+        if (mLooper->isOwnerThread()) {
+            return mAsyncPtr->callAsync<Ret, TimeoutUsec>(
+                mInfo.name, mInfo.path, mInfo.interface, aMethod,
+                std::forward<Callback>(aCallback), aArgs...);
+        }
+
         std::promise<Status> promise;
         std::future<Status> future = promise.get_future();
         mLooper->post(
@@ -150,6 +158,12 @@ public:
 
     template<typename Callback>
     Status listenSignal(std::string_view aSignal, Callback&& aCallback) {
+        if (mLooper->isOwnerThread()) {
+            return mAsyncPtr->listenSignal(
+                mInfo.name, mInfo.path, mInfo.interface,
+                aSignal, std::forward<Callback>(aCallback));
+        }
+
         std::promise<Status> promise;
         std::future<Status> future = promise.get_future();
         mLooper->post(
@@ -166,6 +180,12 @@ public:
 
     template<typename Cls, typename Ret, typename... Args>
     Status listenSignal(std::string_view aSignal, Cls* aCls, Ret(Cls::*aFunc)(Args...)) {
+        if (mLooper->isOwnerThread()) {
+            return mAsyncPtr->listenSignal(
+                mInfo.name, mInfo.path, mInfo.interface,
+                aSignal, aCls, aFunc);
+        }
+
         std::promise<Status> promise;
         std::future<Status> future = promise.get_future();
         mLooper->post(
@@ -182,6 +202,11 @@ public:
 
     template<typename Ret>
     Reply<Ret> getProperty(std::string_view aProp) {
+        if (mLooper->isOwnerThread()) {
+            return mAsyncPtr->getRemoteProperty<Ret>(
+                mInfo.name, mInfo.path, mInfo.interface, aProp);
+        }
+
         std::promise<Reply<Ret>> promise;
         std::future<Reply<Ret>> future = promise.get_future();
         mLooper->post(
@@ -197,6 +222,12 @@ public:
 
     template<typename T>
     Status setProperty(std::string_view aProp, const T& aValue) {
+        if (mLooper->isOwnerThread()) {
+            return mAsyncPtr->setRemoteProperty<T>(
+                mInfo.name, mInfo.path, mInfo.interface,
+                aProp, aValue);
+        }
+
         std::promise<Status> promise;
         std::future<Status> future = promise.get_future();
         mLooper->post(
@@ -213,6 +244,12 @@ public:
 
     template<typename Callback>
     Status onPropertyChanged(std::string_view aProp, Callback&& aCallback) {
+        if (mLooper->isOwnerThread()) {
+            return mAsyncPtr->onRemotePropertyChanged<>(
+                mInfo.name, mInfo.path, mInfo.interface,
+                aProp, std::forward<Callback>(aCallback));
+        }
+
         std::promise<Status> promise;
         std::future<Status> future = promise.get_future();
         mLooper->post(

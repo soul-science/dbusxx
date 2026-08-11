@@ -104,10 +104,15 @@ public:
             auto& objects = session->objects();
             auto it = objects.find(key);
             if (it != objects.end()) {
+                //! Release old slot first to force sd-bus to clean up strdup'd strings
+                //! from the old vtable. Otherwise sd_bus_add_object_vtable may
+                //! access freed strings during replacement (heap-use-after-free).
+                it->second.context->slot = Adaptor::RawSlotSharePtr();
                 for (auto& [name, entry] : it->second.methods) {
                     if (info.methods.count(name)) {
                         continue;
                     }
+
                     reg.addMethod(name, entry.input, entry.output,
                         entry.callback, entry.data.get());
                 }
@@ -131,7 +136,6 @@ public:
                 }
             }
 
-
             std::unique_ptr<Adaptor::VTableContext> ctx;
             auto st = reg.commit(ctx);
             if (st.isError()) {
@@ -141,7 +145,7 @@ public:
             if (it != objects.end()) {
                 auto& obj = it->second;
                 for (auto& [name, entry] : info.methods) {
-                    obj.methods[name] = std::move(entry);   // 覆盖旧 entry
+                    obj.methods[name] = std::move(entry);
                 }
                 for (auto& [name, entry] : info.signals) {
                     obj.signals[name] = std::move(entry);
@@ -187,18 +191,18 @@ public:
         return s;
     }
 
-    static Session peerSession(std::string_view aServiceName) {
-        return Session(SessionType::PEER, aServiceName);
+    static Session peerSession(std::string_view aServiceName, bool aIsServer = false) {
+        return Session(SessionType::PEER, aServiceName, aIsServer);
     }
 
     static Session createSession(SessionType aType = SessionType::USER,
-        std::string_view aServiceName = "") {
+        std::string_view aServiceName = "", bool aIsServer = false) {
         switch (aType) {
             case SessionType::SYSTEM:
                 return aServiceName.empty() ?
                     systemSession() : systemSession(aServiceName);
             case SessionType::PEER:
-                return peerSession(aServiceName);
+                return peerSession(aServiceName, aIsServer);
             case SessionType::USER:
             default:
                 return aServiceName.empty() ?
@@ -243,28 +247,32 @@ public:
         };
     }
 
-    // template<typename Func>
-    // Status registerMethod(std::string_view aPath, std::string aIface,
-    //     std::string_view aFuncName, Func aFunc) {
-    //     return Method::registerSingleMethod(mPrivate.get(), aFuncName, aFunc);
-    // }
+    template<typename Func>
+    Status registerMethod(std::string_view aPath, std::string aIface,
+        std::string_view aFuncName, Func&& aFunc) {
+        return registerBuilder(aPath, aIface)
+            .addMethod(aFuncName, std::forward<Func>(aFunc))
+            .commit();
+    }
 
-    // template<typename Cls, typename Ret, typename... Args>
-    // Status registerMethod(std::string_view aPath, std::string aIface,
-    //     std::string_view aFuncName, Cls* aCls, Ret(Cls::*aFunc)(Args...)) {
-    //     return Method::registerSingleMethod(
-    //         mPrivate.get(), aFuncName,
-    //         [aCls, aFunc] (Args... aArgs) -> Ret {
-    //             return (aCls->*aFunc)(std::forward<Args>(aArgs)...);
-    //         }
-    //     );
-    // }
+    template<typename Cls, typename Ret, typename... Args>
+    Status registerMethod(std::string_view aPath, std::string aIface,
+        std::string_view aFuncName, Cls* aCls, Ret(Cls::*aFunc)(Args...)) {
+        return registerMethod(
+            aPath, aIface, aFuncName,
+            [aCls, aFunc] (Args... aArgs) -> Ret {
+                return (aCls->*aFunc)(std::forward<Args>(aArgs)...);
+            }
+        );
+    }
 
-    // template<typename... Args>
-    // Status registerSignal(std::string_view aPath, std::string aIface,
-    //         std::string_view aSignalName) {
-    //     return Method::registerSingleSignal<Args...>(mPrivate.get(), aSignalName);
-    // }
+    template<typename... Args>
+    Status registerSignal(std::string_view aPath, std::string aIface,
+            std::string_view aSignalName) {
+        return registerBuilder(aPath, aIface)
+            .addSignal(aSignalName)
+            .commit();
+    }
 
     template<typename T>
     Status registerObject(std::string_view aPath, std::string aIface, T* aObj) {
@@ -372,7 +380,7 @@ public:
 
     template<typename T>
     Status setLocalProperty(std::string_view aPath, std::string_view aIface,
-        std::string_view aName, T aValue) {
+        std::string_view aName, const T& aValue) {
         auto p = getPropPrivate<T>(aPath, aIface, aName);
         if (!p) {
             return Status(StatusCode::INVALID_ARG);
@@ -419,8 +427,9 @@ public:
     }
 
 private:
-    explicit Session(SessionType aType, std::string_view aServiceName = "")
-        : mPrivate(std::make_shared<Private::SessionPrivate>(aType, aServiceName))
+    explicit Session(SessionType aType,
+        std::string_view aServiceName = "", bool aIsServer = false)
+        : mPrivate(std::make_shared<Private::SessionPrivate>(aType, aServiceName, aIsServer))
         , mRepsPtr(std::make_shared<PendingRepsV>()) {}
 
     template<typename T>

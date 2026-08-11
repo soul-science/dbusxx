@@ -118,6 +118,10 @@ public:
     }
 
     Status toStatus() const {
+        if (!mRawError.name) {
+            return Status(StatusCode::UNKNOWN_ERROR);
+        }
+
         static const std::map<std::string_view, StatusCode> kMap = {
             // --- common ---
             {SD_BUS_ERROR_FAILED,             StatusCode::UNKNOWN_ERROR},

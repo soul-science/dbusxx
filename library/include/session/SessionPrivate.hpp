@@ -86,10 +86,12 @@ public:
 
     SessionPrivate() = default;
 
-    explicit SessionPrivate(SessionType aType, std::string_view aServiceName)
-        : mRawBus(makePrivate(aType, aServiceName))
+    explicit SessionPrivate(SessionType aType,
+        std::string_view aServiceName, bool aIsServer = false)
+        : mRawBus(makePrivate(aType, aServiceName, aIsServer))
         , mType(aType)
-        , mServiceName(aServiceName) {
+        , mServiceName(aServiceName)
+        , mIsServer(aIsServer) {
         setDaemonDeathWatcher();
     }
 
@@ -117,7 +119,7 @@ public:
             Adaptor::RawBus::closeBus(mRawBus.get());
         }
 
-        mRawBus = makePrivate(mType);
+        mRawBus = makePrivate(mType, mServiceName, mIsServer);
         if (!mRawBus) {
             return Status(StatusCode::NOT_CONNECTED);
         }
@@ -167,18 +169,6 @@ public:
         if (st.isError()) {
             std::cout << "setUniqueName failed, reason:" << st.message() << std::endl;
         }
-        return st;
-    }
-
-    Status setInfo(ServiceInfo aInfo) {
-        std::cout << "name:" << aInfo.name << ", path:" << aInfo.path << ", interface:" << aInfo.interface << std::endl;
-        Status st = Adaptor::RawBus::setUniqueName(mRawBus.get(), aInfo.name.c_str(), 0);
-        if (st.isSuccess()) {
-            mInfo = aInfo;
-        } else {
-            std::cout << "setUniqueName failed, reason:" << st.message() << std::endl;
-        }
-
         return st;
     }
 
@@ -248,20 +238,24 @@ public:
 
 private:
     static Adaptor::RawBusSharePtr makePrivate(SessionType aType,
-        std::string_view aServiceName = "") {
+        std::string_view aServiceName = "", bool aIsServer = false) {
         switch (aType) {
             case SessionType::USER:
                 return Adaptor::RawBusSharePtr::makeUser();
             case SessionType::SYSTEM:
                 return Adaptor::RawBusSharePtr::makeSystem();
             case SessionType::PEER:
-                return Adaptor::RawBusSharePtr::makePeer(aServiceName);
+                return Adaptor::RawBusSharePtr::makePeer(aServiceName, aIsServer);
             default:
                 return Adaptor::RawBusSharePtr(nullptr, false);
         }
     }
 
     void setDaemonDeathWatcher() {
+        if (mType == SessionType::PEER) {
+            return;
+        }
+
         Adaptor::RawBus::setWatchBind(mRawBus.get(), true);
         Adaptor::RawBus::setExitOnDisconnect(mRawBus.get(), false);
         Adaptor::RawBus::setConnectedSignal(mRawBus.get(), true);
@@ -270,11 +264,8 @@ private:
     Adaptor::RawBusSharePtr mRawBus { nullptr };
     SessionType mType { false };
     std::string mServiceName;
+    bool mIsServer{false};
 
-    ServiceInfo mInfo;
-    // MethodMap mRegisteredMethods;
-    // SignalMap mRegisteredSignals;
-    // PropertyMap mRegisteredProperties;
     ObjectMap mRegisteredObjects;
     SignalHandlerVector mRegisteredSigHandlers;
     PropertyHandlerMap mRegisteredPropHandlers;

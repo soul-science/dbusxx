@@ -9,9 +9,9 @@ add_executable(example_server
     example_server.cpp
 )
 
-# add_executable(example_register
-#     example_register.cpp
-# )
+add_executable(example_register
+    example_register.cpp
+)
 
 add_executable(example_client_internal
     example_client_internal.cpp
@@ -19,6 +19,10 @@ add_executable(example_client_internal
 
 add_executable(example_client_external
     example_client_external.cpp
+)
+
+add_executable(example_peer
+    example_peer.cpp
 )
 
 # Find systemd library
@@ -36,10 +40,10 @@ target_link_libraries(example_server PRIVATE
     ssdbus
 )
 
-# target_link_libraries(example_register PRIVATE
-#     ${SYSTEMD_LIBRARIES}
-#     ssdbus
-# )
+target_link_libraries(example_register PRIVATE
+    ${SYSTEMD_LIBRARIES}
+    ssdbus
+)
 
 target_link_libraries(example_client_internal PRIVATE
     ${SYSTEMD_LIBRARIES}
@@ -51,8 +55,14 @@ target_link_libraries(example_client_external PRIVATE
     ssdbus
 )
 
+target_link_libraries(example_peer PRIVATE
+    ${SYSTEMD_LIBRARIES}
+    ssdbus
+)
+
 add_dependencies(example_session ssdbus)
 add_dependencies(example_server ssdbus)
-# add_dependencies(example_register ssdbus)
+add_dependencies(example_register ssdbus)
 add_dependencies(example_client_internal ssdbus)
 add_dependencies(example_client_external ssdbus)
+add_dependencies(example_peer ssdbus)
