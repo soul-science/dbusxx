@@ -2,19 +2,21 @@
 #define SSDBUS_SESSION_PRIVATE_HPP
 
 #include <string>
+#include <string_view>
+#include <functional>
 #include <memory>
-#include <set>
 #include <unordered_map>
-#include <iostream>
-
-#include "Status.hpp"
-#include "Utils.hpp"
+#include <sys/socket.h>
+#include <sys/un.h>
+#include <unistd.h>
 
 #include "adaptor/RawCommon.hpp"
 #include "adaptor/RawSlotSharePtr.hpp"
 #include "adaptor/RawBusSharePtr.hpp"
 #include "message/MessagePrivate.hpp" 
 #include "adaptor/VTableRegistrar.hpp"
+#include "Status.hpp"
+#include "Utils.hpp"
 
 namespace SSDbus {
 namespace Private {
@@ -34,17 +36,22 @@ public:
     struct PropertyEntry {
         std::shared_ptr<void> data;
         std::string signature;
+        bool writable;
         Adaptor::RawBusPropertyGetter getter;
         Adaptor::RawBusPropertySetter setter;
-        bool writable;
     };
 
     //! (path, interface) : ObjectInfo
     struct ObjectInfo {
         std::unique_ptr<Adaptor::VTableContext> context;
+        std::unique_ptr<Adaptor::VTableRegistrar> reg;
         std::unordered_map<std::string, MethodEntry> methods;
         std::unordered_map<std::string, SignalEntry> signals;
         std::unordered_map<std::string, PropertyEntry> properties;
+
+        static std::string makeKey(std::string_view path, std::string_view iface);
+
+        static std::pair<std::string_view, std::string_view> parseKey(std::string_view key);
     };
 
     struct SignalHandlerInfo {
@@ -62,166 +69,92 @@ public:
         std::shared_ptr<void> handler; 
     };
 
-    inline static std::string makeKey(std::string_view path, std::string_view iface) {
-        std::string key;
-        key.reserve(path.size() + iface.size() + 1);
-        key.append(path).append(":").append(iface);
-        return key;
-    }
-
-    inline static std::pair<std::string_view, std::string_view>
-        parseKey(std::string_view key) {
-        auto pos = key.rfind(':');
-        if (pos == std::string_view::npos) {
-            return {key, {}};
-        }
-
-        return {key.substr(0, pos), key.substr(pos + 1)};
-    }
-
     using ObjectMap = std::unordered_map<std::string, ObjectInfo>;
     using PropertyHandlerMap = std::unordered_map<std::string, PropertyHandlerInfo>;
     using SignalHandlerVector = std::vector<SignalHandlerInfo>;
 
-
     SessionPrivate() = default;
 
-    explicit SessionPrivate(SessionType aType,
-        std::string_view aServiceName, bool aIsServer = false)
-        : mRawBus(makePrivate(aType, aServiceName, aIsServer))
-        , mType(aType)
-        , mServiceName(aServiceName)
-        , mIsServer(aIsServer) {
-        setDaemonDeathWatcher();
-    }
+    explicit SessionPrivate(SessionType aType, std::string_view aServiceName, bool aIsServer = false);
 
-    ~SessionPrivate() {
-        if (mRawBus.get()) {
-            Adaptor::RawBus::closeBus(mRawBus.get());
-        }
-    }
+    ~SessionPrivate();
 
-    Status reconnect() {
-        //! Clear all slots
-        for (auto& [name, object] : mRegisteredObjects) {
-            object.context->slot = Adaptor::RawSlotSharePtr();
-        }
-            
-        for (auto& inf : mRegisteredSigHandlers) {
-            inf.slot = Adaptor::RawSlotSharePtr();
-        }
-            
-        for (auto& [key, inf] : mRegisteredPropHandlers) {
-            inf.slot = Adaptor::RawSlotSharePtr();
-        }
-
-        if (mRawBus) {
-            Adaptor::RawBus::closeBus(mRawBus.get());
-        }
-
-        mRawBus = makePrivate(mType, mServiceName, mIsServer);
-        if (!mRawBus) {
-            return Status(StatusCode::NOT_CONNECTED);
-        }
-
-        setDaemonDeathWatcher();
-        if ((mType == SessionType::USER
-            || mType == SessionType::SYSTEM)
-            && !mServiceName.empty()) {
-            return requestNameToDaemon();
-        }
-
-        return Status(StatusCode::SUCCESS);
-    }
-
-    static bool isValidInfo(const ServiceInfo& aInfo) {
-        return Adaptor::RawCheck::isServiceNameValid(aInfo.name)
-            && Adaptor::RawCheck::isPathNameValid(aInfo.path)
-            && Adaptor::RawCheck::isInterfaceNameValid(aInfo.interface);
-    }
-
-    Adaptor::RawBusSharePtr rawBus() const {
+    inline Adaptor::RawBusSharePtr rawBus() const {
         return mRawBus;
     }
 
-    std::string serviceName() const {
+    inline std::string serviceName() const {
         return mServiceName;
     }
 
-    SessionType type() const {
+    inline SessionType type() const {
         return mType;
     }
 
-    ObjectMap& objects() {
+    inline ObjectMap& objects() {
         return mRegisteredObjects;
     }
 
-    SignalHandlerVector& signalHandlers() {
+    inline SignalHandlerVector& signalHandlers() {
         return mRegisteredSigHandlers;
     }
 
-    PropertyHandlerMap& propertyHandlers() {
+    inline PropertyHandlerMap& propertyHandlers() {
         return mRegisteredPropHandlers;
     }
 
-    Status requestNameToDaemon() {
-        Status st = Adaptor::RawBus::setUniqueName(mRawBus.get(), mServiceName, 0);
-        if (st.isError()) {
-            std::cout << "setUniqueName failed, reason:" << st.message() << std::endl;
-        }
-        return st;
-    }
-
-    MessagePrivate createReply(MessagePrivate& aCallMsg) {
-        auto reply = Adaptor::RawMessageSharePtr::createReply(aCallMsg.rawMessage());
-        return MessagePrivate(reply);
-    }
-
-    MessagePrivate createMethodCall(std::string_view aService, std::string_view aPath,
-        std::string_view aIface, std::string_view aMethod) {
-        
-        auto call =  Adaptor::RawMessageSharePtr::createMethodCall(
-            mRawBus.get(), aService, aPath, aIface, aMethod 
-        );
-
-        return MessagePrivate(call);
-    }
-
-    Status sendMessage(MessagePrivate& aMsg) {
-        if (!mRawBus) {
-            return Status(StatusCode::UNKNOWN_ERROR);
-        }
-
-        return Adaptor::RawBus::sendMessage(mRawBus.get(), aMsg.rawMessage());
-    }
-
-    Status sendMessage(MessagePrivate& aMsg, std::string_view aDestination) {
-        if (!mRawBus) {
-            return Status(StatusCode::UNKNOWN_ERROR);
-        }
-
-        return Adaptor::RawBus::sendMessage(mRawBus.get(), aMsg.rawMessage(), aDestination);
-    }
-
-    int process() {
-        return Adaptor::RawBus::process(mRawBus.get(), nullptr);
-    }
-
-    int wait(uint64_t aTimeoutMs = UINT64_MAX) {
-        return Adaptor::RawBus::wait(mRawBus.get(), aTimeoutMs);
-    }
-
-    int getFd() const {
-        return Adaptor::RawBus::getFd(mRawBus.get());
-    }
-
-    void flush() {
-        Adaptor::RawBus::flushBus(mRawBus.get());
-    }
-
-    void addSignalHandlerInfo(SignalHandlerInfo aInf) {
+    inline void addSignalHandlerInfo(SignalHandlerInfo aInf) {
         mRegisteredSigHandlers.push_back(std::move(aInf));
     }
+
+    inline void setPropertyHandlerInfo(std::string_view aKey, PropertyHandlerInfo aInf) {
+        mRegisteredPropHandlers[std::string(aKey)] = std::move(aInf);
+    }
+
+    inline int listenFd() const {
+        return mListenFd;
+    }
+
+    inline void setPeerAcceptedCallback(std::function<Status()> aCb) {
+        mPeerAcceptedCb = std::move(aCb);
+    }
+
+    void addMethodEntry(const std::string& aKey, std::string_view aName,
+        std::string aInput, std::string aOutput,
+        Adaptor::RawBusMessageHandler aCallback, void* aData,
+        std::shared_ptr<void> aDataHolder);
+
+    void addSignalEntry(const std::string& aKey, std::string_view aName, std::string aInput);
+
+    void addPropertyEntry(const std::string& aKey,
+        std::string_view aName, std::string aSignature, bool aWritable,
+        Adaptor::RawBusPropertyGetter, Adaptor::RawBusPropertySetter,
+        void* aData, std::shared_ptr<void> aDataHolder);
+
+    Status commitBuilder(const std::string& aKey);
+
+    Status reconnect();
+
+    Status requestNameToDaemon();
+
+    Status acceptPeerConnection(Adaptor::RawBusEventPtr aEvent);
+
+    MessagePrivate createReply(MessagePrivate& aCallMsg);
+
+    MessagePrivate createMethodCall(std::string_view aService, std::string_view aPath,
+        std::string_view aIface, std::string_view aMethod);
+
+    Status sendMessage(MessagePrivate& aMsg);
+
+    Status sendMessage(MessagePrivate& aMsg, std::string_view aDestination);
+
+    int process();
+
+    int wait(uint64_t aTimeoutMs = UINT64_MAX);
+
+    int getFd() const;
+
+    void flush();
 
     std::shared_ptr<void> getPropertyHandler(std::string_view aKey) const {
         auto it = mRegisteredPropHandlers.find(std::string(aKey));
@@ -232,39 +165,18 @@ public:
         return it->second.handler;
     }
 
-    void setPropertyHandlerInfo(std::string_view aKey, PropertyHandlerInfo aInf) {
-        mRegisteredPropHandlers[std::string(aKey)] = std::move(aInf);
-    }
-
 private:
     static Adaptor::RawBusSharePtr makePrivate(SessionType aType,
-        std::string_view aServiceName = "", bool aIsServer = false) {
-        switch (aType) {
-            case SessionType::USER:
-                return Adaptor::RawBusSharePtr::makeUser();
-            case SessionType::SYSTEM:
-                return Adaptor::RawBusSharePtr::makeSystem();
-            case SessionType::PEER:
-                return Adaptor::RawBusSharePtr::makePeer(aServiceName, aIsServer);
-            default:
-                return Adaptor::RawBusSharePtr(nullptr, false);
-        }
-    }
+        std::string_view aServiceName = "", bool aIsServer = false, int* aListenFd = nullptr);
 
-    void setDaemonDeathWatcher() {
-        if (mType == SessionType::PEER) {
-            return;
-        }
+    void setDaemonDeathWatcher();
 
-        Adaptor::RawBus::setWatchBind(mRawBus.get(), true);
-        Adaptor::RawBus::setExitOnDisconnect(mRawBus.get(), false);
-        Adaptor::RawBus::setConnectedSignal(mRawBus.get(), true);
-    }
-
+    int mListenFd{-1};
     Adaptor::RawBusSharePtr mRawBus { nullptr };
     SessionType mType { false };
     std::string mServiceName;
     bool mIsServer{false};
+    std::function<Status()> mPeerAcceptedCb;
 
     ObjectMap mRegisteredObjects;
     SignalHandlerVector mRegisteredSigHandlers;

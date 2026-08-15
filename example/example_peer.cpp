@@ -16,7 +16,9 @@
 
 #include <array>
 #include <chrono>
+#include <condition_variable>
 #include <csignal>
+#include <mutex>
 #include <iostream>
 #include <string>
 #include <thread>
@@ -155,14 +157,24 @@ int main() {
 
     std::cout << "\n--- 6. Property change tests ---" << std::endl;
 
-    std::promise<int32_t> propChangedPromise;
-    auto propChangedFuture = propChangedPromise.get_future();
+    // 属性在 test 5 改过 42，其 PropertiesChanged 信号可能仍滞留在客户端
+    // 异步线程里，注册后会先收到残留的 42。不能再用一次性 promise（二次
+    // set_value 会抛 std::future_error），改等目标值 99。
+    std::mutex propMutex;
+    std::condition_variable propCv;
+    int32_t propValue = 0;
+    bool gotTarget = false;
 
     st = client.onPropertyChanged("counter",
-        [&propChangedPromise](int32_t newVal) {
+        [&](int32_t newVal) {
+            std::lock_guard lock(propMutex);
             std::cout << "[client] onPropertyChanged(counter): "
                       << newVal << std::endl;
-            propChangedPromise.set_value(newVal);
+            propValue = newVal;
+            if (newVal == 99) {
+                gotTarget = true;
+            }
+            propCv.notify_all();
         });
     std::cout << "[client] onPropertyChanged(counter): "
               << st.message() << std::endl;
@@ -172,8 +184,11 @@ int main() {
         server.setProperty(PATH, IFACE, "counter", 99);
     });
 
-    auto newVal = propChangedFuture.get();
-    std::cout << "[client] property changed to: " << newVal << std::endl;
+    {
+        std::unique_lock lock(propMutex);
+        propCv.wait(lock, [&gotTarget] { return gotTarget; });
+    }
+    std::cout << "[client] property changed to: " << propValue << std::endl;
 
     // ── 7. 清理 ──────────────────────────────────────────────────────
 

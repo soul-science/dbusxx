@@ -4,248 +4,80 @@
 #include <deque>
 #include <functional>
 #include <mutex>
-#include <sys/eventfd.h>
 #include <thread>
 
 #include "adaptor/RawEventSharePtr.hpp"
 #include "adaptor/RawSlotSharePtr.hpp"
 #include "session/SessionPrivate.hpp"
-#include "method/Reconnect.hpp"
 
 namespace SSDbus {
 namespace Private {
-
 class LooperPrivate {
     static constexpr uint64_t EVENT_FD_SIGNAL { 1 };
 public:
     LooperPrivate() = default;
 
-    explicit LooperPrivate(SessionPrivate* aSession)
-        : mSession(aSession)
-        , mEvent(Adaptor::RawEventSharePtr::make())
-        , mStatus(mEvent.status()) {}
+    explicit LooperPrivate(SessionPrivate* aSession);
 
-    ~LooperPrivate() {
-        if (mSession && mSession->rawBus() && mEvent.get()) {
-            Adaptor::RawBus::detachEvent(mSession->rawBus().get());
-        }
+    ~LooperPrivate();
 
-        if (mWakeSrc) {
-            sd_event_source_set_enabled(mWakeSrc, SD_EVENT_OFF);
-            sd_event_source_unref(mWakeSrc);
-            mWakeSrc = nullptr;
-        }
+    template<typename Callback>
+    void onReady(Callback&& aCallback) {
+        using Result = std::invoke_result_t<Callback>;
+        static_assert(std::is_void_v<Result>
+            || std::is_convertible_v<Result, Status>,
+            "onReady callback must return void or Status");
 
-        if (mWakeFd >= 0) {
-            close(mWakeFd);
-            mWakeFd = -1;
-        }
-
-        if (mExitSrc) {
-            sd_event_source_set_enabled(mExitSrc, SD_EVENT_OFF);
-            sd_event_source_unref(mExitSrc);
-            mExitSrc = nullptr;
-        }
-
-        if (mExitFd >= 0) {
-            close(mExitFd);
-            mExitFd = -1;
-        }
+        mReadyCallBack = [cb = std::forward<Callback>(aCallback)] () -> Status {
+            if constexpr (std::is_void_v<Result>) {
+                cb();
+                return Status(StatusCode::SUCCESS);
+            } else {
+                return cb();
+            }
+        };
     }
 
-    void run() {
-        if (mStatus.isError()) {
-            return;
-        }
+    void run();
 
-        mStatus = bindDaemonDisconnectedSignal();
-        if (mStatus.isError()) {
-            return;
-        }
+    void stop();
 
-        mStatus = bindExitEntry();
-        if (mStatus.isError()) {
-            return;
-        }
+    void post(std::function<void()> aTask);
 
-        mStatus = bindWakeEntry();
-        if (mStatus.isError()) {
-            return;
-        }
-
-        mStatus = Adaptor::RawBus::attachEvent(mSession->rawBus().get(), mEvent.get(), 0);
-        if (mStatus.isError()) {
-            return;
-        }
-
-        mThreadId = std::this_thread::get_id();
-        mStatus = Adaptor::RawEvent::loop(mEvent.get());
-    }
-
-    void stop() {
-        __safeWrite(mExitFd, &EVENT_FD_SIGNAL, sizeof(EVENT_FD_SIGNAL));
-    }
-
-    void post(std::function<void()> aTask){
-        {
-            std::lock_guard lock(mTaskMutex);
-            mTasks.push_back(std::move(aTask));
-        }
-
-        //! Write eventfd to awake looper
-        __safeWrite(mWakeFd, &EVENT_FD_SIGNAL, sizeof(EVENT_FD_SIGNAL));
-    }
-
-    bool isOwnerThread() const {
+    inline bool isOwnerThread() const {
         return std::this_thread::get_id() == mThreadId;
     }
 
-    Status status() const {
+    inline Status status() const {
         return mStatus;
     }
 
 private:
-    static ssize_t __safeRead(int aFd, void* aBuffer, size_t aCount) {
-        ssize_t n;
-        do {
-            n = read(aFd, aBuffer, aCount);
-        } while (n == -1 && errno == EINTR);
+    Status bindExitEntry();
 
-        //! > 0: number of bytes read, 0: EOF, -1: other error
-        return n;
-    }
+    Status bindWakeEntry();
 
-    ssize_t __safeWrite(int aFd, const void* aBuffer, size_t aCount) {
-        const char* ptr = static_cast<const char*>(aBuffer);
-        size_t remaining = aCount;
+    Status bindDaemonDisconnectedSignal();
 
-        while (remaining > 0) {
-            ssize_t written = write(aFd, ptr, remaining);
-            if (written == -1) {
-                if (errno == EINTR) {
-                    //! Interrupted by a signal, retry
-                    continue;
-                }
-
-                //! Other errors occur
-                return -1;
-            }
-
-            ptr += written;
-            remaining -= written;
-        }
-
-        //! All data has been written to file
-        return aCount;
-    }
-
-    Status bindExitEntry() {
-        mExitFd = eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC);
-        if (mExitFd < 0) {
-            return Adaptor::RawErrorConvert::fromErrno(errno);
-        }
-
-        return Adaptor::RawEvent::addIO(mEvent.get(), mExitSrc, mExitFd, EPOLLIN,
-            [] (Adaptor::RawBusEventSrcPtr, int aFd, uint32_t aRevent, void *aData) -> int {
-                uint64_t cnt;
-                if (__safeRead(aFd, &cnt, sizeof(cnt)) <= 0) {
-                    return -errno;
-                }
-
-                auto context = static_cast<LooperPrivate*>(aData);
-                context->mStatus = Adaptor::RawEvent::exit(context->mEvent.get(), 0);
-                return 1;
-            }, this
-        );
-    }
-
-    Status bindWakeEntry() {
-        mWakeFd = eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC);
-        if (mWakeFd < 0) {
-            return Adaptor::RawErrorConvert::fromErrno(errno);
-        }
-
-        return Adaptor::RawEvent::addIO(mEvent.get(), mWakeSrc, mWakeFd, EPOLLIN,
-            [] (Adaptor::RawBusEventSrcPtr, int aFd, uint32_t aRevent, void* aData) -> int {
-                auto* self = static_cast<LooperPrivate*>(aData);
-
-                uint64_t cnt;
-                if (__safeRead(aFd, &cnt, sizeof(cnt)) <= 0) {
-                    return -errno;
-                }
-                
-                std::deque<std::function<void()>> tasks;
-                {
-                    std::lock_guard lock(self->mTaskMutex);
-                    tasks.swap(self->mTasks);
-                }
-
-                for (auto& task : tasks) {
-                    task();
-                }
-
-                return 1;
-            }, this
-        );
-    }
-
-private:
-    Status bindDaemonDisconnectedSignal() {
-        if (mSession->type() == SessionType::PEER) {
-            return Status(StatusCode::SUCCESS);
-        }
-
-        mConnectedSlot = Adaptor::RawSlotSharePtr();
-        Adaptor::RawBusSlotPtr slot = nullptr;
-        auto st = Adaptor::RawBus::listenSignal(
-            mSession->rawBus().get(), slot,
-            "org.freedesktop.DBus.Local", "",
-            "org.freedesktop.DBus.Local", "Disconnected",
-            [] (Adaptor::RawBusMessagePtr, void* aData, Adaptor::RawBusErrorPtr) -> int {
-                auto* self = static_cast<LooperPrivate*>(aData);
-                self->post([self]() { self->doReconnect(); });
-                return 0;
-            }, this);
-        if (st.isSuccess()) {
-            mConnectedSlot = Adaptor::RawSlotSharePtr(slot);
-        }
-        return st;
-    }
-
-    void doReconnect() {
-        mConnectedSlot = Adaptor::RawSlotSharePtr();
-        if (mSession && mSession->rawBus() && mEvent.get()) {
-            Adaptor::RawBus::detachEvent(mSession->rawBus().get());
-        }
-
-        auto st = Method::reconnectSession(mSession);
-        if (st.isError()) {
-            return;
-        }
-
-        st = Adaptor::RawBus::attachEvent(
-            mSession->rawBus().get(), mEvent.get(), 0);
-        if (st.isError()) {
-            return;
-        }
-
-        bindDaemonDisconnectedSignal();
-    }
+    void doReconnect();
 
     SessionPrivate* mSession;
+
+    int mExitFd { -1 };
     Adaptor::RawEventSharePtr mEvent { nullptr, StatusCode::UNKNOWN_ERROR };
     Adaptor::RawBusEventSrcPtr mExitSrc { nullptr };
-    int mExitFd { -1 };
 
-    std::mutex mTaskMutex;
-    std::deque<std::function<void()>> mTasks;
     int mWakeFd { -1 };
     Adaptor::RawBusEventSrcPtr mWakeSrc { nullptr };
+    Adaptor::RawBusEventSrcPtr mAcceptSrc { nullptr };
+
+    std::mutex mTaskMutex;
+    std::thread::id mThreadId;
+    std::deque<std::function<void()>> mTasks;
+
+    std::function<Status()> mReadyCallBack;
 
     Adaptor::RawSlotSharePtr mConnectedSlot;
-
-    std::thread::id mThreadId;
-
     Status mStatus { StatusCode::UNKNOWN_ERROR };
 
 };

@@ -1,6 +1,6 @@
 # ssdbus 项目计划
 
-> 最后更新：2026-08-10（RegisterBuilder 重复 commit use-after-free 修复 + PropertyWrapper mutex 移除 + Server property 线程安全 + Method.hpp 清理）
+> 最后更新：2026-08-13（peer-to-peer 连接完成 + accept 逻辑下沉 adaptor + Looper onReady 延迟 init + eventfd 初始化竞态修复 + 属性变更测试健壮化）
 
 ---
 
@@ -20,17 +20,18 @@
 | 信号注册 | `Session.hpp` (RegisterBuilder::addSignal) | ✅ vtable 注册 + 链式，introspect 可见 |
 | VTable 管理 | `VTableRegistrar.hpp` / `RegisterBuilder` | ✅ 链式 API + commit 一次提交完整 vtable；**systemd v250+ 兼容**（`SD_BUS_VTABLE_START(0)` 宏 + `ABSOLUTE_OFFSET` + `reinterpret_cast<size_t>(ptr)` 传 userdata）；`reserve(n)` 防字符串扩容悬空；`slot` 析构顺序修正；**暴露 `path()`/`interface()` 供 PropertyWrapper 自持** (2026-08-09)；**重复 commit 前先释放旧 slot 防 use-after-free** (2026-08-10) |
 | 信号监听 | `Method.hpp` / `SignalHandler.hpp` | ✅ 类型安全回调 |
-| 会话管理 | `Session.hpp` / `SessionPrivate.hpp` | ✅ 开/关/发/收/注册；**构造函数 private**，统一通过 `systemSession()` / `userSession()` / `peerSession()` 工厂方法创建（含 `ServiceInfo` 重载）；`setInfo` 移至 private，Server 通过 friend 工厂方法调用 |
+| 会话管理 | `Session.hpp` / `SessionPrivate.hpp` | ✅ 开/关/发/收/注册；**构造函数 private**，统一通过 `systemSession()` / `userSession()` / `peerSession()` 工厂方法创建；**公开面干净**——不暴露 `listenFd()`/`setPeerAcceptedCallback()`（peer 延迟 init 走 `Looper::onReady`，无 friend）(2026-08-13) |
+| Peer accept | `adaptor/RawBusSharePtr.hpp`（`RawBus::acceptConnection`） | ✅ `SessionPrivate::acceptPeerConnection()` 的 sd-bus 细节（accept4 + sd_bus_new/set_server/set_fd/start/attach_event）下沉到 adaptor；`SessionPrivate` 仅剩薄委托（收进 `mRawBus` + 触发 `mPeerAcceptedCb`）(2026-08-13) |
 | 客户端封装 | `Client.hpp` | ✅ `Client` 远端接口代理：**双构造模式**（自管 + 外部 Looper），**全局 `static` `weak_ptr` 共享单 `AsyncPool`**（system/user/peer 各一），sync 调用通过 `post()` + `promise/future` 走 looper 线程，**SyncPool 已移除**；P2P 天然单连接无冲突；`callSync`/`callAsync`/`listenSignal`/`getProperty`/`setProperty`/`onPropertyChanged` |
-| 事件循环 | `Looper.hpp` / `LooperPrivate.hpp` | ✅ sd-event 集成，IO 驱动 + 优雅退出 + **跨线程 `post()` 投递（eventfd + 任务队列 + mutex）+ `isOwnerThread()`** |
+| 事件循环 | `Looper.hpp` / `LooperPrivate.hpp` | ✅ sd-event 集成，IO 驱动 + 优雅退出 + **跨线程 `post()` 投递（eventfd + 任务队列 + mutex）+ `isOwnerThread()`**；**`onReady(cb)` 模板**（接受 void/Status 回调）统一「连接就绪后 init」时机（普通立即 / peer accept 后）；**eventfd 移到构造函数创建**（修 `post()`/`stop()` 与 `bind*Entry` 的竞态）；**`run()` 结尾 `if (mStatus.isSuccess()) mStatus = st` 防循环内错误状态被 loop 返回值覆盖** (2026-08-13) |
 | 资源管理 | `RawSlotSharePtr` / SharePtr 系列 | ✅ RAII，移动语义完整 |
 | 类型推导 | `FunctionTrait.hpp` / `DbusArgs.hpp` | ✅ 编译期萃取 + **`getSignature` 支持 `std::map`（`a{KV}`）+ `isMapV` trait** |
 | 属性注册 | `Method.hpp` / `Session.hpp` / `VTableRegistrar.hpp` / `MetaObject.hpp` | ✅ 自拥有值 + `getLocalProperty`/`setLocalProperty` + `onLocalPropertyChanged` callback + `sd_bus_emit_properties_changed` + `typeid` 类型安全检查 + `SD_BUS_VTABLE_PROPERTY_EMITS_CHANGE` flag；**`SSDBUS_PROPERTY` 拆分为 `SSDBUS_PROPERTY_RO`（只读）和 `SSDBUS_PROPERTY_RW`（读写）**；**PropertyWrapper 自持 `propPath`/`propIface`**（从 `VTableRegistrar` 传入，替代废弃的 `session->info()`）(2026-08-09)；**移除 mutex**：Server 保证属性操作均在 owner 线程，无线程竞争 (2026-08-10) |
 | 远端属性 | `PropertyHandler.hpp` / `Method.hpp` | ✅ `getRemoteProperty`/`setRemoteProperty` 走 `Properties.Get/Set`；`MessagePrivate::read` variant 自动解包；`Client::getProperty`/`setProperty` |
 | 属性变更监听 | `PropertyHandler.hpp` / `Method.hpp` | ✅ `PropertiesChanged` 信号监听（sa{sv}as），**一个 handler 对应一个 (service, path) 对**（get-or-create），多次监听同一 destination 只注册一条信号匹配、多 callback 聚合；`Client::onPropertyChanged` |
-| 示例 | `example/*.cpp` | ✅ 覆盖主要 API：Session 直连、Server 一站式（含反射注册+server property API）、Client 代理（自管 `example_client_internal` + 外部 Looper `example_client_external`）；**含 RO/RW property get/set/onChanged 全覆盖 + 重连测试**；`example_meta` 已删除（MetaObject 不对外暴露）(2026-08-06)；`example_register` 测试 registerMethod/registerSignal 多种 callable 类型（静态函数、成员函数、lambda、std::function）(2026-08-10) |
-| 反射注册 | `session/MetaObject.hpp` + `Server.hpp` | ✅ CRTP + 宏标注 → `registerObject` 一键注册：`SSDBUS_METHOD` / `SSDBUS_SIGNAL` / `SSDBUS_PROPERTY_RO` / `SSDBUS_PROPERTY_RW` 全部宏在 `Server.hpp` 中；**新增 `SSDBUS_PATH`/`SSDBUS_IFACE` 上下文宏**，支持同一 Server 多 path/iface，`init()` 自动按分组注册；`MetaObject` 移入 `session/` 子目录不对外暴露；`SSDBUS_LISTEN` 已移除，改为运行时 `session().listenSignal()` 手动注册 (2026-08-09) |
-| 服务端封装 | `Server.hpp` | ✅ `Server<Derived>` 捆绑 Session + Looper + registerObject，`run()` 一行启动；`emit()`/`getProperty()`/`setProperty()`/`onPropertyChanged()` 自动线程检测（同线程直调 / 跨线程 promise+future+post）；**`SSDBUS_PATH`/`SSDBUS_IFACE` 宏支持多 path/iface**，`init()` 自动按分组注册；接口均需显式传 path/iface (2026-08-10) |
+| 示例 | `example/*.cpp` | ✅ 覆盖主要 API：Session 直连、Server 一站式（含反射注册+server property API）、Client 代理（自管 `example_client_internal` + 外部 Looper `example_client_external`）；**含 RO/RW property get/set/onChanged 全覆盖 + 重连测试**；`example_meta` 已删除（MetaObject 现位于 include 根目录，经 `Server` 宏对用户可见）(2026-08-06)；`example_register` 测试 registerMethod/registerSignal 多种 callable 类型（静态函数、成员函数、lambda、std::function）(2026-08-10)；**`example_peer` 全流程**（peer server + client：callSync/信号/属性读写/属性变更监听 + 延迟 init）(2026-08-11)；**属性变更测试改为 `condition_variable` 等目标值**——peer 模式会递送订阅前已在途的 `PropertiesChanged` 信号，一次性 promise 二次 `set_value` 会崩 (2026-08-13) |
+| 反射注册 | `MetaObject.hpp`（include 根目录）+ `Server.hpp` | ✅ CRTP + 宏标注 → `registerObject` 一键注册：**`SSDBUS_PATH` / `SSDBUS_IFACE` / `SSDBUS_METHOD` / `SSDBUS_SIGNAL` / `SSDBUS_PROPERTY_RO` / `SSDBUS_PROPERTY_RW` 全部宏定义在 `MetaObject.hpp`**（`Server<Derived>` 继承 `MetaObject<Derived>` 并 include 它）；机制：`inline static` + lambda 静态初始化捕获上下文（`Self::sPath`/`sIface`）向 `registry()` 推入 `MethodEntry{name,path,iface,registerFn}`，`Server::init()` 按 (path, iface) 分组逐个 `registerBuilder`；`MetaObject` 位于 include 根目录（随公开头文件暴露，非 `session/` 子目录）；`SSDBUS_LISTEN` 已移除，改为运行时 `session().listenSignal()` 手动注册 (2026-08-13) |
+| 服务端封装 | `Server.hpp` | ✅ `Server<Derived>` 捆绑 Session + Looper + registerObject，`run()` 通过 `mLooper.onReady(init)` 一行启动——**普通服务立即 init，peer server 延迟到 accept 后 init**（peer server 的 bus 在连接建立前不存在）；`emit()`/`getProperty()`/`setProperty()`/`onPropertyChanged()` 自动线程检测（同线程直调 / 跨线程 promise+future+post）；**`SSDBUS_PATH`/`SSDBUS_IFACE` 宏支持多 path/iface**，`init()` 自动按分组注册 (2026-08-13) |
 | 遗留代码清理 | DbusContext/DbusManager/DbusInterface/DbusError + Method.hpp 旧 registerSingle* | ✅ 全部删除 (2026-08-10) |
 
 ### 🔴 已知 Bug（按严重度）
@@ -66,6 +67,9 @@
 | B28 | ✅ 已修复 | `Method.hpp` / `Session.hpp` | **`PropertyWrapper::set()` 取不到 path/iface**。新 `Server` 不再调 `setInfo()`，`session->info()` 返回空。`sd_bus_emit_properties_changed` 发空 path → 客户端 `onPropertyChanged` 收不到。**修复**：`VTableRegistrar` 暴露 `path()`/`interface()`，`RegisterBuilder::addProperty` 传给 `PropertyWrapper` 自持 (2026-08-09) |
 | B29 | ✅ 已修复 | `Session.hpp` (`RegisterBuilder::commit`) | **`RegisterBuilder::commit()` heap-use-after-free**。同一 (path, iface) 多次调用 `registerMethod` 时，每次 commit 都调 `sd_bus_add_object_vtable` 替换旧 vtable。sd-bus 内部 strdup 旧字符串后 free，再 strlen 访问 → ASAN 报错。**修复**：新 vtable 注册前先释放旧 `context->slot`，强制 sd-bus 清理旧 vtable 的 strdup 字符串 (2026-08-10) |
 | B30 | ✅ 已修复 | `Method.hpp` | **`PropertyWrapper` mutex 冗余**。`Server` 已确保 `getProperty`/`setProperty`/`onGetter`/`onSetter` 均在 owner 线程执行，无并发访问。**修复**：移除 `std::mutex mMutex` 及 `lock_guard`，同时删除 `#include <mutex>` (2026-08-10) |
+| B31 | ✅ 已修复 | `LooperPrivate.hpp` | **`post()` 与 eventfd 初始化竞态 → 小概率卡死**。`mWakeFd`/`mExitFd` 原本在 `run()` 的 `bind*Entry()` 里才创建，`Client` 构造即起 looper 线程，main 的第一次 `callSync` `post()` 若抢在创建之前 → `__safeWrite(-1)` 静默失败（EBADF）→ 任务入队永不唤醒 → `future.get()` 死等。**修复**：eventfd 移到构造函数创建，`bind*Entry` 保留 `if (fd<0)` 惰性兜底 (2026-08-13) |
+| B32 | ✅ 已修复 | `LooperPrivate.hpp` | **循环内设置的错误状态被 `loop()` 返回值覆盖**。`mStatus = loop(...)` 会把 init 等回调里设置的错误冲成 SUCCESS。**修复**：`Status st = loop(...); if (mStatus.isSuccess()) mStatus = st;` (2026-08-13) |
+| B33 | ✅ 已修复 | `example_peer.cpp` | **属性变更测试一次性 promise 二次 `set_value` → `std::future_error` 崩溃**。peer 模式用 `sd_bus_add_filter` 兜底，会递送订阅前已在途的 `PropertiesChanged(42)`，随后 99 到达再 `set_value` 即崩。**修复**：改 `mutex + condition_variable` 等目标值 99，容忍残留信号（库行为正确，是测试竞态）(2026-08-13) |
 
 ---
 
@@ -123,7 +127,7 @@
 | P3-2 | **Stub/Proxy 双向代码生成** | 自定义 `.xi` IDL（IPC 无关接口描述），`xi2cpp` 后端多目标：`--dbus` → `sd-bus` 的 Stub + Proxy；`--binder` / `--grpc` 等后续扩展。单一 IDL 真相源，接口变更编译期同步报错。类型系统用通用名（`i32`/`string`/`map<string, vector<i32>>`），后端各自映射到对应 IPC 签名 |
 | P3-3 | ✅ 已完成 | **连接重连**：`SessionPrivate::reconnect()` 关闭旧 bus → 创建新 bus；`Reconnect.hpp::reconnectSession()` 遍历全部注册项重调 `sd_bus_add_object_vtable`/`sd_bus_match_signal`；`LooperPrivate` 监听 `Disconnected` 信号 + `post()` 异步重连 + 重连后重新注册 Disconnected 监听；`Client::callSync()` 检测连接错误 → `session.rebuild()` → 重试 (2026-08-05) |
 | P3-4 | **name owner 追踪** | 封装 `sd_bus_track` 或 `NameOwnerChanged` |
-| P3-5 | **peer-to-peer 连接** | `sd_bus_open()` P2P 模式 |
+| P3-5 | ✅ 已完成 | **peer-to-peer 连接**：`SessionType::PEER` + `makePeer`（server `bind+listen` 存 listenFd / client `connect`），服务端事件循环异步 accept（`RawBus::acceptConnection`），`Server::run()` 通过 `Looper::onReady` 延迟 init 到 accept 后；`example_peer` 全流程通过 (2026-08-13) |
 | P3-6 | ✅ 已完成 | `RawCommon.hpp` 拆分 → RawBus/RawMessage/RawSlot/RawEvent/RawErrorConvert (2026-07-20) |
 | P3-7 | ✅ 已完成 | **`FuncTrait` 补全**：noexcept/&/&&/const &/const && 及 noexcept 组合共 14 个偏特化，覆盖 lambda operator() 全部 cv-ref 限定符版本 (2026-08-05) |
 | P3-8 | 🟡 按需 | **变体类型 (`v`)**：已有 `MessagePrivate::read` variant 自动解包已覆盖 `Properties.Get` 场景，`PropertiesChanged` 由 PropertyHandler 手动解析。无外部 `a{sv}` 对接需求前不实施 |
@@ -320,3 +324,5 @@ graph TD
 | RegisterBuilder commit ctx 错配 | `RegisterBuilder::commit()` 用 `mEntries`(vector) 顺序生成 ctx，但用 `mMethods`(unordered_map) 哈希序分配——必须按 ctx->name 匹配而非索引 (2026-08-05) |
 | systemd v250+ vtable 兼容 | systemd v250+ `sd_bus_vtable` 结构变化（位域 type/flags、method.names 字段、`sd_bus_object_vtable_format` 变 `const unsigned`）。`SD_BUS_VTABLE_START(0)` 宏强制 `features=_SD_BUS_VTABLE_PARAM_NAMES` + `element_size=sizeof(sd_bus_vtable)`。`ABSOLUTE_OFFSET` 直接把 `void*` 塞 `size_t offset` — sd-bus 解为 `(void*)(uintptr_t)offset`。`VTableContext::slot` 必须放最后（最先析构），字符串 vectors 在其之前析构。`reserve(n)` 防扩容 → `c_str()` 悬空 (2026-08-09) |
 | PropertyWrapper path/iface 自持 | 旧设计依赖 `session->info()` 获取 path/iface，但新 `Server` 支持多 path/iface 后不再设单一 `info`。`VTableRegistrar` 暴露 `path()`/`interface()`，`RegisterBuilder::addProperty` 传给 `PropertyWrapper` 构造时存储，`set()` 用自持的 `propPath`/`propIface` 调 `sd_bus_emit_properties_changed` (2026-08-09) |
+| peer 延迟 init 归属（定稿） | `Server::run()` 的「连接就绪后 init」由 `Looper::onReady(cb)` 承载：`LooperPrivate::run()` 按会话类型分支——peer server（`listenFd()>=0`）→ `setPeerAcceptedCallback`（accept 后触发）；普通服务 → post 进循环执行。**`Session` 公开面保持干净**（不暴露 `listenFd`/回调）；**不用 friend**（破坏封装）；**不用 `Session::prepare(cb)`**（脱离 Server 语境普通用户看不懂）。`onReady` 为模板，接受 void 或返回 Status 的回调（`static_assert` 约束返回类型，`is_convertible_v<Result, Status>`）。**`Looper::run()` 签名不能改**——example 用 `std::thread(&Looper::run, &looper)`，加参数破坏 `&Looper::run`。曾试过「公开方法 / friend / prepare」三版均被否 (2026-08-13) |
+| peer 模式信号语义 | peer 连接无 daemon，`listenSignal` 退化为 `sd_bus_add_filter` 全量过滤 → **会递送订阅前已在途的信号**（如 `PropertiesChanged(42)`），与 daemon 模式的「订阅后才转发」语义不同。使用者回调需容忍多次/残留触发；测试勿用一次性 promise 断言 (2026-08-13) |

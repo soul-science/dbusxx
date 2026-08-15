@@ -4,140 +4,51 @@
 #include "adaptor/RawCommon.hpp"
 #include "adaptor/RawRemoteError.hpp"
 
+
 namespace SSDbus {
 namespace Adaptor {
-
 namespace RawEvent {
-    Status createEvent(RawBusEventPtr& aRawEvent) {
-        return RawErrorConvert::makeStatus(sd_event_new(&aRawEvent));
-    }
+    Status createEvent(RawBusEventPtr& aRawEvent);
 
-    void refEvent(RawBusEventPtr aRawEvent) {
-        if (!aRawEvent) {
-            return;
-        }
+    void refEvent(RawBusEventPtr aRawEvent);
 
-        sd_event_ref(aRawEvent);
-    }
-
-    void unrefEvent(RawBusEventPtr aRawEvent) {
-        if (!aRawEvent) {
-            return;
-        }
-
-        sd_event_unref(aRawEvent);
-    }
+    void unrefEvent(RawBusEventPtr aRawEvent);
 
     Status addIO(RawBusEventPtr aRawEvent, RawBusEventSrcPtr& aEventSrc,
-        int aFd, uint32_t aEvents, RawEventIOHandler aCallback, void* aData) {
-        if (!aRawEvent) {
-            return Status(StatusCode::INVALID_ARG);
-        }
+        int aFd, uint32_t aEvents, RawEventIOHandler aCallback, void* aData);
 
-        return RawErrorConvert::makeStatus(
-            sd_event_add_io(aRawEvent, &aEventSrc, aFd, aEvents, aCallback, aData));
-    }
+    Status loop(RawBusEventPtr aRawEvent);
 
-    Status loop(RawBusEventPtr aRawEvent) {
-        if (!aRawEvent) {
-            return Status(StatusCode::INVALID_ARG);
-        }
+    Status exit(RawBusEventPtr aRawEvent, int aCode);
+}
 
-        return RawErrorConvert::makeStatus(sd_event_loop(aRawEvent));
-    }
+namespace RawEventSrc {
+    Status enableEventSrc(RawBusEventSrcPtr aSrc, int aType);
 
-    Status exit(RawBusEventPtr aRawEvent, int aCode) {
-        if (!aRawEvent) {
-            return Status(StatusCode::INVALID_ARG);
-        }
-
-        return RawErrorConvert::makeStatus(sd_event_exit(aRawEvent, aCode));
-    }
+    void unrefEventSrc(RawBusEventSrcPtr aSrc);
 }
 
 class RawEventSharePtr {
 public:
-    RawEventSharePtr() {}
+    explicit RawEventSharePtr(const RawBusEventPtr& aRawPtr, const Status& aStatus);
 
-    explicit RawEventSharePtr(const RawBusEventPtr& aRawPtr, const Status& aStatus)
-        : mRawEvent(aRawPtr)
-        , mStatus(aStatus) {}
+    ~RawEventSharePtr();
 
-    ~RawEventSharePtr() {
-        if (mRawEvent) {
-            RawEvent::unrefEvent(mRawEvent);
-        }
+    RawEventSharePtr(const RawEventSharePtr& aOther);
 
-        mRawEvent = nullptr;
-    }
+    RawEventSharePtr& operator=(const RawEventSharePtr& aOther);
 
-    RawEventSharePtr(const RawEventSharePtr& aOther)
-        : mRawEvent(aOther.mRawEvent)
-        , mStatus(aOther.mStatus) {
-            if (mRawEvent) {
-                RawEvent::refEvent(mRawEvent);
-            }
-        }
+    RawEventSharePtr(RawEventSharePtr&& aOther) noexcept;
 
-    RawEventSharePtr& operator=(const RawEventSharePtr& aOther) {
-        if (this == &aOther) {
-            return *this;
-        }
+    RawEventSharePtr& operator=(RawEventSharePtr&& aOther) noexcept;
 
-        if (aOther.mRawEvent) {
-            mRawEvent = aOther.mRawEvent;
-            mStatus = aOther.mStatus;
-            RawEvent::refEvent(mRawEvent);
-        }
+    static RawEventSharePtr make();
 
-        return *this;
-    }
-
-    RawEventSharePtr(RawEventSharePtr&& aOther) noexcept {
-        if (mRawEvent) {
-            RawEvent::unrefEvent(mRawEvent);
-            mRawEvent = nullptr;
-        }
-
-        if (aOther.mRawEvent) {
-            mRawEvent = std::move(aOther.mRawEvent);
-            mStatus = std::move(aOther.mStatus);
-            aOther.mRawEvent = nullptr;
-            aOther.mStatus = Status(StatusCode::UNKNOWN_ERROR);
-        }
-    }
-
-    RawEventSharePtr& operator=(RawEventSharePtr&& aOther) noexcept {
-        if (this == &aOther) {
-            return *this;
-        }
-
-        if (mRawEvent) {
-            RawEvent::unrefEvent(mRawEvent);
-            mRawEvent = nullptr;
-        }
-
-        if (aOther.mRawEvent) {
-            mRawEvent = std::move(aOther.mRawEvent);
-            mStatus = std::move(aOther.mStatus);
-            aOther.mRawEvent = nullptr;
-            aOther.mStatus = Status(StatusCode::UNKNOWN_ERROR);
-        }
-
-        return *this;
-    }
-
-    static RawEventSharePtr make() {
-        RawBusEventPtr raw = nullptr;
-        Status st = RawEvent::createEvent(raw);
-        return RawEventSharePtr(raw, st);
-    }
-
-    RawBusEventPtr get() const {
+    inline RawBusEventPtr get() const {
         return mRawEvent;
     }
 
-    Status status() const {
+    inline Status status() const {
         return mStatus;
     }
 

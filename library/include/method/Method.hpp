@@ -7,6 +7,7 @@
 #include "message/MessagePrivate.hpp"
 #include "message/SignalHandler.hpp"
 #include "message/PropertyHandler.hpp"
+#include "message/ReplyAsyncHandler.hpp"
 #include "session/SessionPrivate.hpp"
 #include "FunctionTrait.hpp"
 #include "Status.hpp"
@@ -233,7 +234,8 @@ Private::MessagePrivate callSync(
     std::string_view aMethod, const Args&... aArgs) {
 
     Private::MessagePrivate callMsg = aSession->createMethodCall(
-        aService, aPath, aIface, aMethod);
+        aSession->type() != SessionType::PEER ? aService : "",
+        aPath, aIface, aMethod);
 
     Status st = Status(StatusCode::SUCCESS);
     if constexpr (sizeof...(Args)) {
@@ -281,7 +283,8 @@ std::shared_ptr<Private::ReplyAsyncHandler> callAsync(
     std::string_view aService, std::string_view aPath, std::string_view aIface,
     std::string_view aMethod, const Args&... aArgs) {
     Private::MessagePrivate callMsg = aSession->createMethodCall(
-        aService, aPath, aIface, aMethod);
+        aSession->type() != SessionType::PEER ? aService : "",
+        aPath, aIface, aMethod);
 
     if constexpr (sizeof...(Args)) {
         callMsg.write(aArgs...);
@@ -332,7 +335,7 @@ Status listenSignal(Private::SessionPrivate* aSession,
         aSession->rawBus().get(), raw,
         aSender, aPath, aIface, aSignal,
         &Private::SignalHandler<Callback>::onSignal,
-        handler.get()
+        handler.get(), aSession->type() == SessionType::PEER
     );
 
     if (st.isSuccess()) {
@@ -343,11 +346,13 @@ Status listenSignal(Private::SessionPrivate* aSession,
     return st;
 }
 
-Private::MessagePrivate getRemoteProperty(Private::SessionPrivate* aSession,
+inline Private::MessagePrivate getRemoteProperty(Private::SessionPrivate* aSession,
     std::string_view aService, std::string_view aPath, std::string_view aIface,
     std::string_view aProp) {
     return Private::PropertyHandler::getRemoteProperty(
-        aSession, aService, aPath, aIface, aProp
+        aSession,
+        aSession->type() != SessionType::PEER ? aService : "",
+        aPath, aIface, aProp
     );
 }
 
@@ -356,7 +361,9 @@ Status setRemoteProperty(Private::SessionPrivate* aSession,
     std::string_view aService, std::string_view aPath, std::string_view aIface,
     std::string_view aProp, const T& aValue) {
     return Private::PropertyHandler::setRemoteProperty(
-        aSession, aService, aPath, aIface, aProp, aValue);
+        aSession,
+        aSession->type() != SessionType::PEER ? aService : "",
+        aPath, aIface, aProp, aValue);
 }
 
 template<typename Callback>
@@ -375,7 +382,8 @@ Status onRemotePropertyChanged(Private::SessionPrivate* aSession,
         Adaptor::RawBusSlotPtr raw = nullptr;
         st = Adaptor::RawBus::listenSignal(
             aSession->rawBus().get(), raw,
-            aService, aPath, "org.freedesktop.DBus.Properties", "PropertiesChanged",
+            aSession->type() != SessionType::PEER ? aService : "",
+            aPath, "org.freedesktop.DBus.Properties", "PropertiesChanged",
             &Private::PropertyHandler::onPropertyChanged, newHandler.get()
         );
         if (st.isError()) {

@@ -28,23 +28,23 @@ public:
 
     Reply& operator=(Reply&&) = default;
 
-    [[nodiscard]] Ret value() const {
+    [[nodiscard]] inline Ret value() const {
         return mValue;
     }
 
-    [[nodiscard]] Status status() const {
+    [[nodiscard]] inline Status status() const {
         return Message::isError() ? Message::status() : mStatus;
     }
 
-    [[nodiscard]] bool isError() const {
+    [[nodiscard]] inline bool isError() const {
         return mStatus.isError() || Message::isError();
     }
 
-    [[nodiscard]] std::string errorMessage() const {
+    [[nodiscard]] inline std::string errorMessage() const {
         return Message::isError() ? Message::errorMessage() : mStatus.message();
     }
 
-protected:
+private:
     Ret mValue {};
     Status mStatus { StatusCode::SUCCESS };
 };

@@ -2,9 +2,9 @@
 #define SSDBUS_CLIENT_HPP
 
 #include <memory>
-#include <mutex>
 #include <future>
 #include <string>
+#include <string_view>
 #include <thread>
 
 #include "Looper.hpp"
@@ -12,80 +12,39 @@
 #include "Reply.hpp"
 #include "Utils.hpp"
 
-namespace SSDbus {
 
+namespace SSDbus {
 class Client {
+struct ServerInfo {
+    std::string name;
+    std::string path;
+    std::string interface;
+};
+
 struct AsyncPool {
     Session session;
     Looper looper;
     std::thread thread;
 
-    explicit AsyncPool(Session s)
-        : session(std::move(s))
-        , looper(session)
-        , thread(&Looper::run, &looper) {}
+    explicit AsyncPool(Session s);
 
-    ~AsyncPool() {
-        looper.stop();
-        thread.join();
-    }
+    ~AsyncPool();
 };
 
 public:
     Client() = default;
 
     explicit Client(SessionType aType, std::string aService,
-        std::string aPath, std::string aInterface)
-        : mAsyncPool(getAsyncPool(aType, aService))
-        , mAsyncPtr(&mAsyncPool->session)
-        , mLooper(&mAsyncPool->looper)
-        , mType(aType)
-        , mInfo({aService, aPath, aInterface}) {}
+        std::string aPath, std::string aInterface);
 
     explicit Client(Looper& aLooper, std::string aService,
-        std::string aPath, std::string aInterface)
-        : mInfo({aService, aPath, aInterface})
-        , mLooper(&aLooper)
-        , mAsyncPtr(aLooper.session())
-        , mType(aLooper.session()->type())
-        , mServiceName(aService) {}
-
-    explicit Client(Looper& aLooper, ServiceInfo aInfo)
-        : mInfo(aInfo)
-        , mLooper(&aLooper)
-        , mAsyncPtr(aLooper.session())
-        , mType(aLooper.session()->type())
-        , mServiceName(aInfo.name) {}
+        std::string aPath, std::string aInterface);
 
     ~Client() = default;
 
-    Client(Client&& aOther) noexcept
-        : mAsyncPool(std::move(aOther.mAsyncPool))
-        , mAsyncPtr(aOther.mAsyncPtr)
-        , mLooper(aOther.mLooper)
-        , mType(aOther.mType)
-        , mInfo(std::move(aOther.mInfo))
-        , mServiceName(aOther.mServiceName) {
-        aOther.mLooper = nullptr;
-        aOther.mAsyncPtr = nullptr;
-    }
+    Client(Client&& aOther) noexcept;
 
-    Client& operator=(Client&& aOther) noexcept {
-        if (this == &aOther) {
-            return *this;
-        }
-
-        mAsyncPool = std::move(aOther.mAsyncPool);
-        mAsyncPtr = aOther.mAsyncPtr;
-        mLooper = aOther.mLooper;
-        mType = aOther.mType;
-        mInfo = std::move(aOther.mInfo);
-        mServiceName = aOther.mServiceName;
-
-        aOther.mLooper = nullptr;
-        aOther.mAsyncPtr = nullptr;
-        return *this;
-    }
+    Client& operator=(Client&& aOther) noexcept;
 
     Client(const Client&) = delete;
     Client& operator=(const Client&) = delete;
@@ -97,18 +56,24 @@ public:
                 mInfo.name, mInfo.path, mInfo.interface, aMethod, aArgs...);
         }
 
-        std::promise<Reply<Ret>> promise;
-        std::future<Reply<Ret>> future = promise.get_future();
+        std::promise<PendingReply<Ret>> promise;
+        std::future<PendingReply<Ret>> future = promise.get_future();
         mLooper->post(
             [this, &promise, method = std::string(aMethod),
              aArgs = std::make_tuple(aArgs...)] () mutable -> void {
                 std::apply([this, &promise, &method](auto&&... aUnpack) {
-                    promise.set_value(mAsyncPtr->callSync<Ret, TimeoutUsec>(
+                    promise.set_value(mAsyncPtr->callAsync<Ret, TimeoutUsec>(
                         mInfo.name, mInfo.path, mInfo.interface, method, aUnpack...));
             }, aArgs);
         });
 
-        return future.get();
+        PendingReply<Ret> pend = future.get();
+        //! PendingReply::wait() 依赖 setCallback 建立的内部 future；
+        //! 无回调 callAsync 路径不会自动建立，需先 setCallback（同时注册 reply
+        //! 回调，ReplyAsyncHandler 兼容 reply 已到达/未到达两种情况）
+        pend.setCallback([](Reply<Ret>) {});
+        pend.wait();
+        return pend.reply();
     }
 
     template<typename Ret=void, uint64_t TimeoutUsec=0, typename... Args>
@@ -265,52 +230,16 @@ public:
     }
 
 private:
-    static Session createSession(SessionType aType, std::string_view aSocket) {
-        switch (aType) {
-            case SessionType::SYSTEM:
-                return Session::systemSession();
-            case SessionType::PEER:
-                return Session::peerSession(aSocket);
-            case SessionType::USER:
-            default:
-                return Session::userSession();
-        }
-    }
+    static Session createSession(SessionType aType, std::string_view aService);
 
     static std::shared_ptr<AsyncPool> getAsyncPool(
-        SessionType aType, std::string_view aSocket = "") {
-        // 函数内 static —— 懒初始化，线程安全
-        static std::weak_ptr<AsyncPool> sUserPool;
-        static std::weak_ptr<AsyncPool> sSystemPool;
-        static std::mutex sPeerLock;
-        static std::map<std::string, std::weak_ptr<AsyncPool>> sPeerPools;
-
-        if (aType == SessionType::PEER) {
-            std::lock_guard lock(sPeerLock);
-            auto& weak = sPeerPools[aSocket.data()];
-            auto sp = weak.lock();
-            if (!sp) {
-                weak = sp = std::make_shared<AsyncPool>(
-                    createSession(aType, aSocket));
-            }
-            return sp;
-        }
-
-        auto& weak = (aType == SessionType::SYSTEM) ? sSystemPool : sUserPool;
-        auto sp = weak.lock();
-        if (!sp) {
-            weak = sp = std::make_shared<AsyncPool>(
-                createSession(aType, aSocket));
-        }
-        return sp;
-    }
+        SessionType aType, std::string_view aService = "");
 
     std::shared_ptr<AsyncPool> mAsyncPool { nullptr };
     Session* mAsyncPtr { nullptr };
     Looper* mLooper { nullptr };
     SessionType mType { SessionType::INVALID };
-    ServiceInfo mInfo;
-    std::string mServiceName;
+    ServerInfo mInfo;
 };
 
 }

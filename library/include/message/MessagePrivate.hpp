@@ -2,23 +2,23 @@
 #define SSDBUS_MESSAGE_PRIVATE_HPP
 
 #include <string>
+#include <string_view>
+#include <type_traits>
 #include <iostream>
-
-#include "Status.hpp"
 
 #include "adaptor/RawCommon.hpp"
 #include "adaptor/RawMessageSharePtr.hpp"
 #include "adaptor/DbusArgs.hpp"
+#include "Status.hpp"
+
 
 namespace SSDbus {
 namespace Private {
-
 class MessagePrivate {
 public:
     MessagePrivate() = default;
 
-    explicit MessagePrivate(Adaptor::RawMessageSharePtr aPtr)
-        : mRawMsg(aPtr) {}
+    explicit MessagePrivate(Adaptor::RawMessageSharePtr aPtr);
 
     ~MessagePrivate() = default;
 
@@ -28,7 +28,7 @@ public:
     MessagePrivate(const MessagePrivate&) = default;
     MessagePrivate& operator=(const MessagePrivate&) = default;
 
-    Adaptor::RawBusMessagePtr rawMessage() {
+    inline Adaptor::RawBusMessagePtr rawMessage() {
         return mRawMsg.get();
     }
 
@@ -294,15 +294,13 @@ public:
         return write(aRests...);
     }
 
-    std::string_view getSender() const {
-        return Adaptor::RawMessage::getSender(mRawMsg.get());
-    }
+    std::string getSender() const;
 
-    void setStatus(Status aStatus) {
+    inline void setStatus(Status aStatus) {
         mStatus = aStatus;
     }
 
-    Status getStatus() const {
+    inline Status getStatus() const {
         return mStatus;
     }
 

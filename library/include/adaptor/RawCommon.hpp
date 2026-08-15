@@ -15,6 +15,7 @@
 
 #include <iostream>
 
+
 namespace SSDbus {
 namespace Adaptor {
 using RawBus_ = sd_bus;
@@ -40,45 +41,36 @@ using RawBusTrackHandler = sd_bus_track_handler_t;
 using RawDeleterCallback = sd_bus_destroy_t;
 using RawEventIOHandler = sd_event_io_handler_t;
 
-class DbusException : public std::runtime_error {
-public:
-    explicit DbusException(const std::string& aMsg)
-        : std::runtime_error(aMsg) {}
-
-    explicit DbusException(const std::string& aName, const std::string& msg)
-        : std::runtime_error(aName + ": " + msg) {}
-};
-
 namespace RawCheck {
-bool isInterfaceNameValid(std::string_view aName) {
+inline bool isInterfaceNameValid(std::string_view aName) {
     return sd_bus_interface_name_is_valid(aName.data()) > 0;
 }
 
-bool isInterfaceNameValid(const std::string& aName) {
+inline bool isInterfaceNameValid(const std::string& aName) {
     return isInterfaceNameValid(aName);
 }
 
-bool isServiceNameValid(std::string_view aName) {
+inline bool isServiceNameValid(std::string_view aName) {
     return sd_bus_service_name_is_valid(aName.data()) > 0;
 }
 
-bool isServiceNameValid(const std::string& aName) {
+inline bool isServiceNameValid(const std::string& aName) {
     return isServiceNameValid(aName);
 }
 
-bool isMemberNameValid(std::string_view aName) {
+inline bool isMemberNameValid(std::string_view aName) {
     return sd_bus_member_name_is_valid(aName.data()) > 0;
 }
 
-bool isMemberNameValid(const std::string& aName) {
+inline bool isMemberNameValid(const std::string& aName) {
     return isMemberNameValid(aName);
 }
 
-bool isPathNameValid(std::string_view aName) {
+inline bool isPathNameValid(std::string_view aName) {
     return sd_bus_object_path_is_valid(aName.data()) > 0;
 }
 
-bool isPathNameValid(const std::string& aName) {
+inline bool isPathNameValid(const std::string& aName) {
     return isPathNameValid(aName);
 }
 }

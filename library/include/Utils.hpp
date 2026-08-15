@@ -14,13 +14,6 @@
 #include <string>
 
 namespace SSDbus {
-
-struct ServiceInfo {
-    std::string name;
-    std::string path;
-    std::string interface;
-};
-
 enum class SessionType : uint8_t {
     SYSTEM,
     USER,

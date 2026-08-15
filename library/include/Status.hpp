@@ -2,7 +2,6 @@
 #ifndef SSDBUS_DBUS_RETURN_STATUS_HPP
 #define SSDBUS_DBUS_RETURN_STATUS_HPP
 
-#include <memory>
 #include <string>
 
 namespace SSDbus {
@@ -94,19 +93,20 @@ public:
     Status(StatusCode aCode)
         : mCode(aCode) {}
 
-    // --- 查询 ---
-    StatusCode code() const { return mCode; }
+    inline StatusCode code() const {
+        return mCode;
+    }
 
-    bool isSuccess() const {
+    inline bool isSuccess() const {
         return mCode == StatusCode::SUCCESS;
     
     }
 
-    bool isError() const {
+    inline bool isError() const {
         return mCode != StatusCode::SUCCESS;
     }
 
-    std::string message() const {
+    inline std::string message() const {
         return statusMessage(mCode);
     }
 

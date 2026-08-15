@@ -4,40 +4,36 @@
 #include <functional>
 
 #include "session/LooperPrivate.hpp"
-#include "Session.hpp"
+
 
 namespace SSDbus {
-
+class Session;
 class Looper {
 public:
     Looper() = default;
 
-    explicit Looper(Session& aSession)
-        : mSession(&aSession)
-        , mPrivate(
-            std::make_shared<Private::LooperPrivate>(aSession.mPrivate.get())) {}
+    explicit Looper(Session& aSession);
 
-    void run() {
-        mPrivate->run();
+    void run();
+
+    void stop();
+
+    void post(std::function<void()> aTask);
+
+    template<typename Callback>
+    void onReady(Callback&& aCallback) {
+        mPrivate->onReady(std::forward<Callback>(aCallback));
     }
 
-    void stop() {
-        mPrivate->stop();
-    }
-
-    void post(std::function<void()> aTask) {
-        mPrivate->post(std::move(aTask));
-    }
-
-    bool isOwnerThread() const {
+    inline bool isOwnerThread() const {
         return mPrivate->isOwnerThread();
     }
 
-    Status status() const {
+    inline Status status() const {
         return mPrivate->status();
     }
 
-    Session* session() const {
+    inline Session* session() const {
         return mSession;
     }
 

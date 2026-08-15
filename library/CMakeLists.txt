@@ -1,8 +1,23 @@
 project(lib)
 
 set(SOURCES
-    src/Utils.cpp
+    src/adaptor/RawBusSharePtr.cpp
+    src/adaptor/RawEventSharePtr.cpp
+    src/adaptor/RawMessageSharePtr.cpp
+    src/adaptor/RawSlotSharePtr.cpp
+    src/adaptor/RawRemoteError.cpp
+    src/adaptor/VTableRegistrar.cpp
+    src/message/MessagePrivate.cpp
     src/message/PropertyHandler.cpp
+    src/message/ReplyAsyncHandler.cpp
+    src/method/Reconnect.cpp
+    src/session/LooperPrivate.cpp
+    src/session/SessionPrivate.cpp
+    src/Client.cpp
+    src/Message.cpp
+    src/Looper.cpp
+    src/Session.cpp
+    src/Utils.cpp
 )
 
 add_library(ssdbus SHARED ${SOURCES})

@@ -8,7 +8,6 @@
 
 namespace SSDbus {
 namespace Private {
-
 template<typename Callback>
 struct SignalHandler {
     Callback callback;

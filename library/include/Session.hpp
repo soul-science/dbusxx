@@ -5,52 +5,48 @@
 #include <memory>
 #include <vector>
 
-#include "Message.hpp"
-#include "Reply.hpp"
-#include "PendingReply.hpp"
-#include "Status.hpp"
-
-#include "adaptor/RawBusSharePtr.hpp"
-#include "session/MetaObject.hpp"
-#include "session/SessionPrivate.hpp"
 #include "method/Method.hpp"
 #include "method/Reconnect.hpp"
+#include "session/SessionPrivate.hpp"
+#include "Message.hpp"
+#include "MetaObject.hpp"
+#include "PendingReply.hpp"
+#include "Reply.hpp"
+#include "Status.hpp"
 
-#include <iostream>
 
 namespace SSDbus {
-
 class Session {
     friend class Looper;
     using PendingRepsV = std::vector<std::shared_ptr<void>>;
 
+    template<typename Ret, typename... Args>
+    struct CallbackLikeFirstArg {
+        static constexpr bool value = false;
+    };
+
+    template<typename Ret, typename First, typename... Rest>
+    struct CallbackLikeFirstArg<Ret, First, Rest...> {
+        static constexpr bool value =
+            std::is_invocable_r_v<void, First, Reply<Ret>>;
+    };
+
 public:
-    struct RegisterBuilder {
-        Private::SessionPrivate* session;
-        Adaptor::VTableRegistrar reg;
-        std::string key;
-        Private::SessionPrivate::ObjectInfo info;
+    class RegisterBuilder {
+    public:
+        RegisterBuilder(RegisterBuilder&&) noexcept = default;
+        RegisterBuilder& operator=(RegisterBuilder&&) noexcept = default;
+        RegisterBuilder(const RegisterBuilder&) = delete;
+        RegisterBuilder& operator=(const RegisterBuilder&) = delete;
 
         template<typename Func>
         RegisterBuilder& addMethod(std::string_view aName, Func aFunc) {
             using wrapper = Method::MethodWrapper<Func>;
-            std::string input = wrapper::input();
-            std::string output = wrapper::output();
-            std::string regName = aName.data() + std::string("_") + input;
-            std::cout << "addMethod: " << regName << std::endl;
-            auto data = std::make_shared<wrapper>(session, aFunc);
+            auto data = std::make_shared<wrapper>(mSession, aFunc);
             void* dataPtr = data.get();
-
-            info.methods[aName.data()] = {
-                std::move(data),
-                input,
-                output,
-                &wrapper::onCall
-            };
-
-            reg.addMethod(aName, std::move(input), std::move(output),
-                &wrapper::onCall, dataPtr);
-
+            mSession->addMethodEntry(mKey, aName,
+                wrapper::input(), wrapper::output(),
+                &wrapper::onCall, dataPtr, std::move(data));
             return *this;
         }
 
@@ -65,102 +61,41 @@ public:
 
         template<typename... Args>
         RegisterBuilder& addSignal(std::string_view aName) {
-            std::string input = Method::getArgsString<Args...>();
-            std::string regName = aName.data() + std::string("_") + input;
-            std::cout << "addSignal: " << regName << std::endl;
-            info.signals[aName.data()] = {input};
-            reg.addSiganl(aName, std::move(input));
-
+            mSession->addSignalEntry(mKey, aName,
+                Method::getArgsString<Args...>());
             return *this;
         }
 
         template<typename T>
         RegisterBuilder& addProperty(std::string_view aName, T aValue, bool writable = true) {
             using wrapper = Method::PropertyWrapper<T>;
-            std::string sig = wrapper::signature();
-            
             auto data = std::make_shared<wrapper>(
-                session, aName.data(),
-                reg.path(), reg.interface(), aValue
-            );
+                mSession, aName.data(), mPath, mIface, aValue);
             void* dataPtr = data.get();
-
-            info.properties[aName.data()] = {
-                std::move(data),
-                sig,
-                &wrapper::onGetter,
-                &wrapper::onSetter,
-                writable
-            };
-            
-            reg.addProperty(aName, std::move(sig),
-                &wrapper::onGetter, &wrapper::onSetter,
-                dataPtr, writable);
-
+            mSession->addPropertyEntry(mKey, aName, wrapper::signature(),
+                writable, &wrapper::onGetter, &wrapper::onSetter,
+                dataPtr, std::move(data));
             return *this;
         }
 
-        Status commit() {
-            auto& objects = session->objects();
-            auto it = objects.find(key);
-            if (it != objects.end()) {
-                //! Release old slot first to force sd-bus to clean up strdup'd strings
-                //! from the old vtable. Otherwise sd_bus_add_object_vtable may
-                //! access freed strings during replacement (heap-use-after-free).
-                it->second.context->slot = Adaptor::RawSlotSharePtr();
-                for (auto& [name, entry] : it->second.methods) {
-                    if (info.methods.count(name)) {
-                        continue;
-                    }
+    Status commit() {
+        return mSession->commitBuilder(mKey);
+    }
+    
+    private:
+        friend class Session;
 
-                    reg.addMethod(name, entry.input, entry.output,
-                        entry.callback, entry.data.get());
-                }
+        RegisterBuilder(Private::SessionPrivate* aSession,
+            std::string aKey, std::string aPath, std::string aIface)
+            : mSession(aSession)
+            , mKey(std::move(aKey))
+            , mPath(std::move(aPath))
+            , mIface(std::move(aIface)) {}
 
-                for (auto& [name, entry] : it->second.signals) {
-                    if (info.signals.count(name)) {
-                        continue;
-                    }
-
-                    reg.addSiganl(name, entry.input);
-                }
-
-                for (auto& [name, entry] : it->second.properties) {
-                    if (info.properties.count(name)) {
-                        continue;
-                    }
-
-                    reg.addProperty(name, entry.signature,
-                        entry.getter, entry.setter,
-                        entry.data.get(), entry.writable);
-                }
-            }
-
-            std::unique_ptr<Adaptor::VTableContext> ctx;
-            auto st = reg.commit(ctx);
-            if (st.isError()) {
-                return st;
-            }
-
-            if (it != objects.end()) {
-                auto& obj = it->second;
-                for (auto& [name, entry] : info.methods) {
-                    obj.methods[name] = std::move(entry);
-                }
-                for (auto& [name, entry] : info.signals) {
-                    obj.signals[name] = std::move(entry);
-                }
-                for (auto& [name, entry] : info.properties) {
-                    obj.properties[name] = std::move(entry);
-                }
-                obj.context = std::move(ctx);
-            } else {
-                info.context = std::move(ctx);
-                objects[key] = std::move(info);
-            }
-
-            return Status(StatusCode::SUCCESS);
-        }
+        Private::SessionPrivate* mSession;
+        std::string mKey;
+        std::string mPath;
+        std::string mIface;
     };
 
     ~Session() = default;
@@ -171,81 +106,38 @@ public:
     Session(Session&& aOther) noexcept = default;
     Session& operator=(Session&& aOther) noexcept = default;
 
-    static Session systemSession() {
-        return Session(SessionType::SYSTEM);
-    }
+    static Session systemSession();
 
-    static Session systemSession(std::string_view aServiceName) {
-        Session s(SessionType::SYSTEM, aServiceName);
-        s.mPrivate->requestNameToDaemon();
-        return s;
-    }
+    static Session systemSession(std::string_view aServiceName);
 
-    static Session userSession() {
-        return Session(SessionType::USER);
-    }
+    static Session userSession();
 
-    static Session userSession(std::string_view aServiceName) {
-        Session s(SessionType::USER, aServiceName);
-        s.mPrivate->requestNameToDaemon();
-        return s;
-    }
+    static Session userSession(std::string_view aServiceName);
 
-    static Session peerSession(std::string_view aServiceName, bool aIsServer = false) {
-        return Session(SessionType::PEER, aServiceName, aIsServer);
-    }
+    static Session peerSession(std::string_view aServiceName, bool aIsServer = false);
 
     static Session createSession(SessionType aType = SessionType::USER,
-        std::string_view aServiceName = "", bool aIsServer = false) {
-        switch (aType) {
-            case SessionType::SYSTEM:
-                return aServiceName.empty() ?
-                    systemSession() : systemSession(aServiceName);
-            case SessionType::PEER:
-                return peerSession(aServiceName, aIsServer);
-            case SessionType::USER:
-            default:
-                return aServiceName.empty() ?
-                    userSession() : userSession(aServiceName);
-        }
-    }
+        std::string_view aServiceName = "", bool aIsServer = false);
 
-    SessionType type() const {
+    inline SessionType type() const {
         return mPrivate->type();
     }
 
-    std::string serviceName() const {
+    inline std::string serviceName() const {
         return mPrivate->serviceName();
     }
 
-    Status rebuild() {
-        return Method::reconnectSession(mPrivate.get());
-    }
-
-    int process() {
-        return mPrivate->process();
-    }
-
-    int wait(uint64_t aTimeoutMs = UINT64_MAX) {
-        return mPrivate->wait(aTimeoutMs);
-    }
-
-    int getFd() const {
+    inline int getFd() const {
         return mPrivate->getFd();
     }
 
-    void flush() {
-        mPrivate->flush();
-    }
+    int process();
 
-    auto registerBuilder(std::string_view aPath, std::string_view aIface) {
-        return RegisterBuilder {
-            mPrivate.get(),
-            Adaptor::VTableRegistrar(
-                mPrivate.get()->rawBus(), aPath, aIface),
-            Private::SessionPrivate::makeKey(aPath, aIface)
-        };
-    }
+    int wait(uint64_t aTimeoutMs = UINT64_MAX);
+
+    void flush();
+
+    RegisterBuilder registerBuilder(std::string_view aPath, std::string_view aIface);
 
     template<typename Func>
     Status registerMethod(std::string_view aPath, std::string aIface,
@@ -292,20 +184,25 @@ public:
             ));
     }
 
-    template<typename Ret=void, uint64_t TimeoutUsec=0, typename... Args>
+    template<typename Ret=void, uint64_t TimeoutUsec=0, typename... Args,
+        std::enable_if_t<!CallbackLikeFirstArg<Ret, Args...>::value, int> = 0>
     PendingReply<Ret> callAsync(std::string_view aService, std::string_view aPath,
         std::string_view aIface, std::string_view aMethod, const Args&... aArgs) {
+        static_assert((isValidArgs<Args>() && ...),
+            "callAsync: arguments must be valid D-Bus types. If you meant a callback, "
+            "it must be callable as void(Reply<Ret>), e.g. "
+            "callAsync<int>(..., [](Reply<int> r){}, args...)");
+
         return PendingReply<Ret>(
             Method::callAsync<>(
                 mPrivate.get(), TimeoutUsec, aService, aPath, aIface, aMethod, aArgs...
         ));
     }
 
-    template<typename Ret=void, uint64_t TimeoutUsec=0, typename Callback, typename... Args>
+    template<typename Ret=void, uint64_t TimeoutUsec=0, typename Callback, typename... Args,
+        std::enable_if_t<std::is_invocable_r_v<void, Callback, Reply<Ret>>, int> = 0>
     Status callAsync(std::string_view aService, std::string_view aPath, std::string_view aIface,
         std::string_view aMethod, Callback&& aCallback, const Args&... aArgs) {
-        static_assert(std::is_invocable_r_v<void, Callback, Reply<Ret>>,
-            "callAsync callback must be callable as: void(Reply<Ret>)");
         using Call = std::function<void(Reply<Ret>)>;
         auto rep = std::make_shared<PendingReply<Ret>>(
             Method::callAsync<>(mPrivate.get(), TimeoutUsec,
@@ -428,15 +325,13 @@ public:
 
 private:
     explicit Session(SessionType aType,
-        std::string_view aServiceName = "", bool aIsServer = false)
-        : mPrivate(std::make_shared<Private::SessionPrivate>(aType, aServiceName, aIsServer))
-        , mRepsPtr(std::make_shared<PendingRepsV>()) {}
+        std::string_view aServiceName = "", bool aIsServer = false);
 
     template<typename T>
     Method::PropertyWrapper<T>* getPropPrivate(std::string_view aPath,
         std::string_view aIface, std::string_view aName) {
         auto objIter = mPrivate->objects().find(
-            Private::SessionPrivate::makeKey(aPath, aIface));
+            Private::SessionPrivate::ObjectInfo::makeKey(aPath, aIface));
         if (objIter == mPrivate->objects().end()) {
             return nullptr;
         }
