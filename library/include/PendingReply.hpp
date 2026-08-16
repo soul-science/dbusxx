@@ -24,7 +24,7 @@ public:
         , mCallback(
             std::make_shared<std::function<void(Reply<Ret>)>>()) {
         if (mHandler) {
-            onGetPeply();
+            onGetReply();
         }
     }
 
@@ -58,7 +58,7 @@ public:
     }
 
 private:
-    void onGetPeply() {
+    void onGetReply() {
         auto promisePtr = std::make_shared<std::promise<Reply<Ret>>>();
         mFuture = promisePtr->get_future().share();
         mHandler->setCallback(
@@ -95,7 +95,7 @@ public:
         , mCallback(
             std::make_shared<std::function<void(Reply<void>)>>()) {
         if (mHandler) {
-            onGetPeply();
+            onGetReply();
         }
     }
 
@@ -129,7 +129,7 @@ public:
     }
 
 private:
-    void onGetPeply() {
+    void onGetReply() {
         auto promisePtr = std::make_shared<std::promise<Reply<void>>>();
         mFuture = promisePtr->get_future().share();
         mHandler->setCallback(
