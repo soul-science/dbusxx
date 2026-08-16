@@ -66,6 +66,4 @@ Session::RegisterBuilder Session::registerBuilder(std::string_view aPath, std::s
         std::string(aPath), std::string(aIface)
     );
 }
-
-
 }

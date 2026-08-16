@@ -4,11 +4,13 @@
 #include <functional>
 #include <future>
 #include <memory>
+#include <mutex>
 
-#include "message/MessagePrivate.hpp"
-#include "message/ReplyAsyncHandler.hpp"
+#include "private/message/MessagePrivate.hpp"
+#include "private/message/ReplyAsyncHandler.hpp"
 #include "Message.hpp"
 #include "Reply.hpp"
+
 
 namespace SSDbus {
 template<typename Ret>
@@ -18,17 +20,12 @@ public:
     PendingReply() = default;
 
     explicit PendingReply(std::shared_ptr<Private::ReplyAsyncHandler> aHandler)
-        : mHandler(aHandler) {}
-
-    void setCallback(std::function<void(Reply<Ret>)> aCallback) {
-        auto promisePtr = std::make_shared<std::promise<Reply<Ret>>>();
-        mFuture = promisePtr->get_future().share();
-        mHandler->setCallback(
-            [promisePtr, aCallback] (Private::MessagePrivate* aPrivate) {
-                Reply<Ret> rep(std::make_shared<Private::MessagePrivate>(*aPrivate));
-                aCallback(rep);
-                promisePtr->set_value(rep);
-        });
+        : mHandler(aHandler)
+        , mCallback(
+            std::make_shared<std::function<void(Reply<Ret>)>>()) {
+        if (mHandler) {
+            onGetPeply();
+        }
     }
 
     [[nodiscard]] inline bool isError() const {
@@ -43,6 +40,15 @@ public:
         return mHandler->getStatus();
     }
 
+    void setCallback(std::function<void(Reply<Ret>)> aCallback) {
+        std::lock_guard lock(*mMutex);
+        if (!mCallback) {
+            mCallback = std::make_shared<std::function<void(Reply<Ret>)>>();
+        }
+
+        *mCallback = std::move(aCallback);
+    }
+
     void wait() {
         mReply = mFuture.get();
     }
@@ -52,8 +58,30 @@ public:
     }
 
 private:
-    std::shared_ptr<Private::ReplyAsyncHandler> mHandler { nullptr };;
-    std::shared_future<Reply<Ret>> mFuture{};
+    void onGetPeply() {
+        auto promisePtr = std::make_shared<std::promise<Reply<Ret>>>();
+        mFuture = promisePtr->get_future().share();
+        mHandler->setCallback(
+            [mCallback = mCallback,
+             mMutex = mMutex, promisePtr] (Private::MessagePrivate* aPrivate) {
+                Reply<Ret> rep(std::make_shared<Private::MessagePrivate>(*aPrivate));
+                promisePtr->set_value(rep);
+                std::function<void(Reply<Ret>)> cb;
+                {
+                    std::lock_guard lock(*mMutex);
+                    cb = *mCallback;
+                }
+
+                if (cb) {
+                    cb(rep);
+                }
+        });
+    }
+
+    std::shared_ptr<Private::ReplyAsyncHandler> mHandler { nullptr };
+    std::shared_ptr<std::mutex> mMutex { std::make_shared<std::mutex>() };
+    std::shared_ptr<std::function<void(Reply<Ret>)>> mCallback { nullptr };
+    std::shared_future<Reply<Ret>> mFuture {};
     Reply<Ret> mReply{};
 };
 
@@ -63,17 +91,12 @@ public:
     PendingReply() = default;
 
     explicit PendingReply(std::shared_ptr<Private::ReplyAsyncHandler> aHandler)
-        : mHandler(aHandler) {}
-
-    void setCallback(std::function<void(Reply<void>)> aCallback) {
-        auto promisePtr = std::make_shared<std::promise<Reply<void>>>();
-        mFuture = promisePtr->get_future().share();
-        mHandler->setCallback(
-            [promisePtr, aCallback] (Private::MessagePrivate* aPrivate) {
-                Reply<void> rep(std::make_shared<Private::MessagePrivate>(*aPrivate));
-                aCallback(rep);
-                promisePtr->set_value(rep);
-            });
+        : mHandler(aHandler)
+        , mCallback(
+            std::make_shared<std::function<void(Reply<void>)>>()) {
+        if (mHandler) {
+            onGetPeply();
+        }
     }
 
     [[nodiscard]] bool isError() const {
@@ -88,6 +111,15 @@ public:
         return mHandler ? mHandler->getStatus() : Status(StatusCode::INVALID_ARG);
     }
 
+    void setCallback(std::function<void(Reply<void>)> aCallback) {
+        std::lock_guard lock(*mMutex);
+        if (!mCallback) {
+            mCallback = std::make_shared<std::function<void(Reply<void>)>>();
+        }
+
+        *mCallback = std::move(aCallback);
+    }
+
     void wait() {
         mReply = mFuture.get();
     }
@@ -97,7 +129,28 @@ public:
     }
 
 private:
+    void onGetPeply() {
+        auto promisePtr = std::make_shared<std::promise<Reply<void>>>();
+        mFuture = promisePtr->get_future().share();
+        mHandler->setCallback(
+            [mCallback = mCallback,
+             mMutex = mMutex, promisePtr] (Private::MessagePrivate* aPrivate) {
+                Reply<void> rep(std::make_shared<Private::MessagePrivate>(*aPrivate));
+                promisePtr->set_value(rep);
+                std::function<void(Reply<void>)> cb;
+                {
+                    std::lock_guard lock(*mMutex);
+                    cb = *mCallback;
+                }
+                if (cb) {
+                    cb(rep);
+                }
+        });
+    }
+
     std::shared_ptr<Private::ReplyAsyncHandler> mHandler { nullptr };
+    std::shared_ptr<std::mutex> mMutex { std::make_shared<std::mutex>() };
+    std::shared_ptr<std::function<void(Reply<void>)>> mCallback { nullptr };
     std::shared_future<Reply<void>> mFuture {};
     Reply<void> mReply {};
 };

@@ -109,6 +109,13 @@ private:
 
 static int gPassed = 0, gFailed = 0;
 
+// ⚠️ onPropertyChanged 注册的监听是永久的（存活到 Client 销毁），
+//    回调捕获的对象必须覆盖整个 Client 生命周期。
+//    若用块内局部变量，事件循环线程可能在出作用域后仍触发回调
+//    → stack-use-after-scope。故提升为文件级 static 保证绝对安全。
+static SyncFlag gPropChanged;
+static std::string gChangedValue;
+
 #define TEST(name, expr)                                                      \
     do {                                                                      \
         std::cout << "  [" << (name) << "] ";                                 \
@@ -221,23 +228,23 @@ int main() {
     }
 
     // ④.⑧ 远程属性变更监听 — onPropertyChanged
+    // 回调捕获对象见文件级 static（gPropChanged/gChangedValue），
+    // 原因：此监听是永久的，事件循环线程可能在注册处出作用域后仍触发。
     std::cout << "\n=== Step 4.8: remote property changed ===" << std::endl;
     {
-        SyncFlag propChanged;
-        std::string changedValue;
         Status st2 = c.onPropertyChanged("description",
             [&](const std::string& v) {
                 std::cout << "  [client] description changed: " << v << std::endl;
-                changedValue = v;
-                propChanged.set();
+                gChangedValue = v;
+                gPropChanged.set();
             });
         TEST("onPropertyChanged register", st2.isSuccess());
 
         auto st = c.setProperty<std::string>("description", std::string("remote-changed"));
         TEST("setProperty trigger", st.isSuccess());
         // 信号在 mAsyncPtr 的事件循环中派发，等待一下
-        propChanged.wait();
-        TEST("onPropertyChanged fired", changedValue == "remote-changed");
+        gPropChanged.wait();
+        TEST("onPropertyChanged fired", gChangedValue == "remote-changed");
     }
 
     // ⑤ 信号监听

@@ -5,9 +5,9 @@
 #include <memory>
 #include <vector>
 
-#include "method/Method.hpp"
-#include "method/Reconnect.hpp"
-#include "session/SessionPrivate.hpp"
+#include "private/method/Method.hpp"
+#include "private/method/Reconnect.hpp"
+#include "private/session/SessionPrivate.hpp"
 #include "Message.hpp"
 #include "MetaObject.hpp"
 #include "PendingReply.hpp"

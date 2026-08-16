@@ -3,7 +3,7 @@
 
 #include <functional>
 
-#include "session/LooperPrivate.hpp"
+#include "private/session/LooperPrivate.hpp"
 
 
 namespace SSDbus {

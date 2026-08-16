@@ -4,8 +4,9 @@
 #include <memory>
 #include <tuple>
 
-#include "message/MessagePrivate.hpp"
+#include "private/message/MessagePrivate.hpp"
 #include "Status.hpp"
+
 
 namespace SSDbus {
 class Message {

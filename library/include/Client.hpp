@@ -68,10 +68,6 @@ public:
         });
 
         PendingReply<Ret> pend = future.get();
-        //! PendingReply::wait() 依赖 setCallback 建立的内部 future；
-        //! 无回调 callAsync 路径不会自动建立，需先 setCallback（同时注册 reply
-        //! 回调，ReplyAsyncHandler 兼容 reply 已到达/未到达两种情况）
-        pend.setCallback([](Reply<Ret>) {});
         pend.wait();
         return pend.reply();
     }

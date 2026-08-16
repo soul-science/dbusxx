@@ -3,6 +3,7 @@
 
 #include "Message.hpp"
 
+
 namespace SSDbus {
 template<typename Ret>
 class Reply : public Message {

@@ -4,8 +4,8 @@
 
 #include <string>
 
-namespace SSDbus {
 
+namespace SSDbus {
 enum class StatusCode : uint8_t {
     SUCCESS = 0,
 

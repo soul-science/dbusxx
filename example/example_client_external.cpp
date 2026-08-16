@@ -243,11 +243,12 @@ int main() {
     }
 
     // 12c. 信号监听 — 测试 async session 重注册 signal handler
+    //     sigFlag2/sigA2/sigB2 提到块外：listenSignal 是永久监听，
+    //     重连重注册后仍可能在原块作用域结束后触发回调
     std::cout << "\n--- 12c: Signal after reconnect ---" << std::endl;
+    SyncFlag sigFlag2;
+    int sigA2 = 0, sigB2 = 0;
     {
-        SyncFlag sigFlag2;
-        int sigA2 = 0, sigB2 = 0;
-
         Status st = c.listenSignal("mySignal", [&](int a, int b) {
             sigA2 = a; sigB2 = b;
             sigFlag2.set();
@@ -261,10 +262,11 @@ int main() {
     }
 
     // 12d. 属性变更监听 — 测试 property handler 重注册
+    //     propFlag2/newVal2 提到块外（原因同 12c）
     std::cout << "\n--- 12d: Property changed after reconnect ---" << std::endl;
+    SyncFlag propFlag2;
+    int32_t newVal2 = 0;
     {
-        SyncFlag propFlag2;
-        int32_t newVal2 = 0;
         Status st = c.onPropertyChanged("counter",
             [&](const int32_t& v) {
                 newVal2 = v;

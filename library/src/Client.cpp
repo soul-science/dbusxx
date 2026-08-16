@@ -93,5 +93,4 @@ std::shared_ptr<Client::AsyncPool> Client::getAsyncPool(
 
     return sp;
 }
-
 }

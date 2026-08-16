@@ -20,5 +20,4 @@ void Looper::stop() {
 void Looper::post(std::function<void()> aTask) {
     mPrivate->post(std::move(aTask));
 }
-
 }

@@ -25,39 +25,40 @@ add_executable(example_peer
     example_peer.cpp
 )
 
-# Find systemd library
-# Need to install PkgConfig, sudo apt-get install pkg-config
-find_package(PkgConfig REQUIRED)
-pkg_check_modules(SYSTEMD REQUIRED libsystemd)
-
-target_link_libraries(example_session PRIVATE
-    ${SYSTEMD_LIBRARIES}
-    ssdbus
+target_link_libraries(example_session
+    PRIVATE
+        ssdbus_opts
+        ssdbus
 )
 
-target_link_libraries(example_server PRIVATE
-    ${SYSTEMD_LIBRARIES}
-    ssdbus
+target_link_libraries(example_server
+    PRIVATE
+        ssdbus_opts
+        ssdbus
 )
 
-target_link_libraries(example_register PRIVATE
-    ${SYSTEMD_LIBRARIES}
-    ssdbus
+target_link_libraries(example_register
+    PRIVATE
+        ssdbus_opts
+        ssdbus
 )
 
-target_link_libraries(example_client_internal PRIVATE
-    ${SYSTEMD_LIBRARIES}
-    ssdbus
+target_link_libraries(example_client_internal
+    PRIVATE
+        ssdbus_opts
+        ssdbus
 )
 
-target_link_libraries(example_client_external PRIVATE
-    ${SYSTEMD_LIBRARIES}
-    ssdbus
+target_link_libraries(example_client_external
+    PRIVATE
+        ssdbus_opts
+        ssdbus
 )
 
-target_link_libraries(example_peer PRIVATE
-    ${SYSTEMD_LIBRARIES}
-    ssdbus
+target_link_libraries(example_peer
+    PRIVATE
+        ssdbus_opts
+        ssdbus
 )
 
 add_dependencies(example_session ssdbus)
