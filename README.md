@@ -1,5 +1,7 @@
 # dbusxx
 
+[English](README.en.md)
+
 基于 systemd sd-bus 的 C++17 D-Bus 库。
 
 ## 介绍
