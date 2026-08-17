@@ -6,7 +6,7 @@
 #include "Utils.hpp"
 
 
-namespace SSDbus {
+namespace Dbusxx {
 namespace Method {
 Status reconnectSession(Private::SessionPrivate* aSession) {
     Status st = aSession->reconnect();

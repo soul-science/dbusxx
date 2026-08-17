@@ -1,7 +1,7 @@
 #include "private/message/MessagePrivate.hpp"
 
 
-namespace SSDbus {
+namespace Dbusxx {
 namespace Private {
 MessagePrivate::MessagePrivate(Adaptor::RawMessageSharePtr aPtr)
     : mRawMsg(aPtr) {}

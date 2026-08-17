@@ -1,5 +1,5 @@
-#ifndef SSDBUS_RAW_BUS_SHARE_PTR_HPP
-#define SSDBUS_RAW_BUS_SHARE_PTR_HPP
+#ifndef DBUSXX_RAW_BUS_SHARE_PTR_HPP
+#define DBUSXX_RAW_BUS_SHARE_PTR_HPP
 
 #include "private/adaptor/RawCommon.hpp"
 
@@ -9,7 +9,7 @@
 #include <cstring>
 
 
-namespace SSDbus {
+namespace Dbusxx {
 namespace Adaptor {
 namespace RawBus {
 void unrefBus(RawBusPtr aBus);

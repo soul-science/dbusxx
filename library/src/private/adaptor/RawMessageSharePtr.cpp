@@ -1,7 +1,7 @@
 #include "private/adaptor/RawMessageSharePtr.hpp"
 
 
-namespace SSDbus {
+namespace Dbusxx {
 namespace Adaptor {
 namespace RawMessage {
 RawBusMessagePtr createSignal(RawBusPtr aBus, std::string_view aPath,

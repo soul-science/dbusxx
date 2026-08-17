@@ -20,7 +20,7 @@
 #include <thread>
 #include <vector>
 
-using namespace SSDbus;
+using namespace Dbusxx;
 
 // ── 服务端（同 example_server.cpp，供 Client 测试）─────────────────────
 
@@ -29,48 +29,48 @@ public:
     DemoServer()
         : Server("com.example.demo") {}
 
-    SSDBUS_PATH("/com/example/demo")
-    SSDBUS_IFACE("com.example.Demo")
+    DBUSXX_PATH("/com/example/demo")
+    DBUSXX_IFACE("com.example.Demo")
     int32_t testInt32(int32_t i) {
         std::cout << "[server] testInt32: " << i << std::endl;
         return i;
     }
-    SSDBUS_METHOD(testInt32)
+    DBUSXX_METHOD(testInt32)
 
     std::string testString(const std::string& i) {
         std::cout << "[server] testString: " << i << std::endl;
         return i;
     }
-    SSDBUS_METHOD(testString)
+    DBUSXX_METHOD(testString)
 
     void testVoid() {
         std::cout << "[server] testVoid" << std::endl;
     }
-    SSDBUS_METHOD(testVoid)
+    DBUSXX_METHOD(testVoid)
 
     void testMultiArgs(int i, std::string s) {
         std::cout << "[server] testMultiArgs: i=" << i << ", s=" << s << std::endl;
     }
-    SSDBUS_METHOD(testMultiArgs)
+    DBUSXX_METHOD(testMultiArgs)
 
     void triggerClear(int a, int b) {
         std::cout << "[server] triggerClear(" << a << ", " << b << ")" << std::endl;
         emit("/com/example/demo", "com.example.Demo",
             "clear", a, b);
     }
-    SSDBUS_METHOD(triggerClear)
+    DBUSXX_METHOD(triggerClear)
 
     void shutdown() {
         std::cout << "[server] shutdown" << std::endl;
         stop();
     }
-    SSDBUS_METHOD(shutdown)
+    DBUSXX_METHOD(shutdown)
 
-    SSDBUS_PROPERTY_RO(serverName, std::string, std::string("demo-server"))
-    SSDBUS_PROPERTY_RW(version, int32_t, 1)
-    SSDBUS_PROPERTY_RW(description, std::string, std::string("demo"))
+    DBUSXX_PROPERTY_RO(serverName, std::string, std::string("demo-server"))
+    DBUSXX_PROPERTY_RW(version, int32_t, 1)
+    DBUSXX_PROPERTY_RW(description, std::string, std::string("demo"))
 
-    SSDBUS_SIGNAL(clear, int, int)
+    DBUSXX_SIGNAL(clear, int, int)
 
     //! 注册本地属性变更监听
     void listenVersion() {

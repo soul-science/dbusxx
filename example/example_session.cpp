@@ -21,7 +21,7 @@
 #include <thread>
 #include <vector>
 
-using namespace SSDbus;
+using namespace Dbusxx;
 
 // ── 业务类：暴露全部 D-Bus 基础类型方法 ──────────────────────────────────
 

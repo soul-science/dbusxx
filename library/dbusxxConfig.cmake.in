@@ -1,0 +1,4 @@
+@PACKAGE_INIT@  # Insert package initialization code (automatic path processing, etc.)
+
+include("${CMAKE_CURRENT_LIST_DIR}/dbusxxTargets.cmake")  
+# Enable loading of 'dbusxxTargets.cmake' when 'find_mackage(dbusxx)'

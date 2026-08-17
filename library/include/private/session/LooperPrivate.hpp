@@ -1,5 +1,5 @@
-#ifndef SSDBUS_LOOPER_PRIVATE_HPP
-#define SSDBUS_LOOPER_PRIVATE_HPP
+#ifndef DBUSXX_LOOPER_PRIVATE_HPP
+#define DBUSXX_LOOPER_PRIVATE_HPP
 
 #include <deque>
 #include <functional>
@@ -11,7 +11,7 @@
 #include "private/session/SessionPrivate.hpp"
 
 
-namespace SSDbus {
+namespace Dbusxx {
 namespace Private {
 class LooperPrivate {
     static constexpr uint64_t EVENT_FD_SIGNAL { 1 };

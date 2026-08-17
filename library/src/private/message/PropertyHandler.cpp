@@ -1,6 +1,6 @@
 #include "private/message/PropertyHandler.hpp"
 
-namespace SSDbus {
+namespace Dbusxx {
 namespace Private {
 
 Private::MessagePrivate PropertyHandler::getRemoteProperty(Private::SessionPrivate* aSession,

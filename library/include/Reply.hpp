@@ -1,10 +1,10 @@
-#ifndef SSDBUS_DBUS_REPLY_HPP
-#define SSDBUS_DBUS_REPLY_HPP
+#ifndef DBUSXX_DBUS_REPLY_HPP
+#define DBUSXX_DBUS_REPLY_HPP
 
 #include "Message.hpp"
 
 
-namespace SSDbus {
+namespace Dbusxx {
 template<typename Ret>
 class Reply : public Message {
     static_assert(isValidArgs<Ret>(), "Unsupported value type");

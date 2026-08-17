@@ -1,7 +1,7 @@
 #include "private/session/SessionPrivate.hpp"
 
 
-namespace SSDbus {
+namespace Dbusxx {
 namespace Private {
 std::string SessionPrivate::ObjectInfo::makeKey(std::string_view path, std::string_view iface) {
     std::string key;

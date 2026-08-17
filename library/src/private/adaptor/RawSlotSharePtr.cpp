@@ -1,7 +1,7 @@
 #include "private/adaptor/RawSlotSharePtr.hpp"
 
 
-namespace SSDbus {
+namespace Dbusxx {
 namespace Adaptor {
 namespace RawSlot {
 void unrefSlot(RawBusSlotPtr aSlot) {

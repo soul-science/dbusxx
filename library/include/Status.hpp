@@ -1,11 +1,11 @@
 
-#ifndef SSDBUS_DBUS_RETURN_STATUS_HPP
-#define SSDBUS_DBUS_RETURN_STATUS_HPP
+#ifndef DBUSXX_DBUS_RETURN_STATUS_HPP
+#define DBUSXX_DBUS_RETURN_STATUS_HPP
 
 #include <string>
 
 
-namespace SSDbus {
+namespace Dbusxx {
 enum class StatusCode : uint8_t {
     SUCCESS = 0,
 

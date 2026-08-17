@@ -1,5 +1,5 @@
-#ifndef SSDBUS_VTABLE_REGISTRAR_HPP
-#define SSDBUS_VTABLE_REGISTRAR_HPP
+#ifndef DBUSXX_VTABLE_REGISTRAR_HPP
+#define DBUSXX_VTABLE_REGISTRAR_HPP
 
 #include <memory>
 #include <string>
@@ -11,7 +11,7 @@
 #include "private/adaptor/RawSlotSharePtr.hpp"
 
 
-namespace SSDbus {
+namespace Dbusxx {
 namespace Adaptor {
 struct VTableContext {
     using VTablePtr = std::unique_ptr<Adaptor::RawBusVTable[]>;

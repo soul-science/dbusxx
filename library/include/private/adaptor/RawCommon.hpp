@@ -1,5 +1,5 @@
-#ifndef SSDBUS_RAW_ADAPTOR_HPP
-#define SSDBUS_RAW_ADAPTOR_HPP
+#ifndef DBUSXX_RAW_ADAPTOR_HPP
+#define DBUSXX_RAW_ADAPTOR_HPP
 
 #include <cassert>
 #include <cerrno>
@@ -13,7 +13,7 @@
 #include "Status.hpp"
 
 
-namespace SSDbus {
+namespace Dbusxx {
 namespace Adaptor {
 using RawBus_ = sd_bus;
 using RawBusPtr = sd_bus*;

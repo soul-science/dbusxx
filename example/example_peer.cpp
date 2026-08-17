@@ -6,7 +6,7 @@
  *
  * 架构:
  *   [main 线程: client] ←→ [server 线程: peer server event loop]
- *   通过 /tmp/ssdbus-peer-test socket 直连，无 bus daemon
+ *   通过 /tmp/dbusxx-peer-test socket 直连，无 bus daemon
  ****************************************************************************/
 
 #include "Session.hpp"
@@ -23,7 +23,7 @@
 #include <string>
 #include <thread>
 
-using namespace SSDbus;
+using namespace Dbusxx;
 
 constexpr auto SOCKET_PATH = "unix:path=/tmp/com-example-peer";
 constexpr auto PATH        = "/com/example/peer";
@@ -38,33 +38,33 @@ public:
 
     // ── 方法 ──────────────────────────────────────────────────────────
 
-    SSDBUS_PATH(PATH)
-    SSDBUS_IFACE(IFACE)
+    DBUSXX_PATH(PATH)
+    DBUSXX_IFACE(IFACE)
     int32_t echo(int32_t x) {
         std::cout << "[server] echo(" << x << ")" << std::endl;
         return x * 2;
     }
-    SSDBUS_METHOD(echo)
+    DBUSXX_METHOD(echo)
 
     std::string greet(const std::string& name) {
         std::cout << "[server] greet: Hello, " << name << "!" << std::endl;
         return "Hello, " + name + "!";
     }
-    SSDBUS_METHOD(greet)
+    DBUSXX_METHOD(greet)
 
     void ping() {
         std::cout << "[server] ping" << std::endl;
     }
-    SSDBUS_METHOD(ping)
+    DBUSXX_METHOD(ping)
 
     // ── 信号 ──────────────────────────────────────────────────────────
 
-    SSDBUS_SIGNAL(onNotify, int32_t, std::string)
+    DBUSXX_SIGNAL(onNotify, int32_t, std::string)
 
     // ── 属性 ──────────────────────────────────────────────────────────
 
-    SSDBUS_PROPERTY_RW(counter, int32_t, 0)
-    SSDBUS_PROPERTY_RO(version, std::string, "1.0.0")
+    DBUSXX_PROPERTY_RW(counter, int32_t, 0)
+    DBUSXX_PROPERTY_RO(version, std::string, "1.0.0")
 };
 
 // ── main ─────────────────────────────────────────────────────────────────

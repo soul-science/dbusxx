@@ -1,6 +1,6 @@
 
-#ifndef SSDBUS_REPLY_ASYNC_HANDLER_HPP
-#define SSDBUS_REPLY_ASYNC_HANDLER_HPP
+#ifndef DBUSXX_REPLY_ASYNC_HANDLER_HPP
+#define DBUSXX_REPLY_ASYNC_HANDLER_HPP
 
 #include <functional>
 #include <memory>
@@ -10,7 +10,7 @@
 #include "MessagePrivate.hpp"
 
 
-namespace SSDbus {
+namespace Dbusxx {
 namespace Private {
 struct ReplyAsyncHandler : public MessagePrivate,
     public std::enable_shared_from_this<ReplyAsyncHandler> {

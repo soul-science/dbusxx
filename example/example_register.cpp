@@ -12,7 +12,7 @@
 #include <string>
 #include <thread>
 
-using namespace SSDbus;
+using namespace Dbusxx;
 
 // ── 1. 静态函数 ──────────────────────────────────────────────────────────
 

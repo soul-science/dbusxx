@@ -27,43 +27,43 @@ add_executable(example_peer
 
 target_link_libraries(example_session
     PRIVATE
-        ssdbus_opts
-        ssdbus
+        dbusxx_opts
+        dbusxx
 )
 
 target_link_libraries(example_server
     PRIVATE
-        ssdbus_opts
-        ssdbus
+        dbusxx_opts
+        dbusxx
 )
 
 target_link_libraries(example_register
     PRIVATE
-        ssdbus_opts
-        ssdbus
+        dbusxx_opts
+        dbusxx
 )
 
 target_link_libraries(example_client_internal
     PRIVATE
-        ssdbus_opts
-        ssdbus
+        dbusxx_opts
+        dbusxx
 )
 
 target_link_libraries(example_client_external
     PRIVATE
-        ssdbus_opts
-        ssdbus
+        dbusxx_opts
+        dbusxx
 )
 
 target_link_libraries(example_peer
     PRIVATE
-        ssdbus_opts
-        ssdbus
+        dbusxx_opts
+        dbusxx
 )
 
-add_dependencies(example_session ssdbus)
-add_dependencies(example_server ssdbus)
-add_dependencies(example_register ssdbus)
-add_dependencies(example_client_internal ssdbus)
-add_dependencies(example_client_external ssdbus)
-add_dependencies(example_peer ssdbus)
+add_dependencies(example_session dbusxx)
+add_dependencies(example_server dbusxx)
+add_dependencies(example_register dbusxx)
+add_dependencies(example_client_internal dbusxx)
+add_dependencies(example_client_external dbusxx)
+add_dependencies(example_peer dbusxx)

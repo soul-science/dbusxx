@@ -1,7 +1,7 @@
 #include "private/adaptor/RawRemoteError.hpp"
 
 
-namespace SSDbus {
+namespace Dbusxx {
 namespace Adaptor {
 static const std::map<std::string_view, StatusCode> TO_MAP = {
     // --- common ---

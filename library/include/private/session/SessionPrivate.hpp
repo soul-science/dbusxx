@@ -1,5 +1,5 @@
-#ifndef SSDBUS_SESSION_PRIVATE_HPP
-#define SSDBUS_SESSION_PRIVATE_HPP
+#ifndef DBUSXX_SESSION_PRIVATE_HPP
+#define DBUSXX_SESSION_PRIVATE_HPP
 
 #include <string>
 #include <string_view>
@@ -19,7 +19,7 @@
 #include "Utils.hpp"
 
 
-namespace SSDbus {
+namespace Dbusxx {
 namespace Private {
 class SessionPrivate {
 public:

@@ -23,13 +23,13 @@ set(
         src/Session.cpp
 )
 
-add_library(ssdbus
+add_library(dbusxx
     SHARED
         ${SOURCES}
 )
 
-set_target_properties(ssdbus PROPERTIES
-    OUTPUT_NAME ssdbus
+set_target_properties(dbusxx PROPERTIES
+    OUTPUT_NAME dbusxx
     VERSION 1.0.0
     SOVERSION 1
     POSITION_INDEPENDENT_CODE ON
@@ -49,27 +49,27 @@ if(NOT SYSTEMD_FOUND)
 endif()
 
 # Include header file path
-target_include_directories(ssdbus PUBLIC
+target_include_directories(dbusxx PUBLIC
     # Use header files from the source code directory during construction
     $<BUILD_INTERFACE:${INCLUDES_DIR}>
-    # After installation, use the installation directory /usr/local/include/
-    $<INSTALL_INTERFACE:include/ssdbus>
+    # After installation, headers live in include/dbusxx/
+    $<INSTALL_INTERFACE:include/dbusxx>
     # systemd headers
     ${SYSTEMD_INCLUDE_DIRS}
 )
 
 # Link to libraries
-target_link_libraries(ssdbus
+target_link_libraries(dbusxx
     PUBLIC
         ${SYSTEMD_LIBRARIES}
 )
 
-target_link_libraries(ssdbus
+target_link_libraries(dbusxx
     PRIVATE
-        ssdbus_opts
+        dbusxx_opts
 )
 
-target_compile_options(ssdbus
+target_compile_options(dbusxx
     PRIVATE
         ${SYSTEMD_CFLAGS_OTHER}
 )
@@ -77,54 +77,54 @@ target_compile_options(ssdbus
 # Install .so to/usr/local/lib
 install(
     TARGETS
-        ssdbus
-    # Export ssdbusTargets and store target usage information
+        dbusxx
+    # Export dbusxxTargets and store target usage information
     EXPORT
-        ssdbusTargets
+        dbusxxTargets
     # Installation location: /usr/local/lib
     DESTINATION
         lib
 )
 
-# Install header files to /usr/local/include/ssdbus
+# Install header files to /usr/local/include/dbusxx
 install(
     DIRECTORY
-        ${INCLUDES_DIR}/ DESTINATION include/ssdbus
+        ${INCLUDES_DIR}/ DESTINATION include/dbusxx
     FILES_MATCHING PATTERN
         "*.hpp"
 )
 
 # Install exported CMake Targets, enable 'find_package' to locate
 install(
-    # Install ssdbusTargets.cmake
+    # Install dbusxxTargets.cmake
     EXPORT
-        ssdbusTargets
+        dbusxxTargets
     # Determine the export file for Target
     FILE
-        ssdbusTargets.cmake
-    # Installation location: /usr/local/lib/cmake/ssdbus
+        dbusxxTargets.cmake
+    # Installation location: /usr/local/lib/cmake/dbusxx
     DESTINATION
-        lib/cmake/ssdbus
+        lib/cmake/dbusxx
 )
 
 # Introducing auxiliary functions -> configure_package_config_file
 include(CMakePackageConfigHelpers)
 
-# Generate ssdbusConfig.cmake, 'find_package' will use it
+# Generate dbusxxConfig.cmake, 'find_package' will use it
 configure_package_config_file(
     # Template file
-    "${CMAKE_CURRENT_SOURCE_DIR}/ssdbusConfig.cmake.in"
+    "${CMAKE_CURRENT_SOURCE_DIR}/dbusxxConfig.cmake.in"
     # Output file
-    "${CMAKE_CURRENT_BINARY_DIR}/ssdbusConfig.cmake"
+    "${CMAKE_CURRENT_BINARY_DIR}/dbusxxConfig.cmake"
     # Installation path
     INSTALL_DESTINATION
-        lib/cmake/ssdbus
+        lib/cmake/dbusxx
 )
 
-# Install ssdbusConfig.cmake
+# Install dbusxxConfig.cmake
 install(
     FILES
-        "${CMAKE_CURRENT_BINARY_DIR}/ssdbusConfig.cmake"
+        "${CMAKE_CURRENT_BINARY_DIR}/dbusxxConfig.cmake"
     DESTINATION
-        lib/cmake/ssdbus
+        lib/cmake/dbusxx
 )

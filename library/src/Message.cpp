@@ -1,7 +1,7 @@
 #include "Message.hpp"
 
 
-namespace SSDbus {
+namespace Dbusxx {
 Message::Message(std::shared_ptr<Private::MessagePrivate> aImpl)
     : mPrivate(std::move(aImpl)) {}
 

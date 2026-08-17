@@ -4,7 +4,7 @@
 #include "private/method/Reconnect.hpp"
 
 
-namespace SSDbus {
+namespace Dbusxx {
 namespace Private {
 namespace {
 static ssize_t __safeRead(int aFd, void* aBuffer, size_t aCount) {

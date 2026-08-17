@@ -3,7 +3,7 @@
 #include "Session.hpp"
 
 
-namespace SSDbus {
+namespace Dbusxx {
 Looper::Looper(Session& aSession)
     : mSession(&aSession)
     , mPrivate(

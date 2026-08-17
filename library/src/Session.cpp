@@ -1,7 +1,7 @@
 #include "Session.hpp"
 
 
-namespace SSDbus {
+namespace Dbusxx {
 Session::Session(SessionType aType,
     std::string_view aServiceName, bool aIsServer)
     : mPrivate(std::make_shared<Private::SessionPrivate>(

@@ -1,5 +1,5 @@
-#ifndef SSDBUS_CLIENT_HPP
-#define SSDBUS_CLIENT_HPP
+#ifndef DBUSXX_CLIENT_HPP
+#define DBUSXX_CLIENT_HPP
 
 #include <memory>
 #include <future>
@@ -13,7 +13,7 @@
 #include "Utils.hpp"
 
 
-namespace SSDbus {
+namespace Dbusxx {
 class Client {
 struct ServerInfo {
     std::string name;

@@ -1,12 +1,12 @@
-#ifndef SSDBUS_LOOPER_HPP
-#define SSDBUS_LOOPER_HPP
+#ifndef DBUSXX_LOOPER_HPP
+#define DBUSXX_LOOPER_HPP
 
 #include <functional>
 
 #include "private/session/LooperPrivate.hpp"
 
 
-namespace SSDbus {
+namespace Dbusxx {
 class Session;
 class Looper {
 public:

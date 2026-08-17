@@ -3,7 +3,7 @@
 #include "private/adaptor/RawRemoteError.hpp"
 
 
-namespace SSDbus {
+namespace Dbusxx {
 namespace Adaptor {
 namespace RawBus {
 namespace {

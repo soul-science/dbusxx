@@ -1,11 +1,11 @@
-#ifndef SSDBUS_RAW_EVENT_SHARE_PTR_HPP
-#define SSDBUS_RAW_EVENT_SHARE_PTR_HPP
+#ifndef DBUSXX_RAW_EVENT_SHARE_PTR_HPP
+#define DBUSXX_RAW_EVENT_SHARE_PTR_HPP
 
 #include "private/adaptor/RawCommon.hpp"
 #include "private/adaptor/RawRemoteError.hpp"
 
 
-namespace SSDbus {
+namespace Dbusxx {
 namespace Adaptor {
 namespace RawEvent {
     Status createEvent(RawBusEventPtr& aRawEvent);

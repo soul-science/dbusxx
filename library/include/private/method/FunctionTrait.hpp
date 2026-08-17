@@ -1,11 +1,11 @@
-#ifndef SSDBUS_FUNCTION_TRAIT_HPP
-#define SSDBUS_FUNCTION_TRAIT_HPP
+#ifndef DBUSXX_FUNCTION_TRAIT_HPP
+#define DBUSXX_FUNCTION_TRAIT_HPP
 
 #include <functional>
 #include <tuple>
 
 
-namespace SSDbus {
+namespace Dbusxx {
 namespace Method {
 template<typename F>
 struct FuncTrait : FuncTrait<decltype(&F::operator())> {};

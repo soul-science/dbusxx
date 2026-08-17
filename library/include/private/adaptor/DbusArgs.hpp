@@ -1,6 +1,6 @@
 
-#ifndef SSDBUS_DBUS_ARGS_HPP
-#define SSDBUS_DBUS_ARGS_HPP
+#ifndef DBUSXX_DBUS_ARGS_HPP
+#define DBUSXX_DBUS_ARGS_HPP
 
 #include <array>
 #include <map>
@@ -11,7 +11,7 @@
 #include <vector>
 
 
-namespace SSDbus {
+namespace Dbusxx {
 template<typename T>
 struct isArray : std::false_type {};
 

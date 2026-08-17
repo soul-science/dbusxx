@@ -1,5 +1,5 @@
-#ifndef SSDBUS_DBUS_METHOD_HPP
-#define SSDBUS_DBUS_METHOD_HPP
+#ifndef DBUSXX_DBUS_METHOD_HPP
+#define DBUSXX_DBUS_METHOD_HPP
 
 #include <functional>
 #include <memory>
@@ -17,7 +17,7 @@
 #include "Status.hpp"
 
 
-namespace SSDbus {
+namespace Dbusxx {
 namespace Method {
 
 //! ========== Tools ==========

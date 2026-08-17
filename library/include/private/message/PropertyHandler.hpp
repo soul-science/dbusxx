@@ -1,5 +1,5 @@
-#ifndef SSDBUS_PROPERTY_HANDLER_HPP
-#define SSDBUS_PROPERTY_HANDLER_HPP
+#ifndef DBUSXX_PROPERTY_HANDLER_HPP
+#define DBUSXX_PROPERTY_HANDLER_HPP
 
 #include <string>
 #include <string_view>
@@ -13,7 +13,7 @@
 #include "Status.hpp"
 
 
-namespace SSDbus {
+namespace Dbusxx {
 namespace Private {
 struct PropertyHandler {
     using PropCallback = std::function<void(MessagePrivate&)>;

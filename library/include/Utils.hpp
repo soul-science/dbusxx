@@ -1,10 +1,10 @@
-#ifndef SSDBUS_UTILS_HPP
-#define SSDBUS_UTILS_HPP
+#ifndef DBUSXX_UTILS_HPP
+#define DBUSXX_UTILS_HPP
 
 #include <unistd.h>
 
 
-namespace SSDbus {
+namespace Dbusxx {
 enum class SessionType : uint8_t {
     SYSTEM,
     USER,
@@ -14,4 +14,4 @@ enum class SessionType : uint8_t {
 
 }
 
-#endif //! SSDBUS_UTILS_HPP
+#endif //! DBUSXX_UTILS_HPP

@@ -1,11 +1,11 @@
-#ifndef SSDBUS_RAW_SLOT_SHARE_PTR_HPP
-#define SSDBUS_RAW_SLOT_SHARE_PTR_HPP
+#ifndef DBUSXX_RAW_SLOT_SHARE_PTR_HPP
+#define DBUSXX_RAW_SLOT_SHARE_PTR_HPP
 
 #include "private/adaptor/RawCommon.hpp"
 #include "private/adaptor/RawRemoteError.hpp"
 
 
-namespace SSDbus {
+namespace Dbusxx {
 namespace Adaptor {
 namespace RawSlot {
 void unrefSlot(RawBusSlotPtr aSlot);

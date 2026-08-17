@@ -3,7 +3,7 @@
 #include "private/adaptor/RawRemoteError.hpp"
 
 
-namespace SSDbus {
+namespace Dbusxx {
 namespace Private {
 int ReplyAsyncHandler::onReply(Adaptor::RawBusMessagePtr aRep,
     void* aUsr, Adaptor::RawBusErrorPtr aErr) {

@@ -1,5 +1,5 @@
-#ifndef SSDBUS_SIGNAL_HANDLER_HPP
-#define SSDBUS_SIGNAL_HANDLER_HPP
+#ifndef DBUSXX_SIGNAL_HANDLER_HPP
+#define DBUSXX_SIGNAL_HANDLER_HPP
 
 #include "private/adaptor/RawCommon.hpp"
 #include "private/adaptor/DbusArgs.hpp"
@@ -7,7 +7,7 @@
 #include "private/message/MessagePrivate.hpp"
 
 
-namespace SSDbus {
+namespace Dbusxx {
 namespace Private {
 template<typename Callback>
 struct SignalHandler {

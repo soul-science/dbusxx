@@ -1,5 +1,5 @@
-#ifndef SSDBUS_DBUS_SERVER_HPP
-#define SSDBUS_DBUS_SERVER_HPP
+#ifndef DBUSXX_DBUS_SERVER_HPP
+#define DBUSXX_DBUS_SERVER_HPP
 
 #include <string>
 #include <string_view>
@@ -13,7 +13,7 @@
 #include "Utils.hpp"
 
 
-namespace SSDbus {
+namespace Dbusxx {
 template<typename Derived>
 class Server : public MetaObject<Derived> {
 public:

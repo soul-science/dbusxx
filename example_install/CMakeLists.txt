@@ -7,7 +7,7 @@ project(example_install
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-find_package(ssdbus REQUIRED)
+find_package(dbusxx REQUIRED)
 
 add_executable(example_install
     main.cpp
@@ -15,5 +15,5 @@ add_executable(example_install
 
 target_link_libraries(example_install
     PRIVATE
-        ssdbus
+        dbusxx
 )

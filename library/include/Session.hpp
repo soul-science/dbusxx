@@ -1,6 +1,6 @@
 
-#ifndef SSDBUS_DBUS_SESSION_HPP
-#define SSDBUS_DBUS_SESSION_HPP
+#ifndef DBUSXX_DBUS_SESSION_HPP
+#define DBUSXX_DBUS_SESSION_HPP
 
 #include <memory>
 #include <vector>
@@ -15,7 +15,7 @@
 #include "Status.hpp"
 
 
-namespace SSDbus {
+namespace Dbusxx {
 class Session {
     friend class Looper;
     using PendingRepsV = std::vector<std::shared_ptr<void>>;

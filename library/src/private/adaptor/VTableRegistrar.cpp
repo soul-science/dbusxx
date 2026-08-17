@@ -1,7 +1,7 @@
 #include "private/adaptor/VTableRegistrar.hpp"
 
 
-namespace SSDbus {
+namespace Dbusxx {
 namespace Adaptor {
 VTableRegistrar::VTableRegistrar(const Adaptor::RawBusSharePtr& aBus,
     std::string_view aPath, std::string_view aIface)

@@ -1,7 +1,7 @@
 /****************************************************************************
  * example_install.cpp
- * 安装验证测试：通过 find_package(ssdbus) 链接 /usr/local 已安装的
- * libssdbus.so + include/ssdbus 头文件，验证安装产物可被外部项目直接使用。
+ * 安装验证测试：通过 find_package(dbusxx) 链接 /usr/local 已安装的
+ * libdbusxx.so + include/dbusxx 头文件，验证安装产物可被外部项目直接使用。
  *
  * 功能：
  *   1. 连接 session bus（注册唯一 name）
@@ -13,15 +13,15 @@
  *     与安装产物无关。
  ****************************************************************************/
 
-#include <ssdbus/Reply.hpp>
-#include <ssdbus/Session.hpp>
+#include <dbusxx/Reply.hpp>
+#include <dbusxx/Session.hpp>
 
 #include <cstdlib>
 #include <iostream>
 #include <string>
 #include <vector>
 
-using namespace SSDbus;
+using namespace Dbusxx;
 
 int main() {
     // ① 连接 session bus，注册唯一 name（避免与已存在的实例冲突）

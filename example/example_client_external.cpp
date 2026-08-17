@@ -23,7 +23,7 @@
 #include <thread>
 #include <vector>
 
-using namespace SSDbus;
+using namespace Dbusxx;
 
 // ── 服务端：内嵌 Client，共用自身 Looper ──────────────────────────────────
 
@@ -32,37 +32,37 @@ public:
     DemoServer()
         : Server("com.example.ext") {}
 
-    SSDBUS_PATH("/com/example/ext")
-    SSDBUS_IFACE("com.example.External")
+    DBUSXX_PATH("/com/example/ext")
+    DBUSXX_IFACE("com.example.External")
     int32_t echoInt32(int32_t i) {
         std::cout << "[server] echoInt32: " << i << std::endl;
         return i;
     }
-    SSDBUS_METHOD(echoInt32)
+    DBUSXX_METHOD(echoInt32)
 
     std::string echoString(const std::string& i) {
         std::cout << "[server] echoString: " << i << std::endl;
         return i;
     }
-    SSDBUS_METHOD(echoString)
+    DBUSXX_METHOD(echoString)
 
     void triggerSignal(int a, int b) {
         std::cout << "[server] triggerSignal(" << a << ", " << b << ")" << std::endl;
         emit("/com/example/ext", "com.example.External",
             "mySignal", a, b);
     }
-    SSDBUS_METHOD(triggerSignal)
+    DBUSXX_METHOD(triggerSignal)
 
     void shutdown() {
         std::cout << "[server] shutdown" << std::endl;
         stop();
     }
-    SSDBUS_METHOD(shutdown)
+    DBUSXX_METHOD(shutdown)
 
-    SSDBUS_SIGNAL(mySignal, int, int)
+    DBUSXX_SIGNAL(mySignal, int, int)
 
-    SSDBUS_PROPERTY_RO(name, std::string, std::string("external-demo"))
-    SSDBUS_PROPERTY_RW(counter, int32_t, 0)
+    DBUSXX_PROPERTY_RO(name, std::string, std::string("external-demo"))
+    DBUSXX_PROPERTY_RW(counter, int32_t, 0)
 };
 
 // ── 同步辅助 ────────────────────────────────────────────────────────────

@@ -1,7 +1,7 @@
 #include "Client.hpp"
 
 
-namespace SSDbus {
+namespace Dbusxx {
 Client::AsyncPool::AsyncPool(Session s)
     : session(std::move(s))
     , looper(session)

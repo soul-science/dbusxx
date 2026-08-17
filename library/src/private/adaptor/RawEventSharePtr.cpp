@@ -1,7 +1,7 @@
 #include "private/adaptor/RawEventSharePtr.hpp"
 
 
-namespace SSDbus {
+namespace Dbusxx {
 namespace Adaptor {
 namespace RawEvent {
 Status createEvent(RawBusEventPtr& aRawEvent) {

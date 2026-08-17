@@ -1,5 +1,5 @@
-#ifndef SSDBUS_MESSAGE_PRIVATE_HPP
-#define SSDBUS_MESSAGE_PRIVATE_HPP
+#ifndef DBUSXX_MESSAGE_PRIVATE_HPP
+#define DBUSXX_MESSAGE_PRIVATE_HPP
 
 #include <string>
 #include <string_view>
@@ -11,7 +11,7 @@
 #include "Status.hpp"
 
 
-namespace SSDbus {
+namespace Dbusxx {
 namespace Private {
 class MessagePrivate {
 public:

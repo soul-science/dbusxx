@@ -1,5 +1,5 @@
-#ifndef SSDBUS_DBUS_MESSAGE_HPP
-#define SSDBUS_DBUS_MESSAGE_HPP
+#ifndef DBUSXX_DBUS_MESSAGE_HPP
+#define DBUSXX_DBUS_MESSAGE_HPP
 
 #include <memory>
 #include <tuple>
@@ -8,7 +8,7 @@
 #include "Status.hpp"
 
 
-namespace SSDbus {
+namespace Dbusxx {
 class Message {
 public:
     Message() = default;

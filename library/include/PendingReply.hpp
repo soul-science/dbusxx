@@ -1,5 +1,5 @@
-#ifndef SSDBUS_DBUS_PENDING_REPLY_HPP
-#define SSDBUS_DBUS_PENDING_REPLY_HPP
+#ifndef DBUSXX_DBUS_PENDING_REPLY_HPP
+#define DBUSXX_DBUS_PENDING_REPLY_HPP
 
 #include <functional>
 #include <future>
@@ -12,7 +12,7 @@
 #include "Reply.hpp"
 
 
-namespace SSDbus {
+namespace Dbusxx {
 template<typename Ret>
 class PendingReply {
     static_assert(isValidArgs<Ret>(), "Unsupported value type");

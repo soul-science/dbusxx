@@ -1,13 +1,13 @@
 
-#ifndef SSDBUS_DBUS_ERROR_HPP
-#define SSDBUS_DBUS_ERROR_HPP
+#ifndef DBUSXX_DBUS_ERROR_HPP
+#define DBUSXX_DBUS_ERROR_HPP
 
 #include <map>
 #include <string_view>
 #include "private/adaptor/RawCommon.hpp"
 
 
-namespace SSDbus {
+namespace Dbusxx {
 namespace Adaptor {
 namespace RawErrorConvert {
 inline constexpr StatusCode fromErrno(int aErrno) {
