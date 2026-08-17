@@ -208,7 +208,7 @@ public:
 
     //! 注册本地属性变更监听（供外部 main 调用）
     void listenVersion() {
-        session().onLocalPropertyChanged<int32_t>(
+        (void)session().onLocalPropertyChanged<int32_t>(
             "/com/example/demo","com.example.Demo","version",
             [this](const int32_t& v) {
                 std::cout << "[server] version changed: " << v << std::endl;
@@ -494,7 +494,7 @@ int main() {
                 }).isSuccess());
 
         // 通过远端修改触发
-        syncClient.setRemoteProperty<std::string>(
+        (void)syncClient.setRemoteProperty<std::string>(
             svc, path, iface, "description", std::string("remote-set"));
         srvPropFlag.wait();
         TEST("Server::onPropertyChanged fired", newDesc == "remote-set");
@@ -562,7 +562,7 @@ int main() {
         SyncFlag asyncDone;
         std::string asyncResult;
 
-        asyncClient.callAsync<std::string>(
+        (void)asyncClient.callAsync<std::string>(
             svc, path, iface, "testString",
             [&](Reply<std::string> rep) {
                 asyncResult = rep.value();

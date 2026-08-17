@@ -269,7 +269,7 @@ int main() {
     }
 
     // ⑧ 异步调用 — lambda 回调
-    session.callAsync<std::string>(
+    st = session.callAsync<std::string>(
         "org.freedesktop.DBus", "/org/freedesktop/DBus",
         "org.freedesktop.DBus", "GetId",
         [](Reply<std::string> rep) {

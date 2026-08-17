@@ -189,7 +189,10 @@ public:
     Status read(std::tuple<Args...>& aVals) {
         Status status;
         [&]<size_t... Idx>(std::index_sequence<Idx...> ) {
-            ((status = read(std::get<Idx>(aVals))).isSuccess() && ...);
+            //! Short-circuit fold: stop reading on the first failure while
+            //! keeping the last Status. The fold result is consumed to
+            //! (void) on Status::isSuccess().
+            (void)((status = read(std::get<Idx>(aVals))).isSuccess() && ...);
         }(std::make_index_sequence<sizeof...(Args)>{});
         return status;
     }

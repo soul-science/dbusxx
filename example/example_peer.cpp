@@ -122,7 +122,7 @@ int main() {
 
     // 由 server 线程 emit 信号
     server.post([&server] {
-        server.emit(PATH, IFACE, "onNotify", 100, std::string("hello from server"));
+        (void)server.emit(PATH, IFACE, "onNotify", 100, std::string("hello from server"));
     });
 
     auto sigResult = signalFuture.get();
@@ -181,7 +181,7 @@ int main() {
 
     // 由 server 线程改属性
     server.post([&server] {
-        server.setProperty(PATH, IFACE, "counter", 99);
+        (void)server.setProperty(PATH, IFACE, "counter", 99);
     });
 
     {

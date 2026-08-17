@@ -14,6 +14,15 @@
 
 
 namespace Dbusxx {
+/**
+ * @brief Proxy for a remote D-Bus service.
+ *
+ * `Client` encapsulates a session plus an event loop and exposes
+ * type-safe calls, signals and properties for one remote
+ * (service, path, interface). Use the four-argument constructor to let
+ * the client manage its own session and loop, or the two-argument one
+ * to plug into an external #Looper.
+ */
 class Client {
 struct ServerInfo {
     std::string name;
@@ -32,11 +41,28 @@ struct AsyncPool {
 };
 
 public:
+    //! @brief Construct an empty (invalid) client.
     Client() = default;
 
+    /**
+     * @brief Construct a client that manages its own session and event loop.
+     *
+     * @param aType      session type (system/user/peer)
+     * @param aService   remote service name
+     * @param aPath      remote object path
+     * @param aInterface remote interface name
+     */
     explicit Client(SessionType aType, std::string aService,
         std::string aPath, std::string aInterface);
 
+    /**
+     * @brief Construct a client driven by an external event loop.
+     *
+     * @param aLooper    the loop that will drive the client
+     * @param aService   remote service name
+     * @param aPath      remote object path
+     * @param aInterface remote interface name
+     */
     explicit Client(Looper& aLooper, std::string aService,
         std::string aPath, std::string aInterface);
 
@@ -49,8 +75,17 @@ public:
     Client(const Client&) = delete;
     Client& operator=(const Client&) = delete;
 
+    /**
+     * @brief Synchronously call `aMethod` on the remote service.
+     *
+     * @tparam Ret         expected return type (default void)
+     * @tparam TimeoutUsec optional timeout in microseconds (0 = default)
+     * @param aMethod      method name to invoke
+     * @param aArgs        call arguments
+     * @return Reply<Ret> carrying the parsed return value or an error
+     */
     template<typename Ret=void, uint64_t TimeoutUsec=0, typename... Args>
-    Reply<Ret> callSync(std::string_view aMethod, const Args&... aArgs) {
+    [[nodiscard]] Reply<Ret> callSync(std::string_view aMethod, const Args&... aArgs) {
         if (mLooper->isOwnerThread()) {
             return mAsyncPtr->callSync<Ret, TimeoutUsec>(
                 mInfo.name, mInfo.path, mInfo.interface, aMethod, aArgs...);
@@ -72,8 +107,17 @@ public:
         return pend.reply();
     }
 
+    /**
+     * @brief Asynchronously call `aMethod` and return a #PendingReply handle.
+     *
+     * @tparam Ret          expected return type (default void)
+     * @tparam TimeoutUsec  optional timeout in microseconds (0 = default)
+     * @param aMethod       method name to invoke
+     * @param aArgs         call arguments
+     * @return PendingReply<Ret> handle for the in-flight call
+     */
     template<typename Ret=void, uint64_t TimeoutUsec=0, typename... Args>
-    PendingReply<Ret> callAsync(std::string_view aMethod, const Args&... aArgs) {
+    [[nodiscard]] PendingReply<Ret> callAsync(std::string_view aMethod, const Args&... aArgs) {
         if (mLooper->isOwnerThread()) {
             return mAsyncPtr->callAsync<Ret, TimeoutUsec>(
                 mInfo.name, mInfo.path, mInfo.interface, aMethod, aArgs...);
@@ -93,8 +137,20 @@ public:
         return future.get();
     }
 
+    /**
+     * @brief Asynchronously call `aMethod` with a callback on completion.
+     *
+     * The callback must be callable as `void(Reply<Ret>)`.
+     *
+     * @tparam Ret         expected return type (default void)
+     * @tparam TimeoutUsec optional timeout in microseconds (0 = default)
+     * @param aMethod      method name to invoke
+     * @param aCallback    completion callback
+     * @param aArgs        call arguments
+     * @return Status indicating whether the call was dispatched
+     */
     template<typename Ret=void, uint64_t TimeoutUsec=0, typename Callback, typename... Args>
-    Status callAsync(std::string_view aMethod, Callback&& aCallback, const Args&... aArgs) {
+    [[nodiscard]] Status callAsync(std::string_view aMethod, Callback&& aCallback, const Args&... aArgs) {
         if (mLooper->isOwnerThread()) {
             return mAsyncPtr->callAsync<Ret, TimeoutUsec>(
                 mInfo.name, mInfo.path, mInfo.interface, aMethod,
@@ -117,8 +173,15 @@ public:
         return future.get();
     }
 
+    /**
+     * @brief Subscribe to a signal and invoke `aCallback` on arrival.
+     *
+     * @param aSignal   signal name to listen for
+     * @param aCallback callback invoked on arrival
+     * @return Status of the subscription
+     */
     template<typename Callback>
-    Status listenSignal(std::string_view aSignal, Callback&& aCallback) {
+    [[nodiscard]] Status listenSignal(std::string_view aSignal, Callback&& aCallback) {
         if (mLooper->isOwnerThread()) {
             return mAsyncPtr->listenSignal(
                 mInfo.name, mInfo.path, mInfo.interface,
@@ -139,8 +202,16 @@ public:
         return future.get();
     }
 
+    /**
+     * @brief Subscribe to a signal dispatched to a member function of `aCls`.
+     *
+     * @param aSignal signal name to listen for
+     * @param aCls    receiver object
+     * @param aFunc   member function invoked on arrival
+     * @return Status of the subscription
+     */
     template<typename Cls, typename Ret, typename... Args>
-    Status listenSignal(std::string_view aSignal, Cls* aCls, Ret(Cls::*aFunc)(Args...)) {
+    [[nodiscard]] Status listenSignal(std::string_view aSignal, Cls* aCls, Ret(Cls::*aFunc)(Args...)) {
         if (mLooper->isOwnerThread()) {
             return mAsyncPtr->listenSignal(
                 mInfo.name, mInfo.path, mInfo.interface,
@@ -161,8 +232,15 @@ public:
         return future.get();
     }
 
+    /**
+     * @brief Fetch a remote property's value via `Properties.Get`.
+     *
+     * @tparam Ret  expected property type
+     * @param aProp property name
+     * @return Reply<Ret> carrying the property value or an error
+     */
     template<typename Ret>
-    Reply<Ret> getProperty(std::string_view aProp) {
+    [[nodiscard]] Reply<Ret> getProperty(std::string_view aProp) {
         if (mLooper->isOwnerThread()) {
             return mAsyncPtr->getRemoteProperty<Ret>(
                 mInfo.name, mInfo.path, mInfo.interface, aProp);
@@ -181,8 +259,15 @@ public:
         return future.get();
     }
 
+    /**
+     * @brief Set a remote property's value via `Properties.Set`.
+     *
+     * @param aProp  property name
+     * @param aValue new value to write
+     * @return Status of the write
+     */
     template<typename T>
-    Status setProperty(std::string_view aProp, const T& aValue) {
+    [[nodiscard]] Status setProperty(std::string_view aProp, const T& aValue) {
         if (mLooper->isOwnerThread()) {
             return mAsyncPtr->setRemoteProperty<T>(
                 mInfo.name, mInfo.path, mInfo.interface,
@@ -203,8 +288,15 @@ public:
         return future.get();
     }
 
+    /**
+     * @brief Subscribe to changes of a remote property (`PropertiesChanged`).
+     *
+     * @param aProp     property name to watch
+     * @param aCallback callback invoked with the new value
+     * @return Status of the subscription
+     */
     template<typename Callback>
-    Status onPropertyChanged(std::string_view aProp, Callback&& aCallback) {
+    [[nodiscard]] Status onPropertyChanged(std::string_view aProp, Callback&& aCallback) {
         if (mLooper->isOwnerThread()) {
             return mAsyncPtr->onRemotePropertyChanged<>(
                 mInfo.name, mInfo.path, mInfo.interface,

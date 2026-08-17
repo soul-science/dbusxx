@@ -51,8 +51,8 @@ int Session::process() {
     return mPrivate->process();
 }
 
-int Session::wait(uint64_t aTimeoutMs) {
-    return mPrivate->wait(aTimeoutMs);
+int Session::wait(uint64_t aTimeoutUsec) {
+    return mPrivate->wait(aTimeoutUsec);
 }
 
 void Session::flush() {

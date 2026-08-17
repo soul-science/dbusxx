@@ -183,8 +183,8 @@ int SessionPrivate::process() {
     return Adaptor::RawBus::process(mRawBus.get(), nullptr);
 }
 
-int SessionPrivate::wait(uint64_t aTimeoutMs) {
-    return Adaptor::RawBus::wait(mRawBus.get(), aTimeoutMs);
+int SessionPrivate::wait(uint64_t aTimeoutUsec) {
+    return Adaptor::RawBus::wait(mRawBus.get(), aTimeoutUsec);
 }
 
 int SessionPrivate::getFd() const {

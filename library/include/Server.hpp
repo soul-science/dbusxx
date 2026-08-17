@@ -14,15 +14,34 @@
 
 
 namespace Dbusxx {
+/**
+ * @brief One-stop server wrapper bundling a #Session, a #Looper and reflection.
+ *
+ * `Server<Derived>` (CRTP) creates a session and an event loop. On `run()`
+ * it registers the interface annotated on `Derived` with the `DBUSXX_*`
+ * macros, then serves it until stopped.
+ */
 template<typename Derived>
 class Server : public MetaObject<Derived> {
 public:
+    //! @brief A server must always be constructed with a session type and name.
     Server() = delete;
 
+    /**
+     * @brief Construct a server of the given session type.
+     *
+     * @param aType        session type (system/user/peer)
+     * @param aServiceName service name to request / socket address
+     */
     explicit Server(SessionType aType, std::string_view aServiceName)
         : mSession(Session::createSession(aType, aServiceName, true))
         , mLooper(mSession) {}
 
+    /**
+     * @brief Construct a user-session server with the given service name.
+     *
+     * @param aServiceName service name to request
+     */
     explicit Server(std::string_view aServiceName)
         : mSession(Session::createSession(SessionType::USER, aServiceName))
         , mLooper(mSession) {}
@@ -48,6 +67,7 @@ public:
     Server(const Server&) = delete;
     Server& operator=(const Server&) = delete;
 
+    //! @brief Register the annotated interface and run the event loop (blocks).
     void run() {
         mLooper.onReady([this]() -> Status {
             init();
@@ -56,6 +76,7 @@ public:
         mLooper.run();
     }
 
+    //! @brief Stop the loop gracefully (no-op if the server already errored).
     void stop() {
         if (status().isError()) {
             return;
@@ -64,40 +85,69 @@ public:
         mLooper.stop();
     }
 
+    //! @brief Stop the loop unconditionally.
     void forceStop() {
         mLooper.stop();
     }
 
-    void post(std::function<void()> mTask) {
-        mLooper.post(std::move(mTask));
+    /**
+     * @brief Post a task to be executed on the server's loop thread.
+     *
+     * @param aTask task to run
+     */
+    void post(std::function<void()> aTask) {
+        mLooper.post(std::move(aTask));
     }
 
+    /**
+     * @brief Emit a signal with arguments (thread-safe; may cross threads).
+     *
+     * @param aPath   object path
+     * @param aIface  interface name
+     * @param aSignal signal name to emit
+     * @param aArgs   signal arguments
+     * @return Status of the emission
+     */
     template<typename... Args>
-    Status emit(std::string_view aPath, std::string_view aIface,
+    [[nodiscard]] Status emit(std::string_view aPath, std::string_view aIface,
         std::string_view aSignal, Args&&... aArgs) {
         if (mLooper.isOwnerThread()) {
             return mSession.emitSignal(aPath, aIface, aSignal, std::forward<Args>(aArgs)...);
         }
 
         auto argsTuple = std::make_tuple(std::forward<Args>(aArgs)...);
+        std::promise<Status> promise;
+        std::future<Status> future = promise.get_future();
         mLooper.post(
-            [this, path = std::string(aPath),
+            [this, &promise, path = std::string(aPath),
              iface = std::string(aIface),
              signal = std::string(aSignal),
              args = std::move(argsTuple)] () mutable -> void {
                 std::apply(
                     [&](auto&&... aUnpacked) {
-                        mSession.emitSignal(path, iface, signal, aUnpacked...);
+                        promise.set_value(
+                            mSession.emitSignal(path, iface, signal, aUnpacked...)
+                        );
                     }, std::move(args)
                 );
             }
         );
 
-        return Status(StatusCode::SUCCESS);
+        return future.get();
     }
 
+    /**
+     * @brief Read the current value of a locally registered property.
+     *
+     * @tparam T     property value type
+     * @param aPath  object path
+     * @param aIface interface name
+     * @param aName  property name
+     * @param aValue out-parameter receiving the value
+     * @return Status of the read
+     */
     template<typename T>
-    Status getProperty(std::string_view aPath, std::string_view aIface,
+    [[nodiscard]] Status getProperty(std::string_view aPath, std::string_view aIface,
         std::string_view aName, T& aValue) {
         if (mLooper.isOwnerThread()) {
             return mSession.template getLocalProperty<T>(
@@ -121,8 +171,18 @@ public:
         return future.get();
     }
 
+    /**
+     * @brief Write a new value to a locally registered property.
+     *
+     * @tparam T     property value type
+     * @param aPath  object path
+     * @param aIface interface name
+     * @param aName  property name
+     * @param aValue new value to write
+     * @return Status of the write
+     */
     template<typename T>
-    Status setProperty(std::string_view aPath, std::string_view aIface,
+    [[nodiscard]] Status setProperty(std::string_view aPath, std::string_view aIface,
         std::string_view aName, const T& aValue) {
         if (mLooper.isOwnerThread()) {
             return mSession.template setLocalProperty<T>(
@@ -147,8 +207,18 @@ public:
         return future.get();
     }
 
+    /**
+     * @brief Register a callback fired when a local property changes.
+     *
+     * @tparam T        property value type
+     * @param aPath     object path
+     * @param aIface    interface name
+     * @param aName     property name
+     * @param aCallback callback invoked with the new value
+     * @return Status of the registration
+     */
     template<typename T>
-    Status onPropertyChanged(std::string_view aPath, std::string_view aIface,
+    [[nodiscard]] Status onPropertyChanged(std::string_view aPath, std::string_view aIface,
         std::string_view aName, std::function<void(const T&)>&& aCallback) {
         if (mLooper.isOwnerThread()) {
             return mSession.template onLocalPropertyChanged<T>(
@@ -176,19 +246,23 @@ public:
         return future.get();
     }
 
+    //! @brief Return the server's current status (error takes precedence).
     [[nodiscard]] inline Status status() const {
         return mStatus.isError() ? mStatus : mLooper.status();
     }
 
+    //! @brief Return the session type this server is bound to.
     [[nodiscard]] inline SessionType type() const {
         return mSession.type();
     }
 
 protected:
+    //! @brief Access the underlying session (for direct registration).
     Session& session() {
         return mSession;
     }
 
+    //! @brief Access the underlying event loop.
     Looper& looper() {
         return mLooper;
     }

@@ -151,7 +151,7 @@ public:
 
     int process();
 
-    int wait(uint64_t aTimeoutMs = UINT64_MAX);
+    int wait(uint64_t aTimeoutUsec = UINT64_MAX);
 
     int getFd() const;
 

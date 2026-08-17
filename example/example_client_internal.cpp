@@ -55,7 +55,7 @@ public:
 
     void triggerClear(int a, int b) {
         std::cout << "[server] triggerClear(" << a << ", " << b << ")" << std::endl;
-        emit("/com/example/demo", "com.example.Demo",
+        (void)emit("/com/example/demo", "com.example.Demo",
             "clear", a, b);
     }
     DBUSXX_METHOD(triggerClear)
@@ -74,7 +74,7 @@ public:
 
     //! 注册本地属性变更监听
     void listenVersion() {
-        session().onLocalPropertyChanged<int32_t>(
+        [[maybe_unused]] auto st = session().onLocalPropertyChanged<int32_t>(
             "/com/example/demo", "com.example.Demo", "version",
             [this](const int32_t& v) {
                 std::cout << "[server] version property changed: " << v << std::endl;
@@ -290,7 +290,7 @@ int main() {
         SyncFlag asyncDone;
         std::string asyncResult;
 
-        c.callAsync<std::string>(
+        [[maybe_unused]] auto st = c.callAsync<std::string>(
             "testString",
             [&](Reply<std::string> rep) {
                 asyncResult = rep.value();

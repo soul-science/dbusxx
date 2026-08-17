@@ -13,10 +13,8 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 project(dbusxx
-    VERSION
-        1.0.0
-    LANGUAGES
-        CXX
+    VERSION 1.0.0
+    LANGUAGES CXX
 )
 
 add_library(dbusxx_opts INTERFACE) 

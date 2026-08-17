@@ -16,6 +16,16 @@
 
 
 namespace Dbusxx {
+/**
+ * @brief A D-Bus session (connection) bound to a specific bus.
+ *
+ * `Session` is the core type of the library: it manages a single
+ * D-Bus connection, lets you register methods/signals/properties
+ * (via `RegisterBuilder`), make synchronous and asynchronous remote
+ * calls, and emit/listen to signals. Sessions are created through the
+ * static factory methods (`systemSession()`, `userSession()`,
+ * `peerSession()`, `createSession()`).
+ */
 class Session {
     friend class Looper;
     using PendingRepsV = std::vector<std::shared_ptr<void>>;
@@ -32,6 +42,12 @@ class Session {
     };
 
 public:
+    /**
+     * @brief Chainable builder that batches registrations for one (path, interface).
+     *
+     * Obtain one via `Session::registerBuilder()`, add methods, signals and
+     * properties, then call `commit()` to publish them as a single vtable.
+     */
     class RegisterBuilder {
     public:
         RegisterBuilder(RegisterBuilder&&) noexcept = default;
@@ -39,6 +55,15 @@ public:
         RegisterBuilder(const RegisterBuilder&) = delete;
         RegisterBuilder& operator=(const RegisterBuilder&) = delete;
 
+        /**
+         * @brief Register a method backed by an arbitrary callable.
+         *
+         * The callable may be a lambda, function object or `std::function`.
+         *
+         * @param aName method name exposed on the bus
+         * @param aFunc callable implementing the method
+         * @return *this for chaining
+         */
         template<typename Func>
         RegisterBuilder& addMethod(std::string_view aName, Func aFunc) {
             using wrapper = Method::MethodWrapper<Func>;
@@ -50,6 +75,14 @@ public:
             return *this;
         }
 
+        /**
+         * @brief Register a method backed by a member function of `aCls`.
+         *
+         * @param aName method name exposed on the bus
+         * @param aCls  receiver object
+         * @param aFunc member function implementing the method
+         * @return *this for chaining
+         */
         template<typename Cls, typename Ret, typename ...Args>
         RegisterBuilder& addMethod(std::string_view aName, Cls* aCls, Ret(Cls::*aFunc)(Args...)) {
             return addMethod(aName,
@@ -59,6 +92,13 @@ public:
             );
         }
 
+        /**
+         * @brief Register a signal with the given argument types.
+         *
+         * @tparam Args signal argument types
+         * @param aName signal name exposed on the bus
+         * @return *this for chaining
+         */
         template<typename... Args>
         RegisterBuilder& addSignal(std::string_view aName) {
             mSession->addSignalEntry(mKey, aName,
@@ -66,6 +106,17 @@ public:
             return *this;
         }
 
+        /**
+         * @brief Register a property holding the initial value `aValue`.
+         *
+         * The wrapper owns its own copy of the value.
+         *
+         * @tparam T       property value type
+         * @param aName    property name exposed on the bus
+         * @param aValue   initial value
+         * @param writable whether remote clients may write to it (default true)
+         * @return *this for chaining
+         */
         template<typename T>
         RegisterBuilder& addProperty(std::string_view aName, T aValue, bool writable = true) {
             using wrapper = Method::PropertyWrapper<T>;
@@ -78,10 +129,18 @@ public:
             return *this;
         }
 
-    Status commit() {
-        return mSession->commitBuilder(mKey);
-    }
-    
+        /**
+         * @brief Commit all queued registrations for this builder.
+         *
+         * Publishes the accumulated vtable on the session; the builder cannot
+         * be extended further afterwards.
+         *
+         * @return Status of the registration
+         */
+        [[nodiscard]] Status commit() {
+            return mSession->commitBuilder(mKey);
+        }
+
     private:
         friend class Session;
 
@@ -106,49 +165,120 @@ public:
     Session(Session&& aOther) noexcept = default;
     Session& operator=(Session&& aOther) noexcept = default;
 
+    //! @brief Create a session on the system bus.
     static Session systemSession();
 
+    /**
+     * @brief Create a session on the system bus, requesting the given service name.
+     *
+     * @param aServiceName service name to request
+     * @return the created session
+     */
     static Session systemSession(std::string_view aServiceName);
 
+    //! @brief Create a session on the user/session bus.
     static Session userSession();
 
+    /**
+     * @brief Create a session on the user/session bus with the given service name.
+     *
+     * @param aServiceName service name to request
+     * @return the created session
+     */
     static Session userSession(std::string_view aServiceName);
 
+    /**
+     * @brief Create a peer-to-peer session over a socket (no bus daemon).
+     *
+     * @param aServiceName socket address / service name
+     * @param aIsServer    whether this end accepts the connection (default false)
+     * @return the created session
+     */
     static Session peerSession(std::string_view aServiceName, bool aIsServer = false);
 
+    /**
+     * @brief Generic factory: create a session of the given type.
+     *
+     * @param aType         session type (system/user/peer)
+     * @param aServiceName  service name or socket address (default empty)
+     * @param aIsServer     whether this end is a peer server (default false)
+     * @return the created session
+     */
     static Session createSession(SessionType aType = SessionType::USER,
         std::string_view aServiceName = "", bool aIsServer = false);
 
-    inline SessionType type() const {
+    //! @brief Return the type of bus this session is connected to.
+    [[nodiscard]] inline SessionType type() const {
         return mPrivate->type();
     }
 
-    inline std::string serviceName() const {
+    //! @brief Return the well-known service name this session requested at creation.
+    [[nodiscard]] inline std::string serviceName() const {
         return mPrivate->serviceName();
     }
 
-    inline int getFd() const {
+    //! @brief Return the underlying file descriptor of the connection.
+    [[nodiscard]] inline int getFd() const {
         return mPrivate->getFd();
     }
 
+    /**
+     * @brief Process one batch of pending events.
+     *
+     * @return the sd-bus process return code
+     */
     int process();
 
-    int wait(uint64_t aTimeoutMs = UINT64_MAX);
+    /**
+     * @brief Block for events until `aTimeoutUsec` elapses.
+     *
+     * @param aTimeoutUsec timeout in microseconds, passed straight to
+     *                     sd_bus_wait (default UINT64_MAX = wait forever)
+     * @return the sd-bus wait return code
+     */
+    int wait(uint64_t aTimeoutUsec = UINT64_MAX);
 
+    //! @brief Flush buffered outgoing messages to the bus.
     void flush();
 
+    /**
+     * @brief Create a chainable builder for the given (path, interface).
+     *
+     * @param aPath  object path
+     * @param aIface interface name
+     * @return a builder to register methods/signals/properties
+     */
     RegisterBuilder registerBuilder(std::string_view aPath, std::string_view aIface);
 
+    /**
+     * @brief Register a method backed by an arbitrary callable.
+     *
+     * @param aPath     object path
+     * @param aIface    interface name
+     * @param aFuncName method name
+     * @param aFunc     callable implementing the method
+     * @return Status of the registration
+     */
     template<typename Func>
-    Status registerMethod(std::string_view aPath, std::string aIface,
+    [[nodiscard]] Status registerMethod(std::string_view aPath, std::string aIface,
         std::string_view aFuncName, Func&& aFunc) {
         return registerBuilder(aPath, aIface)
             .addMethod(aFuncName, std::forward<Func>(aFunc))
             .commit();
     }
 
+    /**
+     * @brief Register a method backed by a member function of `aCls`.
+     *
+     * @param aPath     object path
+     * @param aIface    interface name
+     * @param aFuncName method name
+     * @param aCls      receiver object
+     * @param aFunc     member function implementing the method
+     * @return Status of the registration
+     */
     template<typename Cls, typename Ret, typename... Args>
-    Status registerMethod(std::string_view aPath, std::string aIface,
+    [[nodiscard]] Status registerMethod(std::string_view aPath, std::string aIface,
         std::string_view aFuncName, Cls* aCls, Ret(Cls::*aFunc)(Args...)) {
         return registerMethod(
             aPath, aIface, aFuncName,
@@ -158,16 +288,36 @@ public:
         );
     }
 
+    /**
+     * @brief Register a signal of the given argument types.
+     *
+     * @tparam Args       signal argument types
+     * @param aPath       object path
+     * @param aIface      interface name
+     * @param aSignalName signal name
+     * @return Status of the registration
+     */
     template<typename... Args>
-    Status registerSignal(std::string_view aPath, std::string aIface,
+    [[nodiscard]] Status registerSignal(std::string_view aPath, std::string aIface,
             std::string_view aSignalName) {
         return registerBuilder(aPath, aIface)
             .addSignal(aSignalName)
             .commit();
     }
 
+    /**
+     * @brief Register all reflection-annotated members of `aObj`.
+     *
+     * Consumes the metadata collected by the `MetaObject` macros
+     * (`DBUSXX_METHOD`, `DBUSXX_SIGNAL`, `DBUSXX_PROPERTY_*`, ...).
+     *
+     * @param aPath  object path
+     * @param aIface interface name
+     * @param aObj   object exposing the annotated members
+     * @return Status of the registration
+     */
     template<typename T>
-    Status registerObject(std::string_view aPath, std::string aIface, T* aObj) {
+    [[nodiscard]] Status registerObject(std::string_view aPath, std::string aIface, T* aObj) {
         auto builder = registerBuilder(aPath, aIface);
         for (auto& entry : MetaObject<T>::registry()) {
             entry.registerFn(&builder, aObj);
@@ -175,8 +325,22 @@ public:
         return builder.commit();
     }
 
+    /**
+     * @brief Synchronously call a remote method and return a typed reply.
+     *
+     * Blocks until the reply arrives.
+     *
+     * @tparam Ret         expected return type (default void)
+     * @tparam TimeoutUsec optional timeout in microseconds (0 = default)
+     * @param aService     remote service name
+     * @param aPath        remote object path
+     * @param aIface       remote interface name
+     * @param aMethod      method name to invoke
+     * @param aArgs        call arguments
+     * @return Reply<Ret> carrying the parsed return value or an error
+     */
     template<typename Ret=void, uint64_t TimeoutUsec=0, typename... Args>
-    Reply<Ret> callSync(std::string_view aService, std::string_view aPath,
+    [[nodiscard]] Reply<Ret> callSync(std::string_view aService, std::string_view aPath,
         std::string_view aIface, std::string_view aMethod, const Args&... aArgs) {
         return Reply<Ret>(
             Method::callSync<>(
@@ -184,9 +348,21 @@ public:
             ));
     }
 
+    /**
+     * @brief Asynchronously call a remote method and return a handle.
+     *
+     * @tparam Ret         expected return type (default void)
+     * @tparam TimeoutUsec optional timeout in microseconds (0 = default)
+     * @param aService     remote service name
+     * @param aPath        remote object path
+     * @param aIface       remote interface name
+     * @param aMethod      method name to invoke
+     * @param aArgs        call arguments
+     * @return PendingReply<Ret> handle for the in-flight call
+     */
     template<typename Ret=void, uint64_t TimeoutUsec=0, typename... Args,
         std::enable_if_t<!CallbackLikeFirstArg<Ret, Args...>::value, int> = 0>
-    PendingReply<Ret> callAsync(std::string_view aService, std::string_view aPath,
+    [[nodiscard]] PendingReply<Ret> callAsync(std::string_view aService, std::string_view aPath,
         std::string_view aIface, std::string_view aMethod, const Args&... aArgs) {
         static_assert((isValidArgs<Args>() && ...),
             "callAsync: arguments must be valid D-Bus types. If you meant a callback, "
@@ -199,9 +375,24 @@ public:
         ));
     }
 
+    /**
+     * @brief Asynchronously call a remote method with a completion callback.
+     *
+     * The callback must be callable as `void(Reply<Ret>)`.
+     *
+     * @tparam Ret         expected return type (default void)
+     * @tparam TimeoutUsec optional timeout in microseconds (0 = default)
+     * @param aService     remote service name
+     * @param aPath        remote object path
+     * @param aIface       remote interface name
+     * @param aMethod      method name to invoke
+     * @param aCallback    completion callback
+     * @param aArgs        call arguments
+     * @return Status indicating whether the call was dispatched
+     */
     template<typename Ret=void, uint64_t TimeoutUsec=0, typename Callback, typename... Args,
         std::enable_if_t<std::is_invocable_r_v<void, Callback, Reply<Ret>>, int> = 0>
-    Status callAsync(std::string_view aService, std::string_view aPath, std::string_view aIface,
+    [[nodiscard]] Status callAsync(std::string_view aService, std::string_view aPath, std::string_view aIface,
         std::string_view aMethod, Callback&& aCallback, const Args&... aArgs) {
         using Call = std::function<void(Reply<Ret>)>;
         auto rep = std::make_shared<PendingReply<Ret>>(
@@ -233,8 +424,18 @@ public:
         return rep->getStatus();
     }
 
+    /**
+     * @brief Subscribe to a signal and invoke `aCallback` on arrival.
+     *
+     * @param aSender   sender unique name to match (empty for any)
+     * @param aPath     object path to match
+     * @param aIface    interface name to match
+     * @param aSignal   signal name to listen for
+     * @param aCallback callback invoked on arrival
+     * @return Status of the subscription
+     */
     template<typename Callback>
-    Status listenSignal(std::string_view aSender,
+    [[nodiscard]] Status listenSignal(std::string_view aSender,
         std::string_view aPath, std::string_view aIface,
         std::string_view aSignal, Callback&& aCallback) {
         return Method::listenSignal(
@@ -243,8 +444,19 @@ public:
         );
     }
 
+    /**
+     * @brief Subscribe to a signal dispatched to a member function of `aCls`.
+     *
+     * @param aSender sender unique name to match (empty for any)
+     * @param aPath   object path to match
+     * @param aIface  interface name to match
+     * @param aSignal signal name to listen for
+     * @param aCls    receiver object
+     * @param aFunc   member function invoked on arrival
+     * @return Status of the subscription
+     */
     template<typename Cls, typename Ret, typename... Args>
-    Status listenSignal(std::string_view aSender,
+    [[nodiscard]] Status listenSignal(std::string_view aSender,
         std::string_view aPath, std::string_view aIface,
         std::string_view aSignal, Cls* aCls, Ret(Cls::*aFunc)(Args...)) {
         return Method::listenSignal(
@@ -255,16 +467,35 @@ public:
         );
     }
 
+    /**
+     * @brief Emit a signal with the given arguments.
+     *
+     * @param aPath   object path
+     * @param aIface  interface name
+     * @param aSignal signal name to emit
+     * @param aArgs   signal arguments
+     * @return Status of the emission
+     */
     template<typename... Args>
-    Status emitSignal(std::string_view aPath, std::string_view aIface,
+    [[nodiscard]] Status emitSignal(std::string_view aPath, std::string_view aIface,
         std::string_view aSignal, const Args&... aArgs) {
         return Method::emitSignal(
             mPrivate.get(), aPath, aIface, aSignal, aArgs...
         );
     }
 
+    /**
+     * @brief Read the current value of a locally registered property.
+     *
+     * @tparam T     property value type
+     * @param aPath  object path
+     * @param aIface interface name
+     * @param aName  property name
+     * @param aValue out-parameter receiving the value
+     * @return Status of the read
+     */
     template<typename T>
-    Status getLocalProperty(std::string_view aPath, std::string_view aIface,
+    [[nodiscard]] Status getLocalProperty(std::string_view aPath, std::string_view aIface,
         std::string_view aName, T& aValue) {
         auto p = getPropPrivate<T>(aPath, aIface, aName);
         if (!p) {
@@ -275,8 +506,18 @@ public:
         return Status(StatusCode::SUCCESS);
     }
 
+    /**
+     * @brief Write a new value to a locally registered property.
+     *
+     * @tparam T     property value type
+     * @param aPath  object path
+     * @param aIface interface name
+     * @param aName  property name
+     * @param aValue new value to write
+     * @return Status of the write
+     */
     template<typename T>
-    Status setLocalProperty(std::string_view aPath, std::string_view aIface,
+    [[nodiscard]] Status setLocalProperty(std::string_view aPath, std::string_view aIface,
         std::string_view aName, const T& aValue) {
         auto p = getPropPrivate<T>(aPath, aIface, aName);
         if (!p) {
@@ -287,8 +528,18 @@ public:
         return Status(StatusCode::SUCCESS);
     }
 
+    /**
+     * @brief Register a callback fired when a local property changes.
+     *
+     * @tparam T        property value type
+     * @param aPath     object path
+     * @param aIface    interface name
+     * @param aName     property name
+     * @param aCallback callback invoked with the new value
+     * @return Status of the registration
+     */
     template<typename T>
-    Status onLocalPropertyChanged(std::string_view aPath, std::string_view aIface,
+    [[nodiscard]] Status onLocalPropertyChanged(std::string_view aPath, std::string_view aIface,
         std::string_view aName, std::function<void(const T&)>&& aCallback) {
         auto p = getPropPrivate<T>(aPath, aIface, aName);
         if (!p) {
@@ -299,8 +550,18 @@ public:
         return Status(StatusCode::SUCCESS);
     }
 
+    /**
+     * @brief Fetch a remote property's value via `Properties.Get`.
+     *
+     * @tparam Ret     expected property type
+     * @param aService remote service name
+     * @param aPath    remote object path
+     * @param aIface   remote interface name
+     * @param aProp    property name
+     * @return Reply<Ret> carrying the property value or an error
+     */
     template<typename Ret>
-    Reply<Ret> getRemoteProperty(std::string_view aService, std::string_view aPath,
+    [[nodiscard]] Reply<Ret> getRemoteProperty(std::string_view aService, std::string_view aPath,
         std::string_view aIface, std::string_view aProp) {
         return Reply<Ret>(
             Method::getRemoteProperty(
@@ -308,15 +569,36 @@ public:
         ));
     }
 
+    /**
+     * @brief Set a remote property's value via `Properties.Set`.
+     *
+     * @tparam T       property value type
+     * @param aService remote service name
+     * @param aPath    remote object path
+     * @param aIface   remote interface name
+     * @param aProp    property name
+     * @param aValue   new value to write
+     * @return Status of the write
+     */
     template<typename T>
-    Status setRemoteProperty(std::string_view aService, std::string_view aPath,
+    [[nodiscard]] Status setRemoteProperty(std::string_view aService, std::string_view aPath,
         std::string_view aIface, std::string_view aProp, const T& aValue) {
         return Method::setRemoteProperty(
             mPrivate.get(), aService, aPath, aIface, aProp, aValue);
     }
 
+    /**
+     * @brief Subscribe to changes of a remote property (`PropertiesChanged`).
+     *
+     * @param aService  remote service name
+     * @param aPath     remote object path
+     * @param aIface    remote interface name
+     * @param aProp     property name to watch
+     * @param aCallback callback invoked with the new value
+     * @return Status of the subscription
+     */
     template<typename Callback>
-    Status onRemotePropertyChanged(std::string_view aService, std::string_view aPath,
+    [[nodiscard]] Status onRemotePropertyChanged(std::string_view aService, std::string_view aPath,
         std::string_view aIface, std::string_view aProp, Callback&& aCallback) {
         return Method::onRemotePropertyChanged(
             mPrivate.get(), aService, aPath, aIface, aProp, std::forward<Callback>(aCallback)

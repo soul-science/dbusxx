@@ -48,7 +48,7 @@ public:
 
     void triggerSignal(int a, int b) {
         std::cout << "[server] triggerSignal(" << a << ", " << b << ")" << std::endl;
-        emit("/com/example/ext", "com.example.External",
+        (void)emit("/com/example/ext", "com.example.External",
             "mySignal", a, b);
     }
     DBUSXX_METHOD(triggerSignal)
@@ -204,7 +204,7 @@ int main() {
             });
         TEST("onPropertyChanged register", st2.isSuccess());
 
-        c.setProperty<int32_t>("counter", 99);
+        (void)c.setProperty<int32_t>("counter", 99);
         propFlag.wait();
         TEST("onPropertyChanged fired", propNewVal == 99);
     }
@@ -274,7 +274,7 @@ int main() {
             });
         TEST("reconnect onPropertyChanged register", st.isSuccess());
 
-        c.setProperty<int32_t>("counter", 88);
+        (void)c.setProperty<int32_t>("counter", 88);
         propFlag2.wait();
         TEST("reconnect onPropertyChanged fired", newVal2 == 88);
     }

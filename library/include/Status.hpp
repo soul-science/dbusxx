@@ -6,39 +6,51 @@
 
 
 namespace Dbusxx {
+/**
+ * @brief Result codes returned by D-Bus operations.
+ *
+ * Values are grouped into categories: caller errors, connection errors,
+ * transport errors, D-Bus protocol errors and an unknown fallback.
+ */
 enum class StatusCode : uint8_t {
     SUCCESS = 0,
 
-    // --- 调用方错误 ---
-    INVALID_ARG,        // 参数无效
-    NOT_FOUND,          // 服务/对象/接口不存在
-    NO_SERVICE,         //! not found service
-    NO_METHOD,          //! not found method/interface/path
-    ACCESS_DENIED,      // 权限不足
-    NAME_EXISTS,        // 总线名已被占用
+    //! --- Caller errors ---
+    INVALID_ARG,        //!< Invalid argument
+    NOT_FOUND,          //!< Service/object/interface not found
+    NO_SERVICE,         //!< Service not found
+    NO_METHOD,          //!< Method not found (path/interface/method error)
+    ACCESS_DENIED,      //!< Insufficient permission
+    NAME_EXISTS,        //!< Bus name already taken
 
-    // --- 连接错误 ---
-    NOT_CONNECTED,      // 未连接到总线
-    CONN_RESET,         // 连接被重置
-    BUSY,               // 资源忙
+    //! --- Connection errors ---
+    NOT_CONNECTED,      //!< Not connected to the bus
+    CONN_RESET,         //!< Connection reset
+    BUSY,               //!< Resource busy
 
-    // --- 传输错误 ---
-    TIMEOUT,            // 调用超时
-    NO_MEMORY,          // 内存不足
-    NO_REPLY,           // 对方未回复
-    IO_ERROR,           // I/O 错误
-    MSG_TOO_LONG,       // 消息超长
-    LIMIT_EXCEEDED,     // 超出限制
+    //! --- Transport errors ---
+    TIMEOUT,            //!< Call timed out
+    NO_MEMORY,          //!< Out of memory
+    NO_REPLY,           //!< No reply received
+    IO_ERROR,           //!< I/O error
+    MSG_TOO_LONG,       //!< Message too long
+    LIMIT_EXCEEDED,     //!< Limit exceeded
 
-    // --- D-Bus 协议错误 ---
-    PROTOCOL_ERROR,     // 协议错误
-    TYPE_MISMATCH,
-    DISCONNECTED,       // 对端断开
+    //! --- D-Bus protocol errors ---
+    PROTOCOL_ERROR,     //!< Protocol error
+    TYPE_MISMATCH,      //!< Type mismatch
+    DISCONNECTED,       //!< Peer disconnected
 
-    // --- 未知 ---
-    UNKNOWN_ERROR       // 未知错误（兜底）
+    //! --- Unknown ---
+    UNKNOWN_ERROR       //!< Unknown error (fallback)
 };
 
+/**
+ * @brief Convert a status code into a human-readable message string.
+ *
+ * @param aCode status code
+ * @return message string
+ */
 inline constexpr const char* statusMessage(StatusCode aCode) {
     switch (aCode) {
         case StatusCode::SUCCESS:
@@ -86,27 +98,43 @@ inline constexpr const char* statusMessage(StatusCode aCode) {
     return "Unknown";
 }
 
+/**
+ * @brief Lightweight wrapper around a #StatusCode.
+ *
+ * Use `isSuccess()`/`isError()` to inspect the result instead of
+ * relying on implicit boolean conversion.
+ */
 class Status {
 public:
+    //! @brief Construct a successful status by default.
     Status() = default;
 
+    /**
+     * @brief Construct a status from the given code.
+     *
+     * @param aCode status code
+     */
     Status(StatusCode aCode)
         : mCode(aCode) {}
 
-    inline StatusCode code() const {
+    //! @brief Return the underlying result code.
+    [[nodiscard]] inline StatusCode code() const {
         return mCode;
     }
 
-    inline bool isSuccess() const {
+    //! @brief Return true if the operation succeeded.
+    [[nodiscard]] inline bool isSuccess() const {
         return mCode == StatusCode::SUCCESS;
     
     }
 
-    inline bool isError() const {
+    //! @brief Return true if the operation failed.
+    [[nodiscard]] inline bool isError() const {
         return mCode != StatusCode::SUCCESS;
     }
 
-    inline std::string message() const {
+    //! @brief Return a human-readable description of the result.
+    [[nodiscard]] inline std::string message() const {
         return statusMessage(mCode);
     }
 

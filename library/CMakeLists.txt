@@ -49,13 +49,18 @@ if(NOT SYSTEMD_FOUND)
 endif()
 
 # Include header file path
-target_include_directories(dbusxx PUBLIC
-    # Use header files from the source code directory during construction
-    $<BUILD_INTERFACE:${INCLUDES_DIR}>
-    # After installation, headers live in include/dbusxx/
-    $<INSTALL_INTERFACE:include/dbusxx>
-    # systemd headers
-    ${SYSTEMD_INCLUDE_DIRS}
+target_include_directories(dbusxx
+    PUBLIC
+        # Use header files from the source code directory during construction
+        $<BUILD_INTERFACE:${INCLUDES_DIR}>
+        # After installation, headers live in include/dbusxx/. Export two roots
+        # so both include styles work for consumers:
+        #   - `#include <dbusxx/Reply.hpp>`              -> needs the parent dir
+        #   - internal `"Status.hpp"` / `"private/..."`  -> needs the dbusxx dir
+        $<INSTALL_INTERFACE:include>
+        $<INSTALL_INTERFACE:include/dbusxx>
+        # systemd headers
+        ${SYSTEMD_INCLUDE_DIRS}
 )
 
 # Link to libraries
@@ -76,14 +81,11 @@ target_compile_options(dbusxx
 
 # Install .so to/usr/local/lib
 install(
-    TARGETS
-        dbusxx
+    TARGETS dbusxx
     # Export dbusxxTargets and store target usage information
-    EXPORT
-        dbusxxTargets
+    EXPORT dbusxxTargets
     # Installation location: /usr/local/lib
-    DESTINATION
-        lib
+    DESTINATION lib
 )
 
 # Install header files to /usr/local/include/dbusxx
@@ -97,14 +99,11 @@ install(
 # Install exported CMake Targets, enable 'find_package' to locate
 install(
     # Install dbusxxTargets.cmake
-    EXPORT
-        dbusxxTargets
+    EXPORT dbusxxTargets
     # Determine the export file for Target
-    FILE
-        dbusxxTargets.cmake
+    FILE dbusxxTargets.cmake
     # Installation location: /usr/local/lib/cmake/dbusxx
-    DESTINATION
-        lib/cmake/dbusxx
+    DESTINATION lib/cmake/dbusxx
 )
 
 # Introducing auxiliary functions -> configure_package_config_file
