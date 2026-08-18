@@ -1,0 +1,58 @@
+version: "1.0"
+name: 构建、部署到自有主机
+displayName: 构建、部署到自有主机
+stages:
+- name: 构建
+  displayName: 构建
+  strategy: naturally
+  trigger: auto
+  steps:
+  - step: build@gcc
+    name: ""
+    displayName: GCC 构建
+    gccVersion: "9.4"
+    commands:
+    - sudo apt install cmake g++ pkg-config libsystemd-dev
+    - ""
+    - '# Release'
+    - cmake -S . -B build-release -DCMAKE_BUILD_TYPE=Release
+    - cmake --build build-release
+    - ""
+    - '# 安装（建议使用 Release 构建）'
+    - sudo cmake --install build-release
+    artifacts:
+    - name: BUILD_ARTIFACT
+      path:
+      - ./bin
+      type: .tar.gz
+    strategy:
+      retry: "0"
+      resource:
+        cpu: "2"
+        memory: "4"
+- name: 部署
+  displayName: 部署
+  strategy: naturally
+  trigger: auto
+  steps:
+  - step: release@gitee
+    name: c1c76b0e
+    displayName: Gitee Release
+    releaseName: sdbusxx
+    description: sdbusxx
+    tagName: master
+    upstreamArtifact:
+    - BUILD_ARTIFACT
+    assertFiles: []
+    prerelease: false
+    allowUpdate: true
+    strategy:
+      retry: "0"
+      resource:
+        cpu: "2"
+        memory: "4"
+triggers:
+  trigger: manual
+notify: []
+strategy:
+  blocking: true
