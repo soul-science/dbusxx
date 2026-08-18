@@ -12,7 +12,7 @@ stages:
     displayName: GCC 构建
     gccVersion: "9.4"
     commands:
-    - sudo apt install cmake g++ pkg-config libsystemd-dev
+    - apt install cmake g++ pkg-config libsystemd-dev
     - ""
     - '# Release'
     - cmake -S . -B build-release -DCMAKE_BUILD_TYPE=Release
