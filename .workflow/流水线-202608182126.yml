@@ -12,15 +12,12 @@ stages:
     displayName: GCC 构建
     gccVersion: "15.2"
     commands:
-    - sudo apt-get update
-    - sudo apt-get install -y cmake g++ pkg-config libsystemd-dev
+    - apt-get update
+    - apt-get install -y cmake g++ pkg-config libsystemd-dev
     - ""
     - '# Release'
     - cmake -S . -B build-release -DCMAKE_BUILD_TYPE=Release
     - cmake --build build-release
-    - ""
-    - '# 安装（建议使用 Release 构建）'
-    - sudo cmake --install build-release
     artifacts:
     - name: BUILD_ARTIFACT
       path:
