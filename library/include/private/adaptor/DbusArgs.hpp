@@ -3,6 +3,7 @@
 #define DBUSXX_DBUS_ARGS_HPP
 
 #include <array>
+#include <cstdint>
 #include <map>
 #include <unordered_map>
 #include <string>
