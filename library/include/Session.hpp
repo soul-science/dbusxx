@@ -2,7 +2,14 @@
 #ifndef DBUSXX_DBUS_SESSION_HPP
 #define DBUSXX_DBUS_SESSION_HPP
 
+#include <algorithm>
+#include <cstdint>
+#include <functional>
 #include <memory>
+#include <string>
+#include <string_view>
+#include <type_traits>
+#include <utility>
 #include <vector>
 
 #include "private/method/Method.hpp"

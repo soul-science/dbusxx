@@ -1,6 +1,7 @@
 #ifndef DBUSXX_UTILS_HPP
 #define DBUSXX_UTILS_HPP
 
+#include <cstdint>
 #include <unistd.h>
 
 

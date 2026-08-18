@@ -5,6 +5,8 @@
 #include <future>
 #include <memory>
 #include <mutex>
+#include <string>
+#include <utility>
 
 #include "private/message/MessagePrivate.hpp"
 #include "private/message/ReplyAsyncHandler.hpp"

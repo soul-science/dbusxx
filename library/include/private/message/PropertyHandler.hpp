@@ -1,9 +1,11 @@
 #ifndef DBUSXX_PROPERTY_HANDLER_HPP
 #define DBUSXX_PROPERTY_HANDLER_HPP
 
+#include <functional>
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <tuple>
 
 #include "private/adaptor/DbusArgs.hpp"
 #include "private/adaptor/RawCommon.hpp"

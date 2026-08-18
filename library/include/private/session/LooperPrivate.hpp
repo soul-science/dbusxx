@@ -1,10 +1,13 @@
 #ifndef DBUSXX_LOOPER_PRIVATE_HPP
 #define DBUSXX_LOOPER_PRIVATE_HPP
 
+#include <cstdint>
 #include <deque>
 #include <functional>
 #include <mutex>
 #include <thread>
+#include <type_traits>
+#include <utility>
 
 #include "private/adaptor/RawEventSharePtr.hpp"
 #include "private/adaptor/RawSlotSharePtr.hpp"

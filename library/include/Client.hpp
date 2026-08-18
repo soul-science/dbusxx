@@ -1,11 +1,14 @@
 #ifndef DBUSXX_CLIENT_HPP
 #define DBUSXX_CLIENT_HPP
 
+#include <cstdint>
 #include <memory>
 #include <future>
 #include <string>
 #include <string_view>
 #include <thread>
+#include <tuple>
+#include <utility>
 
 #include "Looper.hpp"
 #include "Session.hpp"

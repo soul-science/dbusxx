@@ -1,6 +1,7 @@
 #ifndef DBUSXX_VTABLE_REGISTRAR_HPP
 #define DBUSXX_VTABLE_REGISTRAR_HPP
 
+#include <cstdint>
 #include <memory>
 #include <string>
 #include <string_view>

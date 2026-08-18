@@ -1,5 +1,7 @@
 #include "private/adaptor/RawBusSharePtr.hpp"
 
+#include <cstring>
+
 #include "private/adaptor/RawRemoteError.hpp"
 
 

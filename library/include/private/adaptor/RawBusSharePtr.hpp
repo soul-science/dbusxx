@@ -3,10 +3,10 @@
 
 #include "private/adaptor/RawCommon.hpp"
 
+#include <cstdint>
 #include <sys/un.h>
 #include <sys/socket.h>
 #include <unistd.h>
-#include <cstring>
 
 
 namespace Dbusxx {

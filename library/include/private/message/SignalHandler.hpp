@@ -1,6 +1,8 @@
 #ifndef DBUSXX_SIGNAL_HANDLER_HPP
 #define DBUSXX_SIGNAL_HANDLER_HPP
 
+#include <tuple>
+
 #include "private/adaptor/RawCommon.hpp"
 #include "private/adaptor/DbusArgs.hpp"
 #include "private/method/FunctionTrait.hpp"

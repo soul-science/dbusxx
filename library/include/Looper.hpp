@@ -2,6 +2,8 @@
 #define DBUSXX_LOOPER_HPP
 
 #include <functional>
+#include <memory>
+#include <utility>
 
 #include "private/session/LooperPrivate.hpp"
 

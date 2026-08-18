@@ -1,6 +1,8 @@
 #ifndef DBUSXX_RAW_EVENT_SHARE_PTR_HPP
 #define DBUSXX_RAW_EVENT_SHARE_PTR_HPP
 
+#include <cstdint>
+
 #include "private/adaptor/RawCommon.hpp"
 #include "private/adaptor/RawRemoteError.hpp"
 

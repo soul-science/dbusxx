@@ -1,6 +1,9 @@
 #ifndef DBUSXX_DBUS_REPLY_HPP
 #define DBUSXX_DBUS_REPLY_HPP
 
+#include <string>
+#include <utility>
+
 #include "Message.hpp"
 
 

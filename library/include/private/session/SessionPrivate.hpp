@@ -1,6 +1,7 @@
 #ifndef DBUSXX_SESSION_PRIVATE_HPP
 #define DBUSXX_SESSION_PRIVATE_HPP
 
+#include <cstdint>
 #include <string>
 #include <string_view>
 #include <functional>
@@ -9,6 +10,8 @@
 #include <sys/un.h>
 #include <unistd.h>
 #include <unordered_map>
+#include <utility>
+#include <vector>
 
 #include "private/adaptor/RawCommon.hpp"
 #include "private/adaptor/RawSlotSharePtr.hpp"

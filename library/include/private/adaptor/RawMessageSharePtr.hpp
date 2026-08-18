@@ -1,6 +1,8 @@
 #ifndef DBUSXX_RAW_MESSAGE_SHARE_PTR_HPP
 #define DBUSXX_RAW_MESSAGE_SHARE_PTR_HPP
 
+#include <cstdint>
+
 #include "private/adaptor/RawCommon.hpp"
 #include "private/adaptor/RawRemoteError.hpp"
 

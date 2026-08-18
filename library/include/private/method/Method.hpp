@@ -1,11 +1,14 @@
 #ifndef DBUSXX_DBUS_METHOD_HPP
 #define DBUSXX_DBUS_METHOD_HPP
 
+#include <cstdint>
 #include <functional>
 #include <memory>
 #include <string>
 #include <string_view>
 #include <tuple>
+#include <typeindex>
+#include <utility>
 
 #include "private/adaptor/RawRemoteError.hpp"
 #include "private/message/MessagePrivate.hpp"
