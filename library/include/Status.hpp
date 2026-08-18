@@ -2,6 +2,7 @@
 #ifndef DBUSXX_DBUS_RETURN_STATUS_HPP
 #define DBUSXX_DBUS_RETURN_STATUS_HPP
 
+#include <cstdint>
 #include <string>
 
 
