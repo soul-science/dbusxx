@@ -15,8 +15,10 @@ stages:
     - apt-get update
     - apt-get install -y cmake g++ pkg-config libsystemd-dev
     - ""
-    - '# Release'
-    - cmake -S . -B build-release -DCMAKE_BUILD_TYPE=Release
+    - rm -rf build-release
+    - ""
+    - cmake -S . -B build-release -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_STANDARD=17
+      -DCMAKE_CXX_STANDARD_REQUIRED=ON
     - cmake --build build-release
     artifacts:
     - name: BUILD_ARTIFACT
