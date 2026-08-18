@@ -23,7 +23,7 @@ stages:
     artifacts:
     - name: BUILD_ARTIFACT
       path:
-      - ./bin
+      - ./build-release
       type: .tar.gz
     strategy:
       retry: "0"
