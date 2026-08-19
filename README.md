@@ -6,23 +6,31 @@
 
 ## 介绍
 
-dbusxx 是面向 Linux 的现代 C++ D-Bus 库，目标是在现代 C++ 中提供表达力强、易于使用的 API。它在 systemd 的 sd-bus——一套简洁的 C 语言 D-Bus 实现——之上增加了一层抽象。
+dbusxx 是一个面向 Linux 的 C++17 D-Bus 库，让你用几行代码就能在不同进程之间通信——无论是暴露自己的服务，还是调用别人的接口。
 
-dbusxx 的设计避开了直接操作 sd-bus C API 的繁琐与易错之处，选择了一条简单而强大的路线：以类型安全、直观友好的方式封装 D-Bus 的常用操作，从设计上规避了消息、vtable、句柄等底层细节带来的常见问题。
+用它你可以：
 
-dbusxx 虽然基于 sd-bus，但并不局限于 systemd 环境——sd-bus 本身是通用的 D-Bus 库，只要系统提供 libsystemd（主流发行版均有），非 systemd 环境下同样可以使用。
+- **几行代码暴露服务**：继承 `Server<Derived>`，给成员函数加一个宏，方法、信号、属性就注册到总线上了；
+- **像调本地函数一样调远端**：一个 `Client` 对象就代表远端服务，同步 `callSync` / 异步 `callAsync` 随意选；
+- **直接传你想传的数据**：基础类型、`std::string`、容器，甚至自定义结构体，都能作为参数/返回值，自动编解码；
+- **收发信号、读写属性**：类型安全的信号回调、属性 get/set 和变更监听都已封装好。
+
+你只需要写业务代码——D-Bus 签名、消息、句柄、事件循环这些底层细节都由库处理。
+
+适用场景：桌面/嵌入式应用的进程间通信、系统服务间的 IPC、与现有 D-Bus 服务（systemd、NetworkManager 等）交互。只要系统带 libsystemd（主流发行版都有），不依赖 systemd 环境也能用。
 
 主要优势：
 
 - **类型安全**：参数/返回值/信号/属性都是真实 C++ 类型，编译期校验，不用手写 D-Bus 签名
+- **数据随心传**：基础类型、`std::string`、容器，甚至自定义结构体都能直接作为参数/返回值，自动编解码
 - **写法直接**：服务端 `Server<Derived>` + 宏标注即可暴露接口；客户端一个 `Client` 对象就指向远端服务
 - **覆盖完整**：系统/用户/点对点三种连接，方法、信号、属性（含远端属性）、事件循环、断线重连
-- **资源省心**：sd-bus 句柄全部 RAII 管理，不泄漏
-- **依赖少**：只依赖 libsystemd
+- **资源省心**：资源全部自动管理，不泄漏
+- **依赖少**：只需系统自带 libsystemd
 
 ## 特性
 
-- 方法参数/返回值、信号、属性都用模板在编译期校验，支持基础类型、`std::string`、`std::vector`、`std::array`、`std::map`、`std::tuple`
+- 方法参数/返回值、信号、属性都用模板在编译期校验，支持基础类型、`std::string`、`std::vector`、`std::array`、`std::map`、`std::tuple`，以及任意**自定义聚合体结构体**（自动生成 `(...)` 签名，字段自动展开，嵌套/容器递归）
 - 支持系统总线、用户总线、点对点（peer，不需要 bus daemon）三种连接
 - 同步调用 `callSync` / 异步调用 `callAsync`，超时通过模板参数指定（微秒）
 - 服务端用 `Server<Derived>` + 反射宏（`DBUSXX_METHOD` / `DBUSXX_SIGNAL` / `DBUSXX_PROPERTY_*`）注册，也可以直接用 `Session::registerMethod` 或 `RegisterBuilder`
@@ -107,6 +115,8 @@ int main() {
 #include <dbusxx/Looper.hpp>
 #include <dbusxx/Session.hpp>
 
+#include <iostream>
+
 using namespace Dbusxx;
 
 int main() {
@@ -147,21 +157,111 @@ int main() {
 
 ```cpp
 #include <dbusxx/Session.hpp>
+#include <dbusxx/Looper.hpp>
+
+#include <chrono>
+#include <iostream>
+#include <thread>
 
 using namespace Dbusxx;
 
+// Session 是单线程的：注册方法需要事件循环来派发，调用需要能收回复，
+// 两者必须使用两个独立连接（一个 serve、一个 call）。
 int main() {
-    Session s = Session::userSession("com.example.Calc");
-
-    // 注册方法（任意可调用对象）
-    (void)s.registerMethod("/com/example/calc", "com.example.Calc", "add",
+    // 连接 A：注册方法 + 事件循环（服务端）
+    Session server = Session::userSession("com.example.Calc");
+    (void)server.registerMethod("/com/example/calc", "com.example.Calc", "add",
         [](int32_t a, int32_t b) -> int32_t { return a + b; });
 
-    // 调用远端方法
-    auto r = s.callSync<int32_t>(
+    Looper looper(server);
+    std::thread t([&looper] { looper.run(); });
+    std::this_thread::sleep_for(std::chrono::milliseconds(300));
+
+    // 连接 B：调用远端方法（独立连接）
+    Session client = Session::userSession();
+    auto r = client.callSync<int32_t>(
         "com.example.Calc", "/com/example/calc", "com.example.Calc", "add",
         20, 22);
-    std::cout << r.value() << std::endl;
+    std::cout << r.value() << std::endl;   // 42
+
+    looper.stop();
+    t.join();
+    return 0;
+}
+```
+
+### 自定义结构体
+
+聚合体结构体可直接用作方法参数/返回值、信号参数，字段自动映射为 D-Bus 结构体，无需额外注册：
+
+```cpp
+#include <dbusxx/Server.hpp>
+#include <dbusxx/Client.hpp>
+
+#include <chrono>
+#include <iostream>
+#include <string>
+#include <thread>
+#include <vector>
+
+using namespace Dbusxx;
+
+// 自定义结构体（聚合体，字段按声明顺序映射到 D-Bus 结构体）
+struct Point {
+    int32_t x;
+    int32_t y;
+};
+
+struct Person {
+    std::string              name;
+    int32_t                  age;
+    std::vector<std::string> tags;   // 字段本身可以是容器
+};
+
+class GeoServer : public Server<GeoServer> {
+public:
+    GeoServer() : Server("com.example.Geo") {}
+
+    DBUSXX_PATH("/com/example/geo")
+    DBUSXX_IFACE("com.example.Geo")
+
+    Point addPoint(const Point& p, const Point& q) {
+        return Point { p.x + q.x, p.y + q.y };
+    }
+    DBUSXX_METHOD(addPoint)
+
+    Person echoPerson(const Person& p) { return p; }
+    DBUSXX_METHOD(echoPerson)
+
+    std::vector<Point> echoPoints(const std::vector<Point>& pts) { return pts; }
+    DBUSXX_METHOD(echoPoints)
+};
+
+int main() {
+    GeoServer server;
+    std::thread serverThread([&server] { server.run(); });
+    std::this_thread::sleep_for(std::chrono::milliseconds(300));
+
+    Client c(SessionType::USER, "com.example.Geo",
+             "/com/example/geo", "com.example.Geo");
+
+    // 结构体出入参
+    auto r = c.callSync<Point>("addPoint", Point { 3, 4 }, Point { 5, 6 });
+    std::cout << "addPoint = (" << r.value().x << ", " << r.value().y << ")\n"; // (8, 10)
+
+    // 混合字段结构体 + 容器字段
+    auto r2 = c.callSync<Person>("echoPerson",
+        Person { "alice", 30, { "a", "b" } });
+    std::cout << "echoPerson = " << r2.value().name << ", " << r2.value().age << "\n";
+
+    // 结构体数组
+    auto r3 = c.callSync<std::vector<Point>>("echoPoints",
+        std::vector<Point> { { 1, 1 }, { 2, 2 } });
+    std::cout << "echoPoints size = " << r3.value().size() << "\n";
+
+    server.stop();
+    serverThread.join();
+    return 0;
 }
 ```
 
@@ -209,6 +309,23 @@ int main() {
 | `std::map<K, V>` / `std::unordered_map<K, V>` | `a{<sig(K)><sig(V)>}` | 字典（如 `std::map<std::string, int32_t>` → `a{si}`） |
 | `std::tuple<Args...>` | 逐元素展开 | 仅 `Message` 流式 `read`/`write` 支持一次操作多值，**不能**作为方法参数/返回值类型 |
 
+### 自定义结构体（聚合体）
+
+任意满足以下条件的自定义 `struct` 可直接作为方法参数/返回值、信号参数，**无需任何注册**：
+
+- 是**聚合体**（无用户提供的构造函数、无虚函数、无 private/protected 非静态数据成员）
+- 所有成员本身也是受支持的类型（基础类型、容器、嵌套结构体）
+- 成员数不超过 20
+
+字段按声明顺序映射为 D-Bus 结构体 `(…)`，全部在编译期自动完成：
+
+| C++ 类型 | D-Bus 签名 | 说明 |
+|---|---|---|
+| `struct Point { int32_t x; int32_t y; }` | `(ii)` | 两字段 |
+| `struct Person { std::string name; int32_t age; bool vip; }` | `(sib)` | 混合字段 |
+| `std::vector<Point>` | `a(ii)` | 结构体数组 |
+| `struct Rect { Point a; Point b; }` | `((ii)(ii))` | 结构体套结构体 |
+
 几点说明：
 
 - 容器可以嵌套，比如 `std::vector<std::vector<int32_t>>` → `aai`
@@ -236,7 +353,7 @@ int main() {
 | `example_server` | `Server<Derived>` 的完整用法：方法、信号、属性、同步/异步、跨线程 emit |
 | `example_session` | 直接用 `Session` 的完整流程 |
 | `example_register` | `registerMethod` / `registerSignal` 支持的各种可调用类型 |
-| `example_client_internal` | `Client` 自管模式 |
+| `example_client_internal` | `Client` 自管模式（含自定义结构体往返测试 Step 8.5） |
 | `example_client_external` | `Client` + 外部 `Looper` 模式 |
 | `example_peer` | 点对点连接（peer server + client）全流程 |
 | `example_install` | 验证安装产物能否被独立项目使用（`find_package(dbusxx)`） |
