@@ -4,9 +4,10 @@
 #include <tuple>
 
 #include "private/adaptor/RawCommon.hpp"
-#include "private/adaptor/DbusArgs.hpp"
 #include "private/method/FunctionTrait.hpp"
 #include "private/message/MessagePrivate.hpp"
+
+#include "Args.hpp"
 
 
 namespace Dbusxx {

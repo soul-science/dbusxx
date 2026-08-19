@@ -22,6 +22,18 @@
 
 using namespace Dbusxx;
 
+// ── 自定义结构体（struct 往返测试）────────────────────────────────────
+
+struct Point {
+    int32_t x;
+    int32_t y;
+};
+
+struct Person {
+    std::string name;
+    int32_t age;
+};
+
 // ── 服务端（同 example_server.cpp，供 Client 测试）─────────────────────
 
 class DemoServer : public Server<DemoServer> {
@@ -52,6 +64,26 @@ public:
         std::cout << "[server] testMultiArgs: i=" << i << ", s=" << s << std::endl;
     }
     DBUSXX_METHOD(testMultiArgs)
+
+    // ── 自定义结构体方法 ─────────────────────────────────────────────
+    Point addPoint(const Point& p, const Point& q) {
+        std::cout << "[server] addPoint: (" << p.x << "," << p.y << ") + ("
+                  << q.x << "," << q.y << ")" << std::endl;
+        return Point { p.x + q.x, p.y + q.y };
+    }
+    DBUSXX_METHOD(addPoint)
+
+    Person echoPerson(const Person& p) {
+        std::cout << "[server] echoPerson: " << p.name << ", " << p.age << std::endl;
+        return p;
+    }
+    DBUSXX_METHOD(echoPerson)
+
+    std::vector<Point> echoPointList(const std::vector<Point>& pts) {
+        std::cout << "[server] echoPointList size=" << pts.size() << std::endl;
+        return pts;
+    }
+    DBUSXX_METHOD(echoPointList)
 
     void triggerClear(int a, int b) {
         std::cout << "[server] triggerClear(" << a << ", " << b << ")" << std::endl;
@@ -301,6 +333,44 @@ int main() {
         asyncDone.wait();
         TEST("async call received", asyncDone.get());
         TEST("async call echo", asyncResult == "async-hello");
+    }
+
+    // ⑧.⑤ 自定义结构体往返 — struct 出入参 / 容器嵌套
+    std::cout << "\n=== Step 8.5: custom struct round-trip ===" << std::endl;
+    std::cout << "  sig Point     = " << getSignature<Point>() << std::endl;
+    std::cout << "  sig Person    = " << getSignature<Person>() << std::endl;
+    std::cout << "  sig Vec<Point> = " << getSignature<std::vector<Point>>() << std::endl;
+    {
+        auto r = c.callSync<Point>("addPoint", Point { 3, 4 }, Point { 5, 6 });
+        if (r.isError()) {
+            std::cout << "  [addPoint] CALL ERROR: " << r.errorMessage() << std::endl;
+        } else {
+            std::cout << "  [addPoint] got (" << r.value().x << ", " << r.value().y << ")" << std::endl;
+        }
+        TEST("addPoint (3,4)+(5,6)==(8,10)",
+            !r.isError() && r.value().x == 8 && r.value().y == 10);
+    }
+    {
+        auto r = c.callSync<Person>("echoPerson", Person { "alice", 30 });
+        if (r.isError()) {
+            std::cout << "  [echoPerson] CALL ERROR: " << r.errorMessage() << std::endl;
+        } else {
+            std::cout << "  [echoPerson] got (" << r.value().name << ", " << r.value().age << ")" << std::endl;
+        }
+        TEST("echoPerson round-trip",
+            !r.isError() && r.value().name == "alice" && r.value().age == 30);
+    }
+    {
+        std::vector<Point> in { { 1, 1 }, { 2, 2 } };
+        auto r = c.callSync<std::vector<Point>>("echoPointList", in);
+        if (r.isError()) {
+            std::cout << "  [echoPointList] CALL ERROR: " << r.errorMessage() << std::endl;
+        } else {
+            std::cout << "  [echoPointList] got size=" << r.value().size() << std::endl;
+        }
+        TEST("echoPointList round-trip",
+            !r.isError() && r.value().size() == 2
+                && r.value()[0].x == 1 && r.value()[1].y == 2);
     }
 
     // ⑨ 关闭服务

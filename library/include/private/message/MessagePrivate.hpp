@@ -9,7 +9,7 @@
 
 #include "private/adaptor/RawCommon.hpp"
 #include "private/adaptor/RawMessageSharePtr.hpp"
-#include "private/adaptor/DbusArgs.hpp"
+#include "Args.hpp"
 #include "Status.hpp"
 
 
@@ -169,6 +169,21 @@ public:
 
             st = Adaptor::RawMessage::exitContainer(mRawMsg.get());
         }
+        else if constexpr (isStructV<rawType>) {
+            st = Adaptor::RawMessage::enterContainer(
+                mRawMsg.get(), SD_BUS_TYPE_STRUCT, nullptr);
+            if (st.isError()) {
+                return st;
+            }
+
+            auto fields = tie_as_tuple(aVal);
+            st = read(fields);
+            if (st.isError()) {
+                return st;
+            }
+
+            st = Adaptor::RawMessage::exitContainer(mRawMsg.get());
+        }
         else {
             st = Adaptor::RawMessage::popBasic(
                 mRawMsg.get(), BasicSignature<rawType>::value, aVal);
@@ -299,6 +314,28 @@ public:
 
             st = Adaptor::RawMessage::closeContainer(mRawMsg.get());
         }
+        else if constexpr (isStructV<rawType>) {
+            //! sd-bus's open_container for a STRUCT requires the *member* signature,
+            //! i.e. the outermost parentheses stripped.
+            //! E.g. for `struct Point { int32_t x; int32_t y; }`:
+            //!   getSignature<Point>() is "(ii)" but open_container expects "ii".
+            //! Passing nullptr yields -EINVAL and aborts the write
+            //! (vector/map likewise pass element / dict-entry sigs).
+            std::string memberSig = getSignature<rawType>();
+            memberSig = memberSig.substr(1, memberSig.size() - 2);
+            st = Adaptor::RawMessage::openContainer(
+                mRawMsg.get(), SD_BUS_TYPE_STRUCT, memberSig.c_str());
+            if (st.isError()) {
+                return st;
+            }
+
+            st = write(tie_as_tuple(aVal));
+            if (st.isError()) {
+                return st;
+            }
+
+            st = Adaptor::RawMessage::closeContainer(mRawMsg.get());
+        }
         else {
             st = Adaptor::RawMessage::appendBasic(
                 mRawMsg.get(), BasicSignature<rawType>::value, &aVal);
@@ -315,6 +352,18 @@ public:
         }
 
         return write(aRests...);
+    }
+
+    template<typename... Args>
+    Status write(const std::tuple<Args...>& aVals) {
+        Status status;
+        [&]<size_t... Idx>(std::index_sequence<Idx...> ) {
+            //! Short-circuit fold: stop reading on the first failure while
+            //! keeping the last Status. The fold result is consumed to
+            //! (void) on Status::isSuccess().
+            (void)((status = write(std::get<Idx>(aVals))).isSuccess() && ...);
+        }(std::make_index_sequence<sizeof...(Args)>{});
+        return status;
     }
 
     std::string getSender() const;

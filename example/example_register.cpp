@@ -7,10 +7,13 @@
 #include "Session.hpp"
 #include "Looper.hpp"
 
+#include <cctype>
+#include <cstdint>
 #include <functional>
 #include <iostream>
 #include <string>
 #include <thread>
+#include <vector>
 
 using namespace Dbusxx;
 
@@ -25,6 +28,39 @@ static void staticVoid() {
     std::cout << "[static] staticVoid" << std::endl;
 }
 
+struct ExStruct {
+    int a;
+    std::string b;
+};
+
+struct Point {
+    int32_t x;
+    int32_t y;
+};
+
+static void staticStruct(ExStruct aStruct) {
+    std::cout << "[static] staticStruct(" << aStruct.a << ", " << aStruct.b << ")" << std::endl;
+}
+
+//! struct 作为入参 + 返回值（回显）
+static ExStruct echoStruct(const ExStruct& s) {
+    std::cout << "[static] echoStruct(" << s.a << ", " << s.b << ")" << std::endl;
+    return s;
+}
+
+//! vector<Struct> 作为入参 + 返回值
+static std::vector<ExStruct> echoStructList(const std::vector<ExStruct>& v) {
+    std::cout << "[static] echoStructList size=" << v.size() << std::endl;
+    return v;
+}
+
+//! 多个 struct 参数，返回聚合结果
+static Point addPoints(const Point& p, const Point& q) {
+    std::cout << "[static] addPoints(" << p.x << "," << p.y << ") + ("
+              << q.x << "," << q.y << ")" << std::endl;
+    return Point { p.x + q.x, p.y + q.y };
+}
+
 // ── 2. 成员函数类（普通类，不继承 MetaObject）────────────────────────────
 
 class Calc {
@@ -36,6 +72,15 @@ public:
 
     void greet(const std::string& name) {
         std::cout << "[member] greet: Hello, " << name << "!" << std::endl;
+    }
+
+    //! struct 入参 + 返回，内部改写字段
+    ExStruct toUpperStruct(ExStruct s) {
+        for (auto& c : s.b) {
+            c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+        }
+        std::cout << "[member] toUpperStruct -> " << s.a << ", " << s.b << std::endl;
+        return s;
     }
 };
 
@@ -52,6 +97,11 @@ int main() {
         "/com/example/register", "com.example.Register",
         "staticAdd", staticAdd);
     std::cout << "register staticAdd: " << st.message() << std::endl;
+
+    st = session.registerMethod(
+        "/com/example/register", "com.example.Register",
+        "staticStruct", staticStruct);
+    std::cout << "register ExStruct: " << st.message() << std::endl;
 
     st = session.registerMethod(
         "/com/example/register", "com.example.Register",
@@ -99,6 +149,27 @@ int main() {
         "stdFnUpper", fnUpper);
     std::cout << "register stdFnUpper: " << st.message() << std::endl;
 
+    // ── 注册自定义结构体方法（验证 registerMethod 接受 struct 类型）──
+    st = session.registerMethod(
+        "/com/example/register", "com.example.Register",
+        "echoStruct", echoStruct);
+    std::cout << "register echoStruct: " << st.message() << std::endl;
+
+    st = session.registerMethod(
+        "/com/example/register", "com.example.Register",
+        "echoStructList", echoStructList);
+    std::cout << "register echoStructList: " << st.message() << std::endl;
+
+    st = session.registerMethod(
+        "/com/example/register", "com.example.Register",
+        "addPoints", addPoints);
+    std::cout << "register addPoints: " << st.message() << std::endl;
+
+    st = session.registerMethod(
+        "/com/example/register", "com.example.Register",
+        "toUpperStruct", &calc, &Calc::toUpperStruct);
+    std::cout << "register toUpperStruct(member ptr): " << st.message() << std::endl;
+
     // ── 注册信号 ─────────────────────────────────────────────────────
     st = session.registerSignal<int64_t, std::string>(
         "/com/example/register", "com.example.Register", "onResult");
@@ -107,6 +178,16 @@ int main() {
     st = session.registerSignal<>(
         "/com/example/register", "com.example.Register", "onTick");
     std::cout << "registerSignal(onTick): " << st.message() << std::endl;
+
+    st = session.registerSignal<ExStruct>(
+        "/com/example/register", "com.example.Register", "onStruct");
+    std::cout << "registerSignal(onStruct): " << st.message() << std::endl;
+
+    // ── 签名验证（注册的副产品：struct 萃取是否正确）────────────────
+    std::cout << "signature ExStruct      = " << getSignature<ExStruct>() << std::endl;
+    std::cout << "signature Point         = " << getSignature<Point>() << std::endl;
+    std::cout << "signature Vec<ExStruct> = "
+              << getSignature<std::vector<ExStruct>>() << std::endl;
 
     // ── 启动事件循环 ─────────────────────────────────────────────────
     Looper looper(session);
