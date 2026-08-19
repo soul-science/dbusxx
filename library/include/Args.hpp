@@ -1,14 +1,16 @@
 
-#ifndef DBUSXX_DBUS_ARGS_HPP
-#define DBUSXX_DBUS_ARGS_HPP
+#ifndef DBUSXX_ARGS_HPP
+#define DBUSXX_ARGS_HPP
 
 #include <array>
 #include <cstdint>
 #include <map>
-#include <unordered_map>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <type_traits>
+#include <unordered_map>
+#include <utility>
 #include <vector>
 
 
@@ -38,7 +40,7 @@ struct fields_count<T, 0, void> {
 };
 
 template<typename T>
-constexpr std::size_t fields_count_v = fields_count<T, 32>::value; 
+constexpr std::size_t fields_count_v = fields_count<T, 20>::value; 
 
 //! ------------------------------------------------------------------
 //! tie_as_tuple overloads are macro-generated so the field-count limit
