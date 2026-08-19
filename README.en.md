@@ -6,23 +6,31 @@ A C++17 D-Bus library for Linux, built on systemd's sd-bus.
 
 ## Introduction
 
-dbusxx is a modern C++ D-Bus library for Linux, aiming to provide an expressive, easy-to-use API in modern C++. It adds a layer of abstraction on top of sd-bus, systemd's concise C implementation of D-Bus.
+dbusxx is a C++17 D-Bus library for Linux that lets you communicate between processes with just a few lines of code — whether you're exposing your own service or calling someone else's interface.
 
-dbusxx avoids the verbose, error-prone way of working directly with the sd-bus C API, and instead follows a simple yet powerful design: D-Bus operations are wrapped in a type-safe, intuitive way, sidestepping the common pitfalls around messages, vtables and handles.
+With it you can:
 
-Although dbusxx builds on sd-bus, it is not tied to systemd — sd-bus is a general-purpose D-Bus library, and dbusxx works fine in non-systemd environments as long as libsystemd is available (as it is on most mainstream distributions).
+- **Expose a service in a few lines**: inherit `Server<Derived>` and add a macro to each member function; methods, signals and properties are registered on the bus.
+- **Call remote code like local code**: a single `Client` object represents the remote service; choose sync `callSync` or async `callAsync`.
+- **Pass the data you actually use**: basic types, `std::string`, containers, even custom structs work directly as arguments/return values with automatic (de)serialization.
+- **Send/receive signals, read/write properties**: type-safe signal callbacks and property get/set with change notifications are already wrapped.
+
+You only write business code — D-Bus signatures, messages, handles and the event loop are all handled by the library.
+
+Use cases: inter-process communication in desktop/embedded apps, IPC between system services, and talking to existing D-Bus services such as systemd or NetworkManager. As long as libsystemd is available (it is on most mainstream distributions), you don't need to be on systemd to use it.
 
 Key advantages:
 
 - **Type safety**: method arguments, return values, signals and properties are real C++ types, checked at compile time. No hand-written D-Bus signatures.
+- **Pass the data you use**: basic types, `std::string`, containers and even custom structs work directly as arguments/return values with automatic (de)serialization.
 - **Expressive API**: expose interfaces by inheriting `Server<Derived>` and annotating member functions with macros; a single `Client` object points at a remote service.
 - **Full coverage**: system bus, session bus and peer-to-peer connections; methods, signals, properties (including remote properties), event loop and automatic reconnection.
-- **No resource leaks**: all sd-bus handles are managed with RAII.
-- **Minimal dependencies**: depends only on libsystemd.
+- **No resource leaks**: resources are managed automatically.
+- **Minimal dependencies**: depends only on the system-provided libsystemd.
 
 ## Features
 
-- Method arguments/return values, signals and properties are validated at compile time by templates; supports basic types, `std::string`, `std::vector`, `std::array`, `std::map`, `std::tuple`
+- Method arguments/return values, signals and properties are validated at compile time by templates; supports basic types, `std::string`, `std::vector`, `std::array`, `std::map`, `std::tuple`, plus arbitrary **custom aggregate structs** (auto-generated `(...)` signatures, with nested/container recursion)
 - Three connection types: system bus, session bus, and peer-to-peer (no bus daemon required)
 - Synchronous `callSync` / asynchronous `callAsync` calls, with timeouts specified in microseconds via template parameters
 - Servers are built with `Server<Derived>` + reflection macros (`DBUSXX_METHOD` / `DBUSXX_SIGNAL` / `DBUSXX_PROPERTY_*`), or directly with `Session::registerMethod` / `RegisterBuilder`
@@ -109,6 +117,8 @@ int main() {
 #include <dbusxx/Looper.hpp>
 #include <dbusxx/Session.hpp>
 
+#include <iostream>
+
 using namespace Dbusxx;
 
 int main() {
@@ -151,21 +161,112 @@ If you don't need the Server/Client layer, you can operate on a Session directly
 
 ```cpp
 #include <dbusxx/Session.hpp>
+#include <dbusxx/Looper.hpp>
+
+#include <chrono>
+#include <iostream>
+#include <thread>
 
 using namespace Dbusxx;
 
+// A Session is single-threaded: registering a method needs an event loop to
+// dispatch, and calling needs to receive the reply. Both must live on two
+// separate connections (one serves, one calls).
 int main() {
-    Session s = Session::userSession("com.example.Calc");
-
-    // Register a method (any callable)
-    (void)s.registerMethod("/com/example/calc", "com.example.Calc", "add",
+    // Connection A: register a method + event loop (server side)
+    Session server = Session::userSession("com.example.Calc");
+    (void)server.registerMethod("/com/example/calc", "com.example.Calc", "add",
         [](int32_t a, int32_t b) -> int32_t { return a + b; });
 
-    // Call a remote method
-    auto r = s.callSync<int32_t>(
+    Looper looper(server);
+    std::thread t([&looper] { looper.run(); });
+    std::this_thread::sleep_for(std::chrono::milliseconds(300));
+
+    // Connection B: call the remote method (separate connection)
+    Session client = Session::userSession();
+    auto r = client.callSync<int32_t>(
         "com.example.Calc", "/com/example/calc", "com.example.Calc", "add",
         20, 22);
-    std::cout << r.value() << std::endl;
+    std::cout << r.value() << std::endl;   // 42
+
+    looper.stop();
+    t.join();
+    return 0;
+}
+```
+
+### Custom structs
+
+Aggregate structs can be used directly as method arguments/return values and signal parameters; fields map automatically to a D-Bus struct, with no extra registration:
+
+```cpp
+#include <dbusxx/Server.hpp>
+#include <dbusxx/Client.hpp>
+
+#include <chrono>
+#include <iostream>
+#include <string>
+#include <thread>
+#include <vector>
+
+using namespace Dbusxx;
+
+// Custom struct (aggregate; fields map to a D-Bus struct in declaration order)
+struct Point {
+    int32_t x;
+    int32_t y;
+};
+
+struct Person {
+    std::string              name;
+    int32_t                  age;
+    std::vector<std::string> tags;   // a member can itself be a container
+};
+
+class GeoServer : public Server<GeoServer> {
+public:
+    GeoServer() : Server("com.example.Geo") {}
+
+    DBUSXX_PATH("/com/example/geo")
+    DBUSXX_IFACE("com.example.Geo")
+
+    Point addPoint(const Point& p, const Point& q) {
+        return Point { p.x + q.x, p.y + q.y };
+    }
+    DBUSXX_METHOD(addPoint)
+
+    Person echoPerson(const Person& p) { return p; }
+    DBUSXX_METHOD(echoPerson)
+
+    std::vector<Point> echoPoints(const std::vector<Point>& pts) { return pts; }
+    DBUSXX_METHOD(echoPoints)
+};
+
+int main() {
+    GeoServer server;
+    std::thread serverThread([&server] { server.run(); });
+    std::this_thread::sleep_for(std::chrono::milliseconds(300));
+
+    Client c(SessionType::USER, "com.example.Geo",
+             "/com/example/geo", "com.example.Geo");
+
+    // Struct in/out
+    auto r = c.callSync<Point>("addPoint", Point { 3, 4 }, Point { 5, 6 });
+    std::cout << "addPoint = (" << r.value().x << ", " << r.value().y << ")\n"; // (8, 10)
+
+    // Mixed-field struct + container member
+    auto r2 = c.callSync<Person>("echoPerson",
+        Person { "alice", 30, { "a", "b" } });
+    std::cout << "echoPerson = " << r2.value().name << ", " << r2.value().age << "\n";
+
+    // Array of structs
+    auto r3 = c.callSync<std::vector<Point>>("echoPoints",
+        std::vector<Point> { { 1, 1 }, { 2, 2 } });
+    std::cout << "echoPoints size = " << r3.value().size() << "\n";
+
+    server.stop();
+    serverThread.join();
+    return 0;
 }
 ```
 
@@ -213,6 +314,23 @@ Methods, signals and properties all accept these types; they are checked at comp
 | `std::map<K, V>` / `std::unordered_map<K, V>` | `a{<sig(K)><sig(V)>}` | dictionary (e.g. `std::map<std::string, int32_t>` → `a{si}`) |
 | `std::tuple<Args...>` | element-wise | only for `Message` stream `read`/`write`; **cannot** be used as a method argument/return type |
 
+### Custom structs (aggregates)
+
+Any custom `struct` satisfying the following can be used directly as a method argument/return value or signal parameter, **with no registration**:
+
+- It is an **aggregate** (no user-provided constructors, no virtual functions, no private/protected non-static data members)
+- Every member is itself a supported type (basic types, containers, nested structs)
+- The field count does not exceed 20
+
+Fields map to a D-Bus struct `(…)` in declaration order, fully at compile time:
+
+| C++ type | D-Bus signature | Notes |
+|---|---|---|
+| `struct Point { int32_t x; int32_t y; }` | `(ii)` | two fields |
+| `struct Person { std::string name; int32_t age; bool vip; }` | `(sib)` | mixed fields |
+| `std::vector<Point>` | `a(ii)` | array of structs |
+| `struct Rect { Point a; Point b; }` | `((ii)(ii))` | struct of structs |
+
 Notes:
 
 - Containers can be nested, e.g. `std::vector<std::vector<int32_t>>` → `aai`
@@ -240,7 +358,7 @@ There are a few runnable examples under `example/`:
 | `example_server` | full `Server<Derived>` usage: methods, signals, properties, sync/async, cross-thread emit |
 | `example_session` | using `Session` directly |
 | `example_register` | the various callable types supported by `registerMethod` / `registerSignal` |
-| `example_client_internal` | `Client` in self-managed mode |
+| `example_client_internal` | `Client` in self-managed mode (with a custom-struct round-trip test, Step 8.5) |
 | `example_client_external` | `Client` with an external `Looper` |
 | `example_peer` | peer-to-peer connection (peer server + client) |
 | `example_install` | verifies the installed artifacts can be used by an external project (`find_package(dbusxx)`) |
