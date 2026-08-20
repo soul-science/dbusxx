@@ -375,4 +375,4 @@ target_link_libraries(my_app PRIVATE dbusxx)
 
 ## 许可证
 
-[GPL-2.0](./LICENSE)
+[LGPL-3.0](./LICENSE)
