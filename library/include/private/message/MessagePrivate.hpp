@@ -176,7 +176,7 @@ public:
                 return st;
             }
 
-            auto fields = tie_as_tuple(aVal);
+            auto fields = tieAsTuple(aVal);
             st = read(fields);
             if (st.isError()) {
                 return st;
@@ -329,7 +329,7 @@ public:
                 return st;
             }
 
-            st = write(tie_as_tuple(aVal));
+            st = write(tieAsTuple(aVal));
             if (st.isError()) {
                 return st;
             }
