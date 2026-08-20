@@ -49,7 +49,7 @@ struct memberUpper{
 template<typename T, std::size_t N>
 struct memberUpper<T, N,
 std::void_t<decltype(probeN<T>(std::make_index_sequence<N>{}))>>
- : memberUpper<T, N << 1> {};
+    : memberUpper<T, N << 1> {};
 
 //! Get the upper for the numbers of members,
 template<typename T, std::size_t N = 1>
