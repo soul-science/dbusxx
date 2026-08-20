@@ -22,28 +22,57 @@ struct Probe {
 };
 
 template <typename T, std::size_t... Is>
-constexpr auto probe_n(std::index_sequence<Is...>) noexcept
+constexpr auto probeN(std::index_sequence<Is...>) noexcept
     -> decltype(T{ Probe<Is>{}... });
 
-template <typename T, std::size_t N, typename = void>
-struct fields_count : fields_count<T, N - 1> {};
+//! If the middle cannot construct the struct, probe [Low, Middle - 1].
+template<typename T, std::size_t Low, std::size_t High, typename = void>
+struct memberCount : memberCount<T, Low, Low + (High - Low) / 2> {};
 
-template <typename T, std::size_t N>
-struct fields_count<T, N,
-    std::void_t<decltype(probe_n<T>(std::make_index_sequence<N>{}))>> {
+//! If the middle can construct the struct, probe [Middle, High].
+template<typename T, std::size_t Low, std::size_t High>
+struct memberCount<T, Low, High,
+    std::void_t<decltype(probeN<T>(std::make_index_sequence<Low + (High - Low) / 2 + 1>{}))>>
+    : memberCount<T, Low + (High - Low) / 2 + 1, High> {};
+
+//! Finally, it will output the number of members.
+template<typename T, std::size_t N>
+struct memberCount<T, N, N, void> {
     static constexpr std::size_t value = N;
 };
 
-template<typename T>
-struct fields_count<T, 0, void> {
+template<typename T, std::size_t N, typename = void>
+struct memberUpper{
+    static constexpr std::size_t value = N;
+};
+
+template<typename T, std::size_t N>
+struct memberUpper<T, N,
+std::void_t<decltype(probeN<T>(std::make_index_sequence<N>{}))>>
+ : memberUpper<T, N << 1> {};
+
+//! Get the upper for the numbers of members,
+template<typename T, std::size_t N = 1>
+inline constexpr std::size_t memberUpperV = memberUpper<T, N>::value;
+
+//! Non-aggregate types are not supported; they short-circuit to 0.
+template<typename T, bool = std::is_aggregate_v<T>>
+struct memberCountImpl {
     static constexpr std::size_t value = 0;
 };
 
 template<typename T>
-constexpr std::size_t fields_count_v = fields_count<T, 20>::value; 
+struct memberCountImpl<T, true> {
+    static constexpr std::size_t value =
+        memberCount<T, 0, memberUpperV<T>>::value;
+};
+
+//! Get the number of members of an aggregate struct.
+template<typename T>
+inline constexpr std::size_t memberCountV = memberCountImpl<T>::value;
 
 //! ------------------------------------------------------------------
-//! tie_as_tuple overloads are macro-generated so the field-count limit
+//! tieAsTuple overloads are macro-generated so the field-count limit
 //! can be raised without hand-writing each overload.
 //! To support more than 20 fields, extend DBUSXX_DETAIL_FIELDS_N and
 //! DBUSXX_DETAIL_TIE_TUPLE_N (and bump the static_assert below).
@@ -77,10 +106,10 @@ constexpr std::size_t fields_count_v = fields_count<T, 20>::value;
 
 #define DBUSXX_DETAIL_FIELDS(N) DBUSXX_DETAIL_CAT(DBUSXX_DETAIL_FIELDS_, N)
 
-//! Generate one tie_as_tuple overload for a struct with N fields.
+//! Generate one tieAsTuple overload for a struct with N fields.
 #define DBUSXX_DETAIL_TIE_AS_TUPLE(N)                                       \
     template <class T>                                                      \
-    auto tie_as_tuple(T& v, std::integral_constant<std::size_t, N>)         \
+    auto tieAsTuple(T& v, std::integral_constant<std::size_t, N>)           \
         -> decltype(auto) {                                                 \
         auto& [DBUSXX_DETAIL_FIELDS(N)] = v;                                \
         return std::tie(DBUSXX_DETAIL_FIELDS(N));                           \
@@ -109,7 +138,7 @@ constexpr std::size_t fields_count_v = fields_count<T, 20>::value;
 #define DBUSXX_DETAIL_TIE_TUPLE_20 DBUSXX_DETAIL_TIE_AS_TUPLE(20) DBUSXX_DETAIL_TIE_TUPLE_19
 
 template <class T>
-auto tie_as_tuple(T&, std::integral_constant<std::size_t, 0>) -> std::tuple<> {
+auto tieAsTuple(T&, std::integral_constant<std::size_t, 0>) -> std::tuple<> {
     return {};
 }
 
@@ -117,25 +146,27 @@ auto tie_as_tuple(T&, std::integral_constant<std::size_t, 0>) -> std::tuple<> {
 DBUSXX_DETAIL_TIE_TUPLE_20
 
 template <class T>
-auto tie_as_tuple(T& v) -> decltype(auto) {
-    constexpr std::size_t N = fields_count_v<T>;
+auto tieAsTuple(T& v) -> decltype(auto) {
+    constexpr std::size_t N = memberCountV<T>;
     static_assert(N <= 20,
-        "tie_as_tuple supports aggregates with at most 20 fields; "
+        "tieAsTuple supports aggregates with at most 20 fields; "
         "extend DBUSXX_DETAIL_FIELDS_/DBUSXX_DETAIL_TIE_TUPLE_ limits to raise it");
-    return tie_as_tuple(v, std::integral_constant<std::size_t, N>{});
+    return tieAsTuple(v, std::integral_constant<std::size_t, N>{});
 }
 
+//! Get the type of a member of an aggregate struct.
 template <std::size_t I, class T>
-using member_type = std::remove_reference_t<
-    std::tuple_element_t<I, decltype(tie_as_tuple(std::declval<T&>()))>>;
+using memberTypeT = std::remove_reference_t<
+    std::tuple_element_t<I, decltype(tieAsTuple(std::declval<T&>()))>>;
 
 template <class T, std::size_t... Is>
-auto member_types_impl(std::index_sequence<Is...>)
-    -> std::tuple<member_type<Is, T>...>;
+auto memberTypes(std::index_sequence<Is...>)
+    -> std::tuple<memberTypeT<Is, T>...>;
 
+//! Get the all types of the members of an aggregate struct.
 template <class T>
-using member_types = decltype(member_types_impl<T>(
-    std::make_index_sequence<fields_count_v<T>>{}));
+using memberTypesT = decltype(memberTypes<T>(
+    std::make_index_sequence<memberCountV<T>>{}));
 
 template<typename T>
 struct isArray : std::false_type {};
@@ -166,7 +197,7 @@ inline constexpr bool isStructV =
     !isArrayV<T> &&
     !isVectorV<T> &&
     !isMapV<T> && 
-    fields_count_v<T> > 0;
+    memberCountV<T> > 0;
 
 template<typename T>
 struct BasicSignature {
@@ -287,7 +318,7 @@ std::string getSignature() {
             return s;
         };
 
-        return impl(static_cast<member_types<R>*>(nullptr));     
+        return impl(static_cast<memberTypesT<R>*>(nullptr));
     }
     else {
         return std::string(1, BasicSignature<R>::value);
