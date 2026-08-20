@@ -38,9 +38,9 @@ stages:
   - step: release@gitee
     name: c1c76b0e
     displayName: Gitee Release
-    releaseName: sdbusxx
-    description: sdbusxx
-    tagName: master
+    releaseName: sdbusxx_master
+    description: sdbusxx_master
+    tagName: master_build
     upstreamArtifact:
     - BUILD_ARTIFACT
     assertFiles: []
