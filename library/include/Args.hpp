@@ -42,7 +42,7 @@ struct memberCount<T, N, N, void> {
 };
 
 template<typename T, std::size_t N, typename = void>
-struct memberUpper{
+struct memberUpper {
     static constexpr std::size_t value = N;
 };
 
@@ -51,7 +51,7 @@ struct memberUpper<T, N,
 std::void_t<decltype(probeN<T>(std::make_index_sequence<N>{}))>>
     : memberUpper<T, N << 1> {};
 
-//! Get the upper for the numbers of members,
+//! Get the upper for the numbers of members.
 template<typename T, std::size_t N = 1>
 inline constexpr std::size_t memberUpperV = memberUpper<T, N>::value;
 
