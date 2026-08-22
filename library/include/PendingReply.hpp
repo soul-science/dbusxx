@@ -24,7 +24,7 @@ namespace Dbusxx {
  */
 template<typename Ret>
 class PendingReply {
-    static_assert(isValidArgs<Ret>(), "Unsupported value type");
+    static_assert(isValidArg<Ret>(), "Unsupported value type");
 public:
     //! @brief Construct an empty (invalid) pending reply.
     PendingReply() = default;

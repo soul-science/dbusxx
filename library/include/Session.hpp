@@ -74,6 +74,10 @@ public:
         template<typename Func>
         RegisterBuilder& addMethod(std::string_view aName, Func aFunc) {
             using wrapper = Method::MethodWrapper<Func>;
+            static_assert(
+                isValidArgs(static_cast<typename wrapper::ArgsTuple*>(nullptr)),
+                "addMethod: arguments must be valid types"
+            );
             auto data = std::make_shared<wrapper>(mSession, aFunc);
             void* dataPtr = data.get();
             mSession->addMethodEntry(mKey, aName,
@@ -92,6 +96,10 @@ public:
          */
         template<typename Cls, typename Ret, typename ...Args>
         RegisterBuilder& addMethod(std::string_view aName, Cls* aCls, Ret(Cls::*aFunc)(Args...)) {
+            static_assert(
+                isValidArgs<Args...>(),
+                "addMethod: arguments must be valid types"
+            );
             return addMethod(aName,
                 [aCls, aFunc] (Args... aArgs) -> Ret {
                     return (aCls->*aFunc)(aArgs...);
@@ -108,6 +116,10 @@ public:
          */
         template<typename... Args>
         RegisterBuilder& addSignal(std::string_view aName) {
+            static_assert(
+                isValidArgs<Args...>(),
+                "addSignal: arguments must be valid types"
+            );
             mSession->addSignalEntry(mKey, aName,
                 Method::getArgsString<Args...>());
             return *this;
@@ -126,6 +138,10 @@ public:
          */
         template<typename T>
         RegisterBuilder& addProperty(std::string_view aName, T aValue, bool writable = true) {
+            static_assert(
+                isValidArg<T>(),
+                "addProperty: argument must be valid type"
+            );
             using wrapper = Method::PropertyWrapper<T>;
             auto data = std::make_shared<wrapper>(
                 mSession, aName.data(), mPath, mIface, aValue);
@@ -325,6 +341,10 @@ public:
      */
     template<typename T>
     [[nodiscard]] Status registerObject(std::string_view aPath, std::string aIface, T* aObj) {
+        static_assert(
+            std::is_base_of_v<MetaObject<T>, T>,
+            "registerObject: object must be subclass of MetaObject"
+        );
         auto builder = registerBuilder(aPath, aIface);
         for (auto& entry : MetaObject<T>::registry()) {
             entry.registerFn(&builder, aObj);
@@ -349,6 +369,10 @@ public:
     template<typename Ret=void, uint64_t TimeoutUsec=0, typename... Args>
     [[nodiscard]] Reply<Ret> callSync(std::string_view aService, std::string_view aPath,
         std::string_view aIface, std::string_view aMethod, const Args&... aArgs) {
+        static_assert(
+            isValidArgs<Args...>(),
+            "callSync: arguments must be valid types"
+        );
         return Reply<Ret>(
             Method::callSync<>(
                 mPrivate.get(), TimeoutUsec, aService, aPath, aIface, aMethod, aArgs...
@@ -371,7 +395,7 @@ public:
         std::enable_if_t<!CallbackLikeFirstArg<Ret, Args...>::value, int> = 0>
     [[nodiscard]] PendingReply<Ret> callAsync(std::string_view aService, std::string_view aPath,
         std::string_view aIface, std::string_view aMethod, const Args&... aArgs) {
-        static_assert((isValidArgs<Args>() && ...),
+        static_assert(isValidArgs<Args...>(),
             "callAsync: arguments must be valid D-Bus types. If you meant a callback, "
             "it must be callable as void(Reply<Ret>), e.g. "
             "callAsync<int>(..., [](Reply<int> r){}, args...)");
@@ -445,6 +469,11 @@ public:
     [[nodiscard]] Status listenSignal(std::string_view aSender,
         std::string_view aPath, std::string_view aIface,
         std::string_view aSignal, Callback&& aCallback) {
+        using ArgsTuple = typename Method::FuncTrait<std::decay_t<Callback>>::ArgsTuple;
+        static_assert(
+            isValidArgs(static_cast<ArgsTuple*>(nullptr)),
+            "listenSignal: arguments must be valid types"
+        );
         return Method::listenSignal(
             mPrivate.get(), aSender, aPath, aIface, aSignal,
             std::forward<Callback>(aCallback)
@@ -466,6 +495,10 @@ public:
     [[nodiscard]] Status listenSignal(std::string_view aSender,
         std::string_view aPath, std::string_view aIface,
         std::string_view aSignal, Cls* aCls, Ret(Cls::*aFunc)(Args...)) {
+        static_assert(
+            isValidArgs<Args...>(),
+            "listenSignal: arguments must be valid types"
+        );
         return Method::listenSignal(
             mPrivate.get(), aSender, aPath, aIface, aSignal,
             [aCls, aFunc] (Args... aArgs) -> Ret {
@@ -486,6 +519,10 @@ public:
     template<typename... Args>
     [[nodiscard]] Status emitSignal(std::string_view aPath, std::string_view aIface,
         std::string_view aSignal, const Args&... aArgs) {
+        static_assert(
+            isValidArgs<Args...>(),
+            "emitSignal: arguments must be valid types"
+        );
         return Method::emitSignal(
             mPrivate.get(), aPath, aIface, aSignal, aArgs...
         );
@@ -504,6 +541,10 @@ public:
     template<typename T>
     [[nodiscard]] Status getLocalProperty(std::string_view aPath, std::string_view aIface,
         std::string_view aName, T& aValue) {
+        static_assert(
+            isValidArg<T>(),
+            "getLocalProperty: argument must be valid types"
+        );
         auto p = getPropPrivate<T>(aPath, aIface, aName);
         if (!p) {
             return Status(StatusCode::INVALID_ARG);
@@ -526,6 +567,10 @@ public:
     template<typename T>
     [[nodiscard]] Status setLocalProperty(std::string_view aPath, std::string_view aIface,
         std::string_view aName, const T& aValue) {
+        static_assert(
+            isValidArg<T>(),
+            "setLocalProperty: argument must be valid types"
+        );
         auto p = getPropPrivate<T>(aPath, aIface, aName);
         if (!p) {
             return Status(StatusCode::INVALID_ARG);
@@ -548,6 +593,10 @@ public:
     template<typename T>
     [[nodiscard]] Status onLocalPropertyChanged(std::string_view aPath, std::string_view aIface,
         std::string_view aName, std::function<void(const T&)>&& aCallback) {
+        static_assert(
+            isValidArg<T>(),
+            "onLocalPropertyChanged: argument must be valid types"
+        );
         auto p = getPropPrivate<T>(aPath, aIface, aName);
         if (!p) {
             return Status(StatusCode::INVALID_ARG);
@@ -570,6 +619,10 @@ public:
     template<typename Ret>
     [[nodiscard]] Reply<Ret> getRemoteProperty(std::string_view aService, std::string_view aPath,
         std::string_view aIface, std::string_view aProp) {
+        static_assert(
+            isValidArg<Ret>(),
+            "getRemoteProperty: argument must be valid types"
+        );
         return Reply<Ret>(
             Method::getRemoteProperty(
                 mPrivate.get(), aService, aPath, aIface, aProp
@@ -590,6 +643,10 @@ public:
     template<typename T>
     [[nodiscard]] Status setRemoteProperty(std::string_view aService, std::string_view aPath,
         std::string_view aIface, std::string_view aProp, const T& aValue) {
+        static_assert(
+            isValidArg<T>(),
+            "setRemoteProperty: argument must be valid types"
+        );
         return Method::setRemoteProperty(
             mPrivate.get(), aService, aPath, aIface, aProp, aValue);
     }
@@ -607,6 +664,11 @@ public:
     template<typename Callback>
     [[nodiscard]] Status onRemotePropertyChanged(std::string_view aService, std::string_view aPath,
         std::string_view aIface, std::string_view aProp, Callback&& aCallback) {
+        using ArgsTuple = typename Method::FuncTrait<std::decay_t<Callback>>::ArgsTuple;
+        static_assert(
+            isValidArgs(static_cast<ArgsTuple*>(nullptr)),
+            "onRemotePropertyChanged: arguments must be valid types"
+        );
         return Method::onRemotePropertyChanged(
             mPrivate.get(), aService, aPath, aIface, aProp, std::forward<Callback>(aCallback)
         );
