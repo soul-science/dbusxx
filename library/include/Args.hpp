@@ -196,14 +196,11 @@ inline constexpr bool isStructV =
     std::is_class_v<T> &&
     !isArrayV<T> &&
     !isVectorV<T> &&
-    !isMapV<T> && 
+    !isMapV<T> &&
     memberCountV<T> > 0;
 
 template<typename T>
-struct BasicSignature {
-    static_assert(sizeof(T) == 0, "Unsupported Dbus type");
-    static constexpr char value {'\0'};
-};
+struct BasicSignature {};
 
 template<>
 struct BasicSignature<int8_t> {
@@ -291,6 +288,39 @@ struct BasicSignature<void> {
     static constexpr char value = '\0';
 };
 
+template<typename T, typename = void>
+struct isBasicType : std::false_type {};
+
+template<typename T>
+struct isBasicType<T, std::void_t<decltype(BasicSignature<T>::value)>>
+    : std::true_type {};
+
+template<typename T>
+inline constexpr bool isBasicTypeV = isBasicType<T>::value;
+
+template<typename T>
+constexpr bool isValidArg() {
+    using R = std::decay_t<T>;
+    if constexpr (isVectorV<R> || isArrayV<R>) {
+        return isValidArg<typename R::value_type>();
+    }
+    else if constexpr (isMapV<R>) {
+        return isValidArg<typename R::key_type>()
+            && isValidArg<typename R::mapped_type>();
+    } else if constexpr (isStructV<R>) {
+        return []<typename... Ts>(std::tuple<Ts...>*) {
+            return (isValidArg<Ts>() && ...);
+        }(static_cast<memberTypesT<R>*>(nullptr));
+    } else {
+        return !std::is_same_v<R, void> && isBasicTypeV<R>;
+    }
+}
+
+template<typename... Ts>
+constexpr bool isValidArgs(std::tuple<Ts...>* aArgs = nullptr) {
+    return (isValidArg<Ts>() && ...);
+}
+
 template<typename T>
 std::string getSignature() {
     using R = std::decay_t<T>;
@@ -321,24 +351,9 @@ std::string getSignature() {
         return impl(static_cast<memberTypesT<R>*>(nullptr));
     }
     else {
+        static_assert(isBasicTypeV<R>, "Unsupported Dbus type");
         return std::string(1, BasicSignature<R>::value);
     }
-}
-
-template<typename T>
-constexpr bool isValidArgs() {
-    using R = std::decay_t<T>;
-    return std::is_integral_v<R>
-        || std::is_floating_point_v<R>
-        || std::is_same_v<R, bool>
-        || std::is_same_v<R, const char*>
-        || std::is_same_v<R, char*>
-        || std::is_same_v<R, std::string>
-        || std::is_same_v<R, std::string_view>
-        || isVectorV<R>
-        || isArrayV<R>
-        || isMapV<R>
-        || isStructV<R>;
 }
 
 template<typename T>

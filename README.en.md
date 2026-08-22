@@ -286,7 +286,7 @@ int main() {
 
 ## Supported types
 
-Methods, signals and properties all accept these types; they are checked at compile time by `isValidArgs` and serialized with auto-generated D-Bus signatures at runtime.
+Methods, signals and properties all accept these types; they are checked at compile time by `isValidArg` and serialized with auto-generated D-Bus signatures at runtime.
 
 ### Basic types
 
