@@ -128,6 +128,8 @@ template<typename Ret=void, uint64_t TimeoutUsec=0, typename Callback, typename.
 
 The callback signature is `void(Reply<Ret>)`. Returns a `Status` indicating whether the call was dispatched.
 
+The callback is stored internally and released automatically by RAII after execution. It is invoked on the event-loop thread; if it captures external objects, make sure their lifetime is thread-safe (prefer capturing `std::shared_ptr` over raw pointers).
+
 ## Signals
 
 ### Listening to signals
@@ -146,6 +148,7 @@ template<typename Cls, typename Ret, typename... Args>
 - Callback overload: the callback argument types are the signal argument types.
 - Member-function overload: dispatches the signal to a member function of `aCls`.
 - An empty `aSender` matches any sender.
+- **Lifetime**: the API currently provides no unsubscribe handle; the subscription is strictly bound to the `Session` object (cleaned up when the `Session` is destroyed). The callback keeps firing for the session's lifetime, so in long-lived processes watch the callback resources — avoid capturing raw pointers or accumulating state.
 
 ### Emitting signals
 
@@ -191,7 +194,7 @@ template<typename Callback>
 
 - `getRemoteProperty`: reads a remote property via `Properties.Get`.
 - `setRemoteProperty`: writes a remote property via `Properties.Set`.
-- `onRemotePropertyChanged`: listens for `PropertiesChanged` of a remote property.
+- `onRemotePropertyChanged`: listens for `PropertiesChanged` of a remote property. Same as `listenSignal`, no unsubscribe handle is provided; the subscription is cleaned up when the `Session` is destroyed.
 
 ## Per-API Examples
 
@@ -240,8 +243,8 @@ builder.addMethod("add", [](int32_t a, int32_t b) { return a + b; });
 // (15) addMethod(name, cls, memfn) — register a method with a member function
 struct Calc { int32_t sub(int32_t a, int32_t b) { return a - b; } } calc;
 builder.addMethod("sub", &calc, &Calc::sub);
-// (16) addSignal<Args...>(name) — register a signal
-builder.addSignal<int32_t, std::string>("valueChanged");
+// (16) addSignal<Args...>(name) — register a signal (two int32_t arguments, matching the listeners/emit below)
+builder.addSignal<int32_t, int32_t>("valueChanged");
 // (17) addProperty<T>(name, init, writable) — register a property (writable=false → read-only)
 builder.addProperty<int32_t>("counter", 0, /*writable=*/true);
 // (18) commit() — commit and publish the vtable
@@ -280,13 +283,13 @@ Status st25 = sess.callAsync<int32_t>("com.example.Calc", "/com/example/calc",
 // ── Signals ────────────────────────────────────────────────────
 // (26) listenSignal(sender, path, iface, signal, callback)
 Status st26 = sess.listenSignal("", "/com/example/calc", "com.example.Calc",
-    "valueChanged", [](int32_t v) { std::cout << v; });
+    "valueChanged", [](int32_t v, int32_t w) { std::cout << v << ", " << w; });
 // (27) listenSignal(sender, path, iface, signal, cls, memfn)
 Status st27 = sess.listenSignal("", "/com/example/calc", "com.example.Calc",
     "valueChanged", &calc, &Calc::sub);
 // (28) emitSignal(path, iface, signal, args...)
 Status st28 = sess.emitSignal("/com/example/calc", "com.example.Calc",
-    "valueChanged", 7);
+    "valueChanged", 7, 8);
 
 // ── Local properties ───────────────────────────────────────────
 int32_t cur = 0;
@@ -317,5 +320,6 @@ Status st34 = sess.onRemotePropertyChanged(
 ## Notes
 
 - A `Session` is single-threaded: serving and calling require two independent connections.
-- Async callbacks (`callAsync`, `listenSignal`, `onRemotePropertyChanged`, ...) are invoked on the event-loop thread; don't block inside callbacks.
+- Async callbacks (`callAsync`, `listenSignal`, `onRemotePropertyChanged`, ...) are invoked on the event-loop thread; don't block inside them. Callbacks are managed by the library's internal RAII and released automatically after execution.
+- `listenSignal` / `onRemotePropertyChanged` provide no unsubscribe interface; subscriptions are cleaned up when the `Session` is destroyed — watch callback resources in long-lived processes.
 - `registerObject` requires the object to derive from `MetaObject<T>`.

@@ -138,6 +138,9 @@ int main() {
     std::thread t([&server] { server.run(); });
 
     // (4) status() — current status (error takes precedence)
+    //     Note: right after run() starts, the interface registration in
+    //     onReady may not have completed yet, so this usually returns the
+    //     initial pre-init status, not the final registration result.
     Status st = server.status();
     // (5) type() — session type
     SessionType tp = server.type();

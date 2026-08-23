@@ -128,6 +128,8 @@ template<typename Ret=void, uint64_t TimeoutUsec=0, typename Callback, typename.
 
 回调签名为 `void(Reply<Ret>)`。返回 `Status` 表示是否成功派发。
 
+回调会被内部存储，执行完毕后由 RAII 机制自动释放；回调在事件循环线程上被调用，若捕获外部对象请保证其生命周期跨线程安全（建议捕获 `std::shared_ptr` 而非裸指针）。
+
 ## 信号
 
 ### 订阅信号
@@ -146,6 +148,7 @@ template<typename Cls, typename Ret, typename... Args>
 - 回调版本：回调参数类型即信号参数类型。
 - 成员函数版本：将信号派发到 `aCls` 的成员函数。
 - `aSender` 为空表示匹配任意发送者。
+- **生命周期**：当前 API 不提供取消订阅句柄，订阅与 `Session` 对象严格绑定（`Session` 销毁时随之清理）；回调在会话存续期间持续触发，长生命周期进程请留意回调资源，避免捕获裸指针或堆积状态。
 
 ### 发送信号
 
@@ -191,7 +194,7 @@ template<typename Callback>
 
 - `getRemoteProperty`：通过 `Properties.Get` 读取远端属性。
 - `setRemoteProperty`：通过 `Properties.Set` 写入远端属性。
-- `onRemotePropertyChanged`：监听远端属性的 `PropertiesChanged` 变更。
+- `onRemotePropertyChanged`：监听远端属性的 `PropertiesChanged` 变更。与 `listenSignal` 相同，当前不提供取消订阅句柄，订阅随 `Session` 销毁而清理。
 
 ## API 示例（逐项）
 
@@ -240,8 +243,8 @@ builder.addMethod("add", [](int32_t a, int32_t b) { return a + b; });
 // (15) addMethod(name, cls, memfn) —— 用成员函数注册方法
 struct Calc { int32_t sub(int32_t a, int32_t b) { return a - b; } } calc;
 builder.addMethod("sub", &calc, &Calc::sub);
-// (16) addSignal<Args...>(name) —— 注册信号
-builder.addSignal<int32_t, std::string>("valueChanged");
+// (16) addSignal<Args...>(name) —— 注册信号（2 个 int32_t 参数，与下方监听/发射一致）
+builder.addSignal<int32_t, int32_t>("valueChanged");
 // (17) addProperty<T>(name, init, writable) —— 注册属性（writable=false 只读）
 builder.addProperty<int32_t>("counter", 0, /*writable=*/true);
 // (18) commit() —— 提交并发布 vtable
@@ -280,13 +283,13 @@ Status st25 = sess.callAsync<int32_t>("com.example.Calc", "/com/example/calc",
 // ── 信号 ──────────────────────────────────────────────────────
 // (26) listenSignal(sender, path, iface, signal, callback)
 Status st26 = sess.listenSignal("", "/com/example/calc", "com.example.Calc",
-    "valueChanged", [](int32_t v) { std::cout << v; });
+    "valueChanged", [](int32_t v, int32_t w) { std::cout << v << ", " << w; });
 // (27) listenSignal(sender, path, iface, signal, cls, memfn)
 Status st27 = sess.listenSignal("", "/com/example/calc", "com.example.Calc",
     "valueChanged", &calc, &Calc::sub);
 // (28) emitSignal(path, iface, signal, args...)
 Status st28 = sess.emitSignal("/com/example/calc", "com.example.Calc",
-    "valueChanged", 7);
+    "valueChanged", 7, 8);
 
 // ── 本地属性 ──────────────────────────────────────────────────
 int32_t cur = 0;
@@ -317,5 +320,6 @@ Status st34 = sess.onRemotePropertyChanged(
 ## 注意事项
 
 - 一个 `Session` 是单线程的：serve 与 call 需要两条独立连接。
-- 异步回调（`callAsync`、`listenSignal`、`onRemotePropertyChanged` 等）会在事件循环线程上被调用，不要在回调里阻塞。
+- 异步回调（`callAsync`、`listenSignal`、`onRemotePropertyChanged` 等）会在事件循环线程上被调用，不要在回调里阻塞；回调由库内部 RAII 管理，执行后自动释放。
+- `listenSignal` / `onRemotePropertyChanged` 不提供取消订阅接口，订阅随 `Session` 销毁而清理，长生命周期进程请留意回调资源。
 - `registerObject` 要求对象继承自 `MetaObject<T>`。

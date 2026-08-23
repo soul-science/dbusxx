@@ -138,6 +138,8 @@ int main() {
     std::thread t([&server] { server.run(); });
 
     // (4) status() —— 当前状态（错误优先）
+    //     注意：run() 刚启动时，onReady 里的接口注册可能尚未执行完，
+    //     此处返回的通常是初始化前的初始状态，不代表最终注册结果。
     Status st = server.status();
     // (5) type() —— 会话类型
     SessionType tp = server.type();
