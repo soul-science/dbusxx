@@ -4,6 +4,10 @@
 
 A C++17 D-Bus library for Linux, built on systemd's sd-bus.
 
+## Documentation
+
+For the full API reference, see the **[Documentation Overview](docs/en/overview.en.md)** (also available in [Chinese](docs/cn/overview.md)).
+
 ## Introduction
 
 dbusxx is a C++17 D-Bus library for Linux that lets you communicate between processes with just a few lines of code — whether you're exposing your own service or calling someone else's interface.

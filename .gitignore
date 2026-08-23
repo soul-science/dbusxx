@@ -37,4 +37,4 @@ build-release/
 .vscode/
 
 # Private docs (kept local only, not pushed)
-docs/
+note/

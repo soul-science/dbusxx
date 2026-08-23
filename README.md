@@ -4,6 +4,10 @@
 
 基于 systemd sd-bus 的 C++17 D-Bus 库。
 
+## 文档
+
+完整 API 参考，请见 **[文档总览（中文）](docs/cn/overview.md)**，或英文版 [Documentation Overview](docs/en/overview.en.md)。
+
 ## 介绍
 
 dbusxx 是一个面向 Linux 的 C++17 D-Bus 库，让你用几行代码就能在不同进程之间通信——无论是暴露自己的服务，还是调用别人的接口。
