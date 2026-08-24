@@ -33,8 +33,12 @@
 
 # Other
 build/
-build-release/
+build_release/
+build_unit_tests/
 .vscode/
 
 # Private docs (kept local only, not pushed)
 note/
+
+# Vendored test dependency (googletest) — download locally, do not commit
+tests/unit_tests/third_party/

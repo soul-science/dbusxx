@@ -65,7 +65,8 @@ static const std::map<StatusCode, const char*> FROM_MAP = {
     {StatusCode::UNKNOWN_ERROR,  SD_BUS_ERROR_FAILED},
 };
 
-RawRemoteError::RawRemoteError(RawBusErrorPtr aRawError) {
+RawRemoteError::RawRemoteError(RawBusErrorPtr aRawError)
+    : mRawError(SD_BUS_ERROR_NULL) {
     sd_bus_error_copy(&mRawError, aRawError);
 }
 
@@ -78,7 +79,8 @@ RawRemoteError::~RawRemoteError() {
     }
 }
 
-RawRemoteError::RawRemoteError(const RawRemoteError& aOther) {
+RawRemoteError::RawRemoteError(const RawRemoteError& aOther)
+    : mRawError(SD_BUS_ERROR_NULL) {
     sd_bus_error_copy(&mRawError, &aOther.mRawError);
 }
 
@@ -95,7 +97,8 @@ RawRemoteError& RawRemoteError::operator=(const RawRemoteError& aOther) {
     return *this;
 }
 
-RawRemoteError::RawRemoteError(RawRemoteError&& aOther) {
+RawRemoteError::RawRemoteError(RawRemoteError&& aOther)
+    : mRawError(SD_BUS_ERROR_NULL) {
     sd_bus_error_move(&mRawError, &aOther.mRawError);
 }
 
