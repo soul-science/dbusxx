@@ -10,7 +10,7 @@ stages:
   - step: build@gcc
     name: ""
     displayName: GCC 构建
-    gccVersion: "15.2"
+    gccVersion: 11.1.0
     commands:
     - apt-get update
     - apt-get install -y cmake g++ pkg-config libsystemd-dev libgtest-dev
