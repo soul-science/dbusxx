@@ -13,17 +13,23 @@ stages:
     gccVersion: "15.2"
     commands:
     - apt-get update
-    - apt-get install -y cmake g++ pkg-config libsystemd-dev
+    - apt-get install -y cmake g++ pkg-config libsystemd-dev libgtest-dev
     - ""
-    - rm -rf build-release
+    - rm -rf build_release
+    - rm -rf build_unit_tests
     - ""
-    - cmake -S . -B build-release -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_STANDARD=17
+    - cmake -S . -B build_release -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_STANDARD=17
       -DCMAKE_CXX_STANDARD_REQUIRED=ON
-    - cmake --build build-release
+    - cmake --build build_release
+    - ""
+    - cmake -S . -B build_unit_tests -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_STANDARD=17
+      -DCMAKE_CXX_STANDARD_REQUIRED=ON
+    - cmake --build build_unit_tests --target sdbusxx_unit_tests
+    - ctest --test-dir build_unit_tests --rerun-failed --output-on-failure
     artifacts:
     - name: BUILD_ARTIFACT
       path:
-      - ./build-release
+      - ./build_release
       type: .tar.gz
     strategy:
       retry: "0"
