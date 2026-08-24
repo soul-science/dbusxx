@@ -62,10 +62,18 @@ public:
         }
 
         if constexpr (std::is_same_v<rawType, std::string>) {
-            const char* tmp;
+            //! NB: on a type mismatch (e.g. the wire carries 'i' but we ask
+            //! for 's') sd_bus_message_read_basic fails *without* writing
+            //! `tmp`, so it must be initialised and only used on success —
+            //! otherwise we strlen() an uninitialised pointer.
+            const char* tmp = nullptr;
             st = Adaptor::RawMessage::popBasic(
                 mRawMsg.get(), BasicSignature<rawType>::value, tmp);
-            aVal = tmp;
+            if (st.isSuccess()) {
+                aVal = tmp;
+            } else {
+                aVal.clear();
+            }
         }
         else if constexpr (std::is_same_v<rawType, float>) {
             //! Convert float to double (unified use of double type)

@@ -3,7 +3,7 @@
 # cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug && cmake --build build
 
 # RELEASE
-# cmake -S . -B build-release -DCMAKE_BUILD_TYPE=Release && cmake --build build-release
+# cmake -S . -B build_release -DCMAKE_BUILD_TYPE=Release && cmake --build build_release
 
 # CMake version >= 3.15
 cmake_minimum_required(VERSION 3.15)
@@ -39,3 +39,11 @@ add_subdirectory(library)
 
 # example
 add_subdirectory(example)
+
+# unit tests (Google Test; spawns its own private dbus-daemon, so no system
+# D-Bus daemon is required — covers pure-logic layers + business-layer E2E)
+option(DBUSXX_BUILD_TESTS "Build unit tests" ON)
+if(DBUSXX_BUILD_TESTS)
+    enable_testing()
+    add_subdirectory(tests/unit_tests)
+endif()
