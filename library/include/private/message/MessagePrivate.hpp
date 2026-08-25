@@ -69,26 +69,35 @@ public:
             const char* tmp = nullptr;
             st = Adaptor::RawMessage::popBasic(
                 mRawMsg.get(), BasicSignature<rawType>::value, tmp);
-            if (st.isSuccess()) {
-                aVal = tmp;
-            } else {
-                aVal.clear();
+            if (st.isError()) {
+             
+                return st;
             }
+
+            aVal = tmp;
         }
         else if constexpr (std::is_same_v<rawType, float>) {
             //! Convert float to double (unified use of double type)
             //! Ensure that the number of bytes read is consistent
-            double tmp = static_cast<double>(aVal);
+            double tmp = 0.0;
             st = Adaptor::RawMessage::popBasic(
-                mRawMsg.get(), BasicSignature<rawType>::value, tmp
-            );
+                mRawMsg.get(), BasicSignature<rawType>::value, tmp);
+            if (st.isError()) {
+                return st;
+            }
+
             aVal = static_cast<float>(tmp);
         }
         else if constexpr (std::is_same_v<rawType, bool>) {
             int tmp = 0;
             st = Adaptor::RawMessage::popBasic(
                 mRawMsg.get(), BasicSignature<rawType>::value, tmp);
+            if (st.isError()) {
+                return st;
+            }
+
             aVal = (tmp != 0);
+
         }
         else if constexpr (isVectorV<rawType>) {
             using ElemType = typename rawType::value_type;
