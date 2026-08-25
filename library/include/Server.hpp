@@ -1,6 +1,7 @@
 #ifndef DBUSXX_DBUS_SERVER_HPP
 #define DBUSXX_DBUS_SERVER_HPP
 
+#include <atomic>
 #include <string>
 #include <string_view>
 #include <future>
@@ -49,8 +50,9 @@ public:
     Server(Server&& aOther) noexcept
         : mSession(std::move(aOther.mSession))
         , mLooper(std::move(aOther.mLooper))
-        , mStatus(std::move(aOther.mStatus))
-        , mInited(aOther.mInited) {}
+        , mStatus(aOther.mStatus.load())
+        , mRunCalled(aOther.mRunCalled.load())
+        , mInited(aOther.mInited.load()) {}
 
     Server& operator=(Server&& aOther) noexcept {
         if (this == &aOther) {
@@ -59,8 +61,9 @@ public:
 
         mSession = std::move(aOther.mSession);
         mLooper = std::move(aOther.mLooper);
-        mStatus = std::move(aOther.mStatus);
-        mInited = std::move(aOther.mInited);
+        mStatus = aOther.mStatus.load();
+        mRunCalled.store(aOther.mRunCalled.load());
+        mInited = aOther.mInited.load();
         return *this;
     }
 
@@ -69,9 +72,13 @@ public:
 
     //! @brief Register the annotated interface and run the event loop (blocks).
     void run() {
+        if (mRunCalled.exchange(true)) {
+            return;
+        }
+
         mLooper.onReady([this]() -> Status {
             init();
-            return mStatus;
+            return mStatus.load();
         });
         mLooper.run();
     }
@@ -96,6 +103,10 @@ public:
      * @param aTask task to run
      */
     void post(std::function<void()> aTask) {
+        if (mLooper.status().isError()) {
+            return;
+        }
+
         mLooper.post(std::move(aTask));
     }
 
@@ -111,6 +122,11 @@ public:
     template<typename... Args>
     [[nodiscard]] Status emit(std::string_view aPath, std::string_view aIface,
         std::string_view aSignal, Args&&... aArgs) {
+        Status st = status();
+        if (st.isError()) {
+            return st;
+        }
+
         if (mLooper.isOwnerThread()) {
             return mSession.emitSignal(aPath, aIface, aSignal, std::forward<Args>(aArgs)...);
         }
@@ -149,6 +165,11 @@ public:
     template<typename T>
     [[nodiscard]] Status getProperty(std::string_view aPath, std::string_view aIface,
         std::string_view aName, T& aValue) {
+        Status st = status();
+        if (st.isError()) {
+            return st;
+        }
+
         if (mLooper.isOwnerThread()) {
             return mSession.template getLocalProperty<T>(
                 aPath, aIface, aName, aValue);
@@ -184,6 +205,11 @@ public:
     template<typename T>
     [[nodiscard]] Status setProperty(std::string_view aPath, std::string_view aIface,
         std::string_view aName, const T& aValue) {
+        Status st = status();
+        if (st.isError()) {
+            return st;
+        }
+
         if (mLooper.isOwnerThread()) {
             return mSession.template setLocalProperty<T>(
                 aPath, aIface, aName, aValue);
@@ -220,6 +246,11 @@ public:
     template<typename T>
     [[nodiscard]] Status onPropertyChanged(std::string_view aPath, std::string_view aIface,
         std::string_view aName, std::function<void(const T&)>&& aCallback) {
+        Status st = status();
+        if (st.isError()) {
+            return st;
+        }
+
         if (mLooper.isOwnerThread()) {
             return mSession.template onLocalPropertyChanged<T>(
                 aPath, aIface, aName,
@@ -248,7 +279,16 @@ public:
 
     //! @brief Return the server's current status (error takes precedence).
     [[nodiscard]] inline Status status() const {
-        return mStatus.isError() ? mStatus : mLooper.status();
+        Status st = mStatus.load();
+        if (st.isError()) {
+            return st;
+        }
+
+        if (!mInited.load()) {
+            return StatusCode::NOT_CONNECTED;
+        }
+
+        return mLooper.status();
     }
 
     //! @brief Return the session type this server is bound to.
@@ -258,18 +298,18 @@ public:
 
 protected:
     //! @brief Access the underlying session (for direct registration).
-    Session& session() {
+    inline Session& session() {
         return mSession;
     }
 
     //! @brief Access the underlying event loop.
-    Looper& looper() {
+    inline Looper& looper() {
         return mLooper;
     }
 
 private:
     void init() {
-        if (mInited || mStatus.isError()) {
+        if (mInited.load()) {
             return;
         }
 
@@ -290,19 +330,21 @@ private:
                 e.registerFn(&builder, static_cast<Derived*>(this));
             }
 
-            mStatus = builder.commit();
-            if (mStatus.isError()) {
+            Status st = builder.commit();
+            mStatus.store(st);
+            if (st.isError()) {
                 return;
             }
         }
+
         mInited = true;
     }
 
     Session mSession;
     Looper mLooper;
-    Status mStatus;
-
-    bool mInited { false };
+    std::atomic<Status> mStatus;
+    std::atomic<bool> mRunCalled { false };
+    std::atomic<bool> mInited { false };
 };
 }
 #endif

@@ -1,6 +1,7 @@
 #ifndef DBUSXX_LOOPER_PRIVATE_HPP
 #define DBUSXX_LOOPER_PRIVATE_HPP
 
+#include <atomic>
 #include <cstdint>
 #include <deque>
 #include <functional>
@@ -49,11 +50,11 @@ public:
     void post(std::function<void()> aTask);
 
     inline bool isOwnerThread() const {
-        return std::this_thread::get_id() == mThreadId;
+        return std::this_thread::get_id() == mThreadId.load();
     }
 
     inline Status status() const {
-        return mStatus;
+        return mStatus.load();
     }
 
 private:
@@ -76,13 +77,13 @@ private:
     Adaptor::RawBusEventSrcPtr mAcceptSrc { nullptr };
 
     std::mutex mTaskMutex;
-    std::thread::id mThreadId;
+    std::atomic<std::thread::id> mThreadId;
     std::deque<std::function<void()>> mTasks;
 
     std::function<Status()> mReadyCallBack;
 
     Adaptor::RawSlotSharePtr mConnectedSlot;
-    Status mStatus { StatusCode::UNKNOWN_ERROR };
+    std::atomic<Status> mStatus { StatusCode::UNKNOWN_ERROR };
 
 };
 }
