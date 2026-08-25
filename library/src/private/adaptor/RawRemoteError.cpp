@@ -97,12 +97,12 @@ RawRemoteError& RawRemoteError::operator=(const RawRemoteError& aOther) {
     return *this;
 }
 
-RawRemoteError::RawRemoteError(RawRemoteError&& aOther)
+RawRemoteError::RawRemoteError(RawRemoteError&& aOther) noexcept
     : mRawError(SD_BUS_ERROR_NULL) {
     sd_bus_error_move(&mRawError, &aOther.mRawError);
 }
 
-RawRemoteError& RawRemoteError::operator=(RawRemoteError&& aOther) {
+RawRemoteError& RawRemoteError::operator=(RawRemoteError&& aOther) noexcept {
     if (this == &aOther) {
         return *this;
     }
