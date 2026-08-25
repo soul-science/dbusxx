@@ -79,9 +79,9 @@ public:
 
     RawRemoteError& operator=(const RawRemoteError& aOther);
 
-    RawRemoteError(RawRemoteError&& aOther);
+    RawRemoteError(RawRemoteError&& aOther) noexcept;
 
-    RawRemoteError& operator=(RawRemoteError&& aOther);
+    RawRemoteError& operator=(RawRemoteError&& aOther) noexcept;
 
     Status toStatus() const;
 
