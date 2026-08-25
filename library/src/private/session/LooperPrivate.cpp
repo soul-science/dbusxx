@@ -84,22 +84,22 @@ LooperPrivate::~LooperPrivate() {
 }
 
 void LooperPrivate::run() {
-    if (mStatus.isError()) {
+    if (mStatus.load().isError()) {
         return;
     }
 
     mStatus = bindDaemonDisconnectedSignal();
-    if (mStatus.isError()) {
+    if (mStatus.load().isError()) {
         return;
     }
 
     mStatus = bindExitEntry();
-    if (mStatus.isError()) {
+    if (mStatus.load().isError()) {
         return;
     }
 
     mStatus = bindWakeEntry();
-    if (mStatus.isError()) {
+    if (mStatus.load().isError()) {
         return;
     }
 
@@ -116,15 +116,15 @@ void LooperPrivate::run() {
                 self->mAcceptSrc = nullptr;
 
                 self->mStatus = self->mSession->acceptPeerConnection(self->mEvent.get());
-                return self->mStatus.isSuccess() ? 1 : -1;
+                return self->mStatus.load().isSuccess() ? 1 : -1;
             }, this);
-        if (mStatus.isError()) {
+        if (mStatus.load().isError()) {
             return;
         }
     } else {
         mStatus = Adaptor::RawBus::attachEvent(
             mSession->rawBus().get(), mEvent.get(), 0);
-        if (mStatus.isError()) {
+        if (mStatus.load().isError()) {
             return;
         }
 
@@ -137,7 +137,7 @@ void LooperPrivate::run() {
 
     mThreadId = std::this_thread::get_id();
     Status st = Adaptor::RawEvent::loop(mEvent.get());
-    if (mStatus.isSuccess()) {
+    if (mStatus.load().isSuccess()) {
         mStatus = st;
     }
 }
