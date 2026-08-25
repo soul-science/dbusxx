@@ -61,9 +61,9 @@ public:
 
         mSession = std::move(aOther.mSession);
         mLooper = std::move(aOther.mLooper);
-        mStatus = aOther.mStatus.load();
+        mStatus.store(aOther.mStatus.load());
         mRunCalled.store(aOther.mRunCalled.load());
-        mInited = aOther.mInited.load();
+        mInited.store(aOther.mInited.load());
         return *this;
     }
 
