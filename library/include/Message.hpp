@@ -132,22 +132,23 @@ public:
 
     //! @brief Return the unique name of the message sender (empty if unknown).
     [[nodiscard]] inline std::string getSender() const {
-        return mPrivate->getSender();
+        return mPrivate ? mPrivate->getSender() : std::string();
     }
 
     //! @brief Return true if the message represents an error reply.
     [[nodiscard]] inline bool isError() const {
-        return mPrivate->getStatus().isError();
+        return mPrivate && mPrivate->getStatus().isError();
     }
 
     //! @brief Return the transport/parse status of the message.
     [[nodiscard]] inline Status status() const {
-        return mPrivate->getStatus();
+        return mPrivate ? mPrivate->getStatus()
+                        : Status(StatusCode::UNKNOWN_ERROR);
     }
 
     //! @brief Return the error description if the message is an error.
     [[nodiscard]] inline std::string errorMessage() const {
-        return mPrivate->getStatus().message();
+        return mPrivate ? mPrivate->getStatus().message() : std::string();
     }
 
 private:

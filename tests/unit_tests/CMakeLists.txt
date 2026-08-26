@@ -66,7 +66,9 @@ add_executable(sdbusxx_unit_tests
     TestLooper.cpp
     TestSession.cpp
     TestMessage.cpp
+    TestPendingReply.cpp
     TestPropertyWrapper.cpp
+    TestReply.cpp
     TestServerClient.cpp
 )
 
