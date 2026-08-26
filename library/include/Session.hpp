@@ -9,8 +9,8 @@
 #include <string>
 #include <string_view>
 #include <type_traits>
+#include <unordered_set>
 #include <utility>
-#include <vector>
 
 #include "private/method/Method.hpp"
 #include "private/method/Reconnect.hpp"
@@ -35,7 +35,7 @@ namespace Dbusxx {
  */
 class Session {
     friend class Looper;
-    using PendingRepsV = std::vector<std::shared_ptr<void>>;
+    using PendingRepsV = std::unordered_set<std::shared_ptr<void>>;
 
     template<typename Ret, typename... Args>
     struct CallbackLikeFirstArg {
@@ -431,7 +431,7 @@ public:
                 aService, aPath, aIface, aMethod, aArgs...)
         );
 
-        mRepsPtr->push_back(rep);
+        mRepsPtr->insert(rep);
         rep->setCallback(
             [RepsPtr = mRepsPtr, cb = Call(std::forward<Callback>(aCallback)),
                 key = std::weak_ptr<void>(rep)] (Reply<Ret> aRep) {
@@ -441,10 +441,10 @@ public:
                 }
                 //! Use RAII to ensure release old rep
                 struct Clear {
-                    std::vector<std::shared_ptr<void>>& reps;
+                    PendingRepsV& reps;
                     std::shared_ptr<void> entry;
                     ~Clear() {
-                        reps.erase(std::find(reps.begin(), reps.end(), entry));
+                        reps.erase(entry);
                     }
                 } clear{*RepsPtr, locked};
 
