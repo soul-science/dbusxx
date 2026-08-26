@@ -19,13 +19,13 @@ int ReplyAsyncHandler::onReply(Adaptor::RawBusMessagePtr aRep,
         self->mCallback(self);
     }
 
-    self->isFinished = true;
+    self->isFinished.store(true, std::memory_order_release);
     return 0;
 }
 
 void ReplyAsyncHandler::setCallback(Callback aCallback) {
     mCallback = aCallback;
-    if (isFinished) {
+    if (isFinished.load(std::memory_order_acquire)) {
         mCallback(this);
     }
 }

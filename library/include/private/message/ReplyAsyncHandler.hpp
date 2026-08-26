@@ -2,6 +2,7 @@
 #ifndef DBUSXX_REPLY_ASYNC_HANDLER_HPP
 #define DBUSXX_REPLY_ASYNC_HANDLER_HPP
 
+#include <atomic>
 #include <functional>
 #include <memory>
 
@@ -23,7 +24,7 @@ struct ReplyAsyncHandler : public MessagePrivate,
 
     Adaptor::RawSlotSharePtr mSlot { nullptr };
     std::function<void(MessagePrivate*)> mCallback { nullptr };
-    bool isFinished { false };
+    std::atomic<bool> isFinished { false };
 };
 
 }

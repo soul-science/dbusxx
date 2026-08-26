@@ -279,7 +279,7 @@ int main() {
 | `Looper` | 事件循环：`run/stop/post/onReady` |
 | `Message` | 消息，支持流式 `<<` / `>>` 读写 |
 | `Reply<Ret>` | 同步调用的返回值（`value()/isError()/status()`） |
-| `PendingReply<Ret>` | 异步调用的句柄（`setCallback` / `wait` / `reply`） |
+| `PendingReply<Ret>` | 异步调用的句柄（`setCallback` / `wait` / `waitFor` / `reply`） |
 | `Status` / `StatusCode` | 错误码和状态 |
 | `MetaObject<Derived>` | 反射元数据收集基类（供宏使用） |
 
