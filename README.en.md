@@ -284,7 +284,7 @@ int main() {
 | `Looper` | Event loop: `run/stop/post/onReady` |
 | `Message` | A message, supporting stream-style `<<` / `>>` read/write |
 | `Reply<Ret>` | Return value of a synchronous call (`value()/isError()/status()`) |
-| `PendingReply<Ret>` | Handle for an asynchronous call (`setCallback` / `wait` / `reply`) |
+| `PendingReply<Ret>` | Handle for an asynchronous call (`setCallback` / `wait` / `waitFor` / `reply`) |
 | `Status` / `StatusCode` | Error codes and status |
 | `MetaObject<Derived>` | Reflection metadata base class (used by the macros) |
 

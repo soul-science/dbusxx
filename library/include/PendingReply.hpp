@@ -1,6 +1,8 @@
 #ifndef DBUSXX_DBUS_PENDING_REPLY_HPP
 #define DBUSXX_DBUS_PENDING_REPLY_HPP
 
+#include <chrono>
+#include <cstdint>
 #include <functional>
 #include <future>
 #include <memory>
@@ -66,20 +68,58 @@ public:
      *
      * Replaces any previously installed callback; the latest one wins.
      *
+     * If the reply has already been delivered synchronously (for example the
+     * call failed while marshalling the arguments, or the reply arrived before
+     * this callback was installed), the callback is invoked immediately with
+     * that reply so the completion is never lost.
+     *
      * @param aCallback completion callback
      */
     void setCallback(std::function<void(Reply<Ret>)> aCallback) {
-        std::lock_guard lock(*mMutex);
-        if (!mCallback) {
-            mCallback = std::make_shared<std::function<void(Reply<Ret>)>>();
+        bool deliver = false;
+        {
+            std::lock_guard lock(*mMutex);
+            if (!mCallback) {
+                mCallback = std::make_shared<std::function<void(Reply<Ret>)>>();
+            }
+
+            *mCallback = std::move(aCallback);
+            if (mHandler && mHandler->isFinished.load()) {
+                mReply = mFuture.get();
+                deliver = true;
+            }
         }
 
-        *mCallback = std::move(aCallback);
+        if (deliver) {
+            (*mCallback)(mReply);
+        }
     }
 
     //! @brief Block until the reply arrives.
-    void wait() {
+    inline void wait() {
         mReply = mFuture.get();
+    }
+
+    /**
+     * @brief Wait for the reply with a timeout.
+     *
+     * Blocks up to `aTimeoutMs` milliseconds for the reply to arrive.
+     * Pass a concrete millisecond value for a bounded wait; `0` performs a
+     * non-blocking check and returns immediately with the current state.
+     * Use `wait()` for an unbounded (infinite) wait.
+     *
+     * @param aTimeoutMs timeout in milliseconds (0 = non-blocking check)
+     * @return true if the reply arrived within the timeout; false on timeout.
+     *         Only read `reply()` after a `true` return.
+    */
+    [[nodiscard]] bool waitFor(std::size_t aTimeoutMs) {
+        if (mFuture.wait_for(std::chrono::milliseconds(aTimeoutMs))
+                == std::future_status::timeout) {
+            return false;
+        }
+
+        mReply = mFuture.get();
+        return true;
     }
 
     //! @brief Return the reply obtained by `wait()`.
@@ -157,20 +197,60 @@ public:
     /**
      * @brief Install a callback to be invoked when the reply arrives.
      *
+     * Replaces any previously installed callback; the latest one wins.
+     *
+     * If the reply has already been delivered synchronously (for example the
+     * call failed while marshalling the arguments, or the reply arrived before
+     * this callback was installed), the callback is invoked immediately with
+     * that reply so the completion is never lost.
+     *
      * @param aCallback completion callback
      */
     void setCallback(std::function<void(Reply<void>)> aCallback) {
-        std::lock_guard lock(*mMutex);
-        if (!mCallback) {
-            mCallback = std::make_shared<std::function<void(Reply<void>)>>();
+        bool deliver = false;
+        {
+            std::lock_guard lock(*mMutex);
+            if (!mCallback) {
+                mCallback = std::make_shared<std::function<void(Reply<void>)>>();
+            }
+
+            *mCallback = std::move(aCallback);
+            if (mHandler && mHandler->isFinished.load()) {
+                mReply = mFuture.get();
+                deliver = true;
+            }
         }
 
-        *mCallback = std::move(aCallback);
+        if (deliver) {
+            (*mCallback)(mReply);
+        }
     }
 
     //! @brief Block until the reply arrives.
-    void wait() {
+    inline void wait() {
         mReply = mFuture.get();
+    }
+
+    /**
+     * @brief Wait for the reply with a timeout.
+     *
+     * Blocks up to `aTimeoutMs` milliseconds for the reply to arrive.
+     * Pass a concrete millisecond value for a bounded wait; `0` performs a
+     * non-blocking check and returns immediately with the current state.
+     * Use `wait()` for an unbounded (infinite) wait.
+     *
+     * @param aTimeoutMs timeout in milliseconds (0 = non-blocking check)
+     * @return true if the reply arrived within the timeout; false on timeout.
+     *         Only read `reply()` after a `true` return.
+    */
+    [[nodiscard]] bool waitFor(std::size_t aTimeoutMs) {
+        if (mFuture.wait_for(std::chrono::milliseconds(aTimeoutMs))
+                == std::future_status::timeout) {
+            return false;
+        }
+
+        mReply = mFuture.get();
+        return true;
     }
 
     //! @brief Return the reply obtained by `wait()`.

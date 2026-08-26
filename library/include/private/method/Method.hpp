@@ -290,18 +290,32 @@ std::shared_ptr<Private::ReplyAsyncHandler> callAsync(
         aSession->type() != SessionType::PEER ? aService : "",
         aPath, aIface, aMethod);
 
+    Status st = Status(StatusCode::SUCCESS);
     if constexpr (sizeof...(Args)) {
-        callMsg.write(aArgs...);
+        st = callMsg.write(aArgs...);
     }
 
     auto repHandler = std::make_shared<Private::ReplyAsyncHandler>();
+    if (st.isError()) {
+        repHandler->setStatus(st);
+        //! Finish synchronously: the PendingReply will deliver this error
+        //! right away instead of blocking wait()/waitFor() forever.
+        repHandler->isFinished = true;
+        return repHandler;
+    }
+
     Adaptor::RawBusSlotPtr rawSlot = nullptr;
-    Status st = Adaptor::RawBus::callAsync(
+    st = Adaptor::RawBus::callAsync(
         aSession->rawBus().get(), rawSlot, callMsg.rawMessage(),
         Private::ReplyAsyncHandler::onReply, repHandler.get(), aTimeoutUmsc
     );
     repHandler->mSlot = Adaptor::RawSlotSharePtr(rawSlot);
     repHandler->setStatus(st);
+    if (st.isError()) {
+        //! sd_bus_call_async failed without registering a pending call, so
+        //! onReply will never fire; finish synchronously to avoid a hang.
+        repHandler->isFinished = true;
+    }
 
     return repHandler;
 }
