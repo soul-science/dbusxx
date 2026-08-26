@@ -77,6 +77,7 @@ public:
      */
     void setCallback(std::function<void(Reply<Ret>)> aCallback) {
         bool deliver = false;
+        std::function<void(Reply<Ret>)> cb;
         {
             std::lock_guard lock(*mMutex);
             if (!mCallback) {
@@ -84,6 +85,7 @@ public:
             }
 
             *mCallback = std::move(aCallback);
+            cb = *mCallback;
             if (mHandler && mHandler->isFinished.load()) {
                 mReply = mFuture.get();
                 deliver = true;
@@ -91,7 +93,7 @@ public:
         }
 
         if (deliver) {
-            (*mCallback)(mReply);
+            cb(mReply);
         }
     }
 
@@ -208,6 +210,7 @@ public:
      */
     void setCallback(std::function<void(Reply<void>)> aCallback) {
         bool deliver = false;
+        std::function<void(Reply<void>)> cb;
         {
             std::lock_guard lock(*mMutex);
             if (!mCallback) {
@@ -215,6 +218,7 @@ public:
             }
 
             *mCallback = std::move(aCallback);
+            cb = *mCallback;
             if (mHandler && mHandler->isFinished.load()) {
                 mReply = mFuture.get();
                 deliver = true;
@@ -222,7 +226,7 @@ public:
         }
 
         if (deliver) {
-            (*mCallback)(mReply);
+            cb(mReply);
         }
     }
 
