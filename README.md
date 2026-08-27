@@ -337,6 +337,8 @@ int main() {
 - `std::string_view` 读写时按 `const char*` 处理，`float` 按 `double` 处理
 - 不支持的 C++ 类型在编译期就 `static_assert` 报错，不会留到运行期
 
+> ⚠️ **重要限制：不支持原生数组 `T[N]` 作为结构体成员**。定长数组字段请用 `std::array<T, N>`，动态数组字段请用 `std::vector<T>`。
+
 ## 反射宏
 
 | 宏 | 作用 |

@@ -324,7 +324,7 @@ public:
     [[nodiscard]] Status registerSignal(std::string_view aPath, std::string aIface,
             std::string_view aSignalName) {
         return registerBuilder(aPath, aIface)
-            .addSignal(aSignalName)
+            .addSignal<Args...>(aSignalName)
             .commit();
     }
 
