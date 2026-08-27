@@ -108,7 +108,7 @@ inline constexpr std::size_t memberCountV = memberCountImpl<T>::value;
 
 //! Generate one tieAsTuple overload for a struct with N fields.
 #define DBUSXX_DETAIL_TIE_AS_TUPLE(N)                                       \
-    template <class T>                                                      \
+    template<class T>                                                       \
     auto tieAsTuple(T& v, std::integral_constant<std::size_t, N>)           \
         -> decltype(auto) {                                                 \
         auto& [DBUSXX_DETAIL_FIELDS(N)] = v;                                \
@@ -137,7 +137,7 @@ inline constexpr std::size_t memberCountV = memberCountImpl<T>::value;
 #define DBUSXX_DETAIL_TIE_TUPLE_19 DBUSXX_DETAIL_TIE_AS_TUPLE(19) DBUSXX_DETAIL_TIE_TUPLE_18
 #define DBUSXX_DETAIL_TIE_TUPLE_20 DBUSXX_DETAIL_TIE_AS_TUPLE(20) DBUSXX_DETAIL_TIE_TUPLE_19
 
-template <class T>
+template<class T>
 auto tieAsTuple(T&, std::integral_constant<std::size_t, 0>) -> std::tuple<> {
     return {};
 }
@@ -145,7 +145,7 @@ auto tieAsTuple(T&, std::integral_constant<std::size_t, 0>) -> std::tuple<> {
 //! Expand the generated overloads (1..20 fields).
 DBUSXX_DETAIL_TIE_TUPLE_20
 
-template <class T>
+template<class T>
 auto tieAsTuple(T& v) -> decltype(auto) {
     constexpr std::size_t N = memberCountV<T>;
     static_assert(N <= 20,
@@ -155,16 +155,16 @@ auto tieAsTuple(T& v) -> decltype(auto) {
 }
 
 //! Get the type of a member of an aggregate struct.
-template <std::size_t I, class T>
+template<std::size_t I, class T>
 using memberTypeT = std::remove_reference_t<
     std::tuple_element_t<I, decltype(tieAsTuple(std::declval<T&>()))>>;
 
-template <class T, std::size_t... Is>
+template<class T, std::size_t... Is>
 auto memberTypes(std::index_sequence<Is...>)
     -> std::tuple<memberTypeT<Is, T>...>;
 
 //! Get the all types of the members of an aggregate struct.
-template <class T>
+template<class T>
 using memberTypesT = decltype(memberTypes<T>(
     std::make_index_sequence<memberCountV<T>>{}));
 

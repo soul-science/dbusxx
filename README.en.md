@@ -342,6 +342,8 @@ Notes:
 - `std::string_view` is treated as `const char*`, and `float` as `double`, when reading/writing
 - Unsupported C++ types fail with a `static_assert` at compile time, never at runtime
 
+> ⚠️ **Important limitation: native C arrays `T[N]` are not supported as struct members**. Use `std::array<T, N>` for fixed-size array fields and `std::vector<T>` for dynamic arrays.
+
 ## Reflection macros
 
 | Macro | Purpose |
