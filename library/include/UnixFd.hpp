@@ -14,12 +14,7 @@ public:
     explicit UnixFd(int aFd)
         : mFd(aFd) {}
 
-    //! Copy = dup a fresh independent handle to the *same* kernel object
-    //! (shares the underlying file description; no data is copied).
-    //! Rationale: the library's async machinery (Client/PendingReply uses
-    //! make_tuple + shared_future) requires copyable value types, so fd must
-    //! be copyable to travel through those paths. dup() failure (EMFILE)
-    //! yields -1; each copy owns and closes its own fd number.
+    //! Use dup to copy fd(a new fd of the same file)
     UnixFd(const UnixFd& aOther)
         : mFd(dupOf(aOther.mFd)) {}
 
