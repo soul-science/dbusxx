@@ -212,6 +212,12 @@ public:
         //! fd 是 move-only，跨线程 emit 需要把所有权移进信号参数
         Status st = emit("/com/example/demo","com.example.Demo",
             "fdReady", std::move(fd));
+        if (st.isError()) {
+            //! 发送失败必须显式暴露：避免信号丢失/fd 状态被静默吞没
+            std::cout << "[server] emit fdReady FAILED: "
+                      << st.message() << std::endl;
+            return;
+        }
         std::cout << "[server] emit fdReady result: " << st.message() << std::endl;
     }
     DBUSXX_METHOD(triggerFdSignal)
