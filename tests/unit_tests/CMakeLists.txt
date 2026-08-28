@@ -61,6 +61,7 @@ add_executable(sdbusxx_unit_tests
     main.cpp
     TestStatus.cpp
     TestArgs.cpp
+    TestUnixFd.cpp
     TestFuncTrait.cpp
     TestRawError.cpp
     TestLooper.cpp

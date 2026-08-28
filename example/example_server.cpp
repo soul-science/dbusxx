@@ -10,17 +10,20 @@
 #include "Session.hpp"
 #include "Reply.hpp"
 #include "PendingReply.hpp"
+#include "UnixFd.hpp"
 
 #include <array>
 #include <chrono>
 #include <condition_variable>
 #include <csignal>
+#include <fcntl.h>
 #include <iostream>
 #include <map>
 #include <mutex>
 #include <string>
 #include <string_view>
 #include <thread>
+#include <unistd.h>
 #include <vector>
 
 using namespace Dbusxx;
@@ -140,6 +143,22 @@ public:
     }
     DBUSXX_METHOD(testMultiArgs)
 
+    // ─ Unix fd 方法 ─
+
+    // echo 回传收到的 fd（move-only 出入参，签名 'h'）
+    UnixFd echoFd(UnixFd fd) {
+        std::cout << "[server] echoFd: fd=" << fd.get() << std::endl;
+        return fd;
+    }
+    DBUSXX_METHOD(echoFd)
+
+    // 批量 fd：std::vector<UnixFd> → 'ah'
+    std::vector<UnixFd> echoFdList(std::vector<UnixFd> fds) {
+        std::cout << "[server] echoFdList: size=" << fds.size() << std::endl;
+        return fds;
+    }
+    DBUSXX_METHOD(echoFdList)
+
     // ─ Map 读写方法 ─
 
     // 读取 map: echo 回显 int map
@@ -187,6 +206,16 @@ public:
     }
     DBUSXX_METHOD(triggerClear)
 
+    // 触发携带 fd 的信号（fdReady）
+    void triggerFdSignal(UnixFd fd) {
+        std::cout << "[server] triggerFdSignal: fd=" << fd.get() << std::endl;
+        //! fd 是 move-only，跨线程 emit 需要把所有权移进信号参数
+        Status st = emit("/com/example/demo","com.example.Demo",
+            "fdReady", std::move(fd));
+        std::cout << "[server] emit fdReady result: " << st.message() << std::endl;
+    }
+    DBUSXX_METHOD(triggerFdSignal)
+
     // ─ 关闭服务 ─
 
     void shutdown() {
@@ -198,6 +227,9 @@ public:
     // ─ 信号声明 ─
 
     DBUSXX_SIGNAL(clear, int, int)
+
+    // 携带 UnixFd 的信号（签名 'h'）
+    DBUSXX_SIGNAL(fdReady, UnixFd)
 
     // ─ 属性 ─
     // RO: 只读属性，外部只能 Get 不能 Set
@@ -266,6 +298,12 @@ static int gFailed = 0;
         }                                                                     \
         std::cout << std::endl;                                               \
     } while (0)
+
+// ⚠️ fdReady 信号监听是永久的（存活到 asyncClient 销毁），回调捕获对象必须
+//    覆盖整个生命周期，故用文件级 static（与 clear 信号的 main 顶层变量同理）。
+static SyncFlag gFdSignalFlag;
+static bool gFdSignalReadOk = false;
+static int gFdSignalFd = -1;
 
 // ── main ──────────────────────────────────────────────────────────────────
 
@@ -574,6 +612,111 @@ int main() {
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
         TEST("async call received", asyncDone.get());
         TEST("async call echo", asyncResult == "async-hello");
+    }
+
+    // ⑨.⑤ Unix fd 传输测试（方法 + 信号）
+    std::cout << "\n=== Step 9.5: Unix fd passing ===" << std::endl;
+    std::cout << "  sig UnixFd         = " << getSignature<UnixFd>() << std::endl;
+    std::cout << "  sig vector<UnixFd> = "
+              << getSignature<std::vector<UnixFd>>() << std::endl;
+    {
+        // 单 fd 往返：pipe 读端 → echoFd → 返回一个新 fd（'h'）
+        int pipefd[2];
+        if (::pipe(pipefd) == 0) {
+            // 读端设为非阻塞，避免测试失败时 read 挂死
+            ::fcntl(pipefd[0], F_SETFL,
+                ::fcntl(pipefd[0], F_GETFL, 0) | O_NONBLOCK);
+
+            auto r = syncClient.callSync<UnixFd>(
+                svc, path, iface, "echoFd", UnixFd(pipefd[0]));
+            TEST("echoFd call ok", !r.isError());
+            TEST("echoFd returns a new fd", !r.isError()
+                && r.value().get() >= 0 && r.value().get() != pipefd[0]);
+
+            // 功能验证：向写端写，从返回的 fd 读出（证明指向同一 pipe）
+            TEST("echoFd write", ::write(pipefd[1], "hello", 5) == 5);
+            char buf[8] = {0};
+            TEST("echoFd read via returned fd",
+                ::read(r.value().get(), buf, 5) == 5
+                && std::string(buf) == "hello");
+
+            ::close(pipefd[1]);
+        } else {
+            TEST("echoFd pipe create", false);
+        }
+    }
+    {
+        // 批量 fd 往返：两个 pipe 读端 → echoFdList → 返回两个新 fd（'ah'）
+        int pa[2], pb[2];
+        if (::pipe(pa) == 0 && ::pipe(pb) == 0) {
+            ::fcntl(pa[0], F_SETFL, ::fcntl(pa[0], F_GETFL, 0) | O_NONBLOCK);
+            ::fcntl(pb[0], F_SETFL, ::fcntl(pb[0], F_GETFL, 0) | O_NONBLOCK);
+
+            std::vector<UnixFd> in;
+            in.push_back(UnixFd(pa[0]));
+            in.push_back(UnixFd(pb[0]));
+            auto r = syncClient.callSync<std::vector<UnixFd>>(
+                svc, path, iface, "echoFdList", in);
+            TEST("echoFdList ok", !r.isError() && r.value().size() == 2);
+            TEST("echoFdList distinct fds", !r.isError()
+                && r.value()[0].get() >= 0 && r.value()[1].get() >= 0
+                && r.value()[0].get() != r.value()[1].get());
+
+            // 功能验证：往 pa 写端写，从返回的 fd[0] 读出
+            TEST("echoFdList write", ::write(pa[1], "AAA", 3) == 3);
+            char buf[4] = {0};
+            TEST("echoFdList read via returned fd",
+                ::read(r.value()[0].get(), buf, 3) == 3
+                && std::string(buf) == "AAA");
+
+            ::close(pa[1]);
+            ::close(pb[1]);
+        } else {
+            TEST("echoFdList pipe create", false);
+        }
+    }
+    {
+        // fd 信号：服务端 emit fdReady，客户端回调内读取
+        gFdSignalFlag.reset();
+        gFdSignalReadOk = false;
+        gFdSignalFd = -1;
+
+        Status stSig = asyncClient.listenSignal(
+            svc, path, iface, "fdReady",
+            [](UnixFd fd) {
+                std::cout << "  [client] signal 'fdReady' received: fd="
+                          << fd.get() << std::endl;
+                char buf[8] = {0};
+                // fd 归回调参数所有，读取须在回调内完成
+                gFdSignalReadOk = (::read(fd.get(), buf, 5) == 5
+                    && std::string(buf) == "hello");
+                gFdSignalFd = fd.get();
+                gFdSignalFlag.set();
+            });
+        TEST("listenSignal fdReady", stSig.isSuccess());
+
+        if (stSig.isSuccess()) {
+            int pipefd[2];
+            if (::pipe(pipefd) == 0) {
+                ::fcntl(pipefd[0], F_SETFL,
+                    ::fcntl(pipefd[0], F_GETFL, 0) | O_NONBLOCK);
+
+                // 先写数据再触发，确保回调里 read 不阻塞
+                TEST("fdSignal write", ::write(pipefd[1], "hello", 5) == 5);
+                auto r = syncClient.callSync(
+                    svc, path, iface, "triggerFdSignal", UnixFd(pipefd[0]));
+                TEST("triggerFdSignal call", !r.isError());
+
+                gFdSignalFlag.wait();
+                std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                TEST("fdReady signal received", gFdSignalFlag.get());
+                TEST("fdReady fd valid", gFdSignalFd >= 0);
+                TEST("fdReady data read inside callback", gFdSignalReadOk);
+                ::close(pipefd[1]);
+            } else {
+                TEST("fdSignal pipe create", false);
+            }
+        }
     }
 
     // ⑩ 关闭服务 — 用 syncClient（无事件循环，不会竞争）

@@ -9,15 +9,18 @@
 
 #include "Client.hpp"
 #include "Server.hpp"
+#include "UnixFd.hpp"
 
 #include <chrono>
 #include <condition_variable>
 #include <csignal>
+#include <fcntl.h>
 #include <iostream>
 #include <map>
 #include <mutex>
 #include <string>
 #include <thread>
+#include <unistd.h>
 #include <vector>
 
 using namespace Dbusxx;
@@ -64,6 +67,19 @@ public:
         std::cout << "[server] testMultiArgs: i=" << i << ", s=" << s << std::endl;
     }
     DBUSXX_METHOD(testMultiArgs)
+
+    // ── Unix fd 方法 ────────────────────────────────────────────────
+    UnixFd echoFd(UnixFd fd) {
+        std::cout << "[server] echoFd: fd=" << fd.get() << std::endl;
+        return fd;
+    }
+    DBUSXX_METHOD(echoFd)
+
+    std::vector<UnixFd> echoFdList(std::vector<UnixFd> fds) {
+        std::cout << "[server] echoFdList: size=" << fds.size() << std::endl;
+        return fds;
+    }
+    DBUSXX_METHOD(echoFdList)
 
     // ── 自定义结构体方法 ─────────────────────────────────────────────
     Point addPoint(const Point& p, const Point& q) {
@@ -371,6 +387,59 @@ int main() {
         TEST("echoPointList round-trip",
             !r.isError() && r.value().size() == 2
                 && r.value()[0].x == 1 && r.value()[1].y == 2);
+    }
+
+    // ⑧.⑥ Unix fd 往返 — 单 fd / 批量 fd
+    std::cout << "\n=== Step 8.6: Unix fd round-trip ===" << std::endl;
+    std::cout << "  sig UnixFd         = " << getSignature<UnixFd>() << std::endl;
+    std::cout << "  sig vector<UnixFd> = "
+              << getSignature<std::vector<UnixFd>>() << std::endl;
+    {
+        // 单 fd：pipe 读端 → echoFd → 返回新 fd，写端数据可从返回 fd 读出
+        int pipefd[2];
+        if (::pipe(pipefd) == 0) {
+            ::fcntl(pipefd[0], F_SETFL,
+                ::fcntl(pipefd[0], F_GETFL, 0) | O_NONBLOCK);
+
+            auto r = c.callSync<UnixFd>("echoFd", UnixFd(pipefd[0]));
+            TEST("echoFd call ok", !r.isError());
+            TEST("echoFd new fd", !r.isError()
+                && r.value().get() >= 0 && r.value().get() != pipefd[0]);
+            TEST("echoFd write", ::write(pipefd[1], "hi", 2) == 2);
+            char buf[4] = {0};
+            TEST("echoFd read via returned fd",
+                ::read(r.value().get(), buf, 2) == 2
+                && std::string(buf) == "hi");
+            ::close(pipefd[1]);
+        } else {
+            TEST("echoFd pipe create", false);
+        }
+    }
+    {
+        // 批量 fd：两个 pipe 读端 → echoFdList → 返回两个新 fd
+        int pa[2], pb[2];
+        if (::pipe(pa) == 0 && ::pipe(pb) == 0) {
+            ::fcntl(pa[0], F_SETFL, ::fcntl(pa[0], F_GETFL, 0) | O_NONBLOCK);
+            ::fcntl(pb[0], F_SETFL, ::fcntl(pb[0], F_GETFL, 0) | O_NONBLOCK);
+
+            std::vector<UnixFd> in;
+            in.push_back(UnixFd(pa[0]));
+            in.push_back(UnixFd(pb[0]));
+            auto r = c.callSync<std::vector<UnixFd>>("echoFdList", in);
+            TEST("echoFdList ok", !r.isError() && r.value().size() == 2);
+            TEST("echoFdList distinct", !r.isError()
+                && r.value()[0].get() >= 0 && r.value()[1].get() >= 0
+                && r.value()[0].get() != r.value()[1].get());
+            TEST("echoFdList write", ::write(pa[1], "AB", 2) == 2);
+            char buf[4] = {0};
+            TEST("echoFdList read via returned fd",
+                ::read(r.value()[0].get(), buf, 2) == 2
+                && std::string(buf) == "AB");
+            ::close(pa[1]);
+            ::close(pb[1]);
+        } else {
+            TEST("echoFdList pipe create", false);
+        }
     }
 
     // ⑨ 关闭服务

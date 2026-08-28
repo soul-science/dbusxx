@@ -93,9 +93,9 @@ struct MethodWrapper {
 
                 //! Apply function
                 if constexpr (std::is_same_v<Ret, void>) {
-                    std::apply(self->func, tpl);
+                    std::apply(self->func, std::move(tpl));
                 } else {
-                    Ret ret = std::apply(self->func, tpl);
+                    Ret ret = std::apply(self->func, std::move(tpl));
                     st = reply.write(ret);
                     if (st.isError()) {
                         Adaptor::RawRemoteError::fromStatus(st.code()).moveTo(aErr);

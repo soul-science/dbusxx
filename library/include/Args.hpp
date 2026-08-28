@@ -13,6 +13,8 @@
 #include <utility>
 #include <vector>
 
+#include "UnixFd.hpp"
+
 
 namespace Dbusxx {
 template<std::size_t I>
@@ -280,6 +282,11 @@ struct BasicSignature<std::string> {
 template<>
 struct BasicSignature<std::string_view> {
     static constexpr char value = 's';
+};
+
+template<>
+struct BasicSignature<UnixFd> {
+    static constexpr char value = 'h';
 };
 
 //! void

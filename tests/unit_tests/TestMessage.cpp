@@ -8,14 +8,17 @@
 
 #include <array>
 #include <cstdint>
+#include <fcntl.h>
 #include <map>
 #include <string>
 #include <string_view>
 #include <tuple>
 #include <unordered_map>
+#include <unistd.h>
 #include <vector>
 
 #include "private/message/MessagePrivate.hpp"
+#include "UnixFd.hpp"
 #include "Args.hpp"
 #include "Status.hpp"
 #include "TestUtil.hpp"
@@ -43,6 +46,13 @@ struct Nested {
     Point p;
     std::string tag;
     bool operator==(const Nested& o) const { return p == o.p && tag == o.tag; }
+};
+
+//! Aggregate carrying a UnixFd member (maps to (hsi)).
+struct WithFd {
+    UnixFd      fd;
+    std::string path;
+    int32_t     flags;
 };
 
 //! write → seal → read → compare
@@ -180,6 +190,110 @@ TEST(MessageTest, StructRoundTrips) {
     expectRoundTrip<Nested>({{1, 2}, "tag"});
     expectRoundTrip<std::vector<Point>>({{1, 2}, {3, 4}});
     expectRoundTrip<std::map<std::string, Point>>({{"p", {5, 6}}});
+}
+
+TEST(MessageTest, UnixFdRoundTrip) {
+    if (!Dbusxx::UnitTest::busAvailable()) {
+        GTEST_SKIP() << "no session D-Bus daemon available";
+    }
+
+    int fds[2];
+    ASSERT_EQ(::pipe(fds), 0);
+    ::fcntl(fds[0], F_SETFL, ::fcntl(fds[0], F_GETFL, 0) | O_NONBLOCK);
+
+    auto msg = Dbusxx::UnitTest::makeMessage();
+    Status st = msg.write(UnixFd(fds[0]));
+    EXPECT_TRUE(st.isSuccess());
+    st = Dbusxx::UnitTest::sealMessage(msg);
+    EXPECT_TRUE(st.isSuccess());
+
+    UnixFd out;
+    st = msg.read(out);
+    EXPECT_TRUE(st.isSuccess());
+    //! read() must hand out a usable handle (dup of the message's own fd).
+    //! NB: the fd *number* is not a reliable invariant — the original is
+    //! closed when the temporary UnixFd dies, so dup() may reuse that number.
+    EXPECT_GE(out.get(), 0);
+
+    //! Functional: same pipe object — data written on one end reads back.
+    ASSERT_EQ(::write(fds[1], "hello", 5), 5);
+    char buf[8] = {0};
+    EXPECT_EQ(::read(out.get(), buf, 5), 5);
+    EXPECT_STREQ(buf, "hello");
+
+    //! msg + out destroyed here; both own their own fd → no double-close.
+    ::close(fds[1]);
+}
+
+TEST(MessageTest, StructWithFdRoundTrip) {
+    if (!Dbusxx::UnitTest::busAvailable()) {
+        GTEST_SKIP() << "no session D-Bus daemon available";
+    }
+
+    int fds[2];
+    ASSERT_EQ(::pipe(fds), 0);
+    ::fcntl(fds[0], F_SETFL, ::fcntl(fds[0], F_GETFL, 0) | O_NONBLOCK);
+
+    WithFd in { UnixFd(fds[0]), std::string("pipe"), 7 };
+    auto msg = Dbusxx::UnitTest::makeMessage();
+    Status st = msg.write(in);
+    EXPECT_TRUE(st.isSuccess());
+    st = Dbusxx::UnitTest::sealMessage(msg);
+    EXPECT_TRUE(st.isSuccess());
+
+    WithFd out {};
+    st = msg.read(out);
+    EXPECT_TRUE(st.isSuccess());
+    EXPECT_EQ(out.path, "pipe");
+    EXPECT_EQ(out.flags, 7);
+    EXPECT_GE(out.fd.get(), 0);
+
+    //! Functional: the fd member still refers to the same pipe.
+    ASSERT_EQ(::write(fds[1], "hi", 2), 2);
+    char buf[4] = {0};
+    EXPECT_EQ(::read(out.fd.get(), buf, 2), 2);
+    EXPECT_STREQ(buf, "hi");
+
+    ::close(fds[1]);
+}
+
+TEST(MessageTest, UnixFdVectorRoundTrip) {
+    if (!Dbusxx::UnitTest::busAvailable()) {
+        GTEST_SKIP() << "no session D-Bus daemon available";
+    }
+
+    int pa[2], pb[2];
+    ASSERT_EQ(::pipe(pa), 0);
+    ASSERT_EQ(::pipe(pb), 0);
+    ::fcntl(pa[0], F_SETFL, ::fcntl(pa[0], F_GETFL, 0) | O_NONBLOCK);
+    ::fcntl(pb[0], F_SETFL, ::fcntl(pb[0], F_GETFL, 0) | O_NONBLOCK);
+
+    std::vector<UnixFd> in;
+    in.push_back(UnixFd(pa[0]));
+    in.push_back(UnixFd(pb[0]));
+
+    auto msg = Dbusxx::UnitTest::makeMessage();
+    Status st = msg.write(in);
+    EXPECT_TRUE(st.isSuccess());
+    st = Dbusxx::UnitTest::sealMessage(msg);
+    EXPECT_TRUE(st.isSuccess());
+
+    std::vector<UnixFd> out;
+    st = msg.read(out);
+    EXPECT_TRUE(st.isSuccess());
+    ASSERT_EQ(out.size(), 2u);
+    EXPECT_GE(out[0].get(), 0);
+    EXPECT_GE(out[1].get(), 0);
+    EXPECT_NE(out[0].get(), out[1].get());
+
+    //! Functional: feed the first pipe and read via the returned fd.
+    ASSERT_EQ(::write(pa[1], "AB", 2), 2);
+    char buf[4] = {0};
+    EXPECT_EQ(::read(out[0].get(), buf, 2), 2);
+    EXPECT_STREQ(buf, "AB");
+
+    ::close(pa[1]);
+    ::close(pb[1]);
 }
 
 TEST(MessageTest, ReadFromEmptyFails) {
