@@ -21,7 +21,9 @@ public:
 
     //! Use dup to copy fd(a new fd of the same file)
     UnixFd(const UnixFd& aOther)
-        : mFd(dupOf(aOther.mFd)) {}
+        : mFd(dupOf(aOther.mFd))
+        , mStatus(isValidFd(mFd) ? Status(StatusCode::SUCCESS)
+            : Status(StatusCode::INVALID_ARG)) {}
 
     UnixFd& operator=(const UnixFd& aOther) {
         if (this != &aOther) {
@@ -37,7 +39,9 @@ public:
     }
 
     UnixFd(UnixFd&& aOther) noexcept
-        :mFd(aOther.release()) {}
+        : mFd(aOther.release())
+        , mStatus(isValidFd(mFd) ? Status(StatusCode::SUCCESS)
+            : Status(StatusCode::INVALID_ARG)) {}
 
     UnixFd& operator=(UnixFd&& aOther) noexcept {
         if (this == &aOther) {

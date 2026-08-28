@@ -103,8 +103,12 @@ public:
 
     void triggerClear(int a, int b) {
         std::cout << "[server] triggerClear(" << a << ", " << b << ")" << std::endl;
-        (void)emit("/com/example/demo", "com.example.Demo",
+        Status st = emit("/com/example/demo", "com.example.Demo",
             "clear", a, b);
+        if (st.isError()) {
+            std::cout << "[server] emit clear FAILED: " << st.message() << std::endl;
+            return;
+        }
     }
     DBUSXX_METHOD(triggerClear)
 
@@ -122,13 +126,16 @@ public:
 
     //! 注册本地属性变更监听
     void listenVersion() {
-        [[maybe_unused]] auto st = session().onLocalPropertyChanged<int32_t>(
+        Status st = session().onLocalPropertyChanged<int32_t>(
             "/com/example/demo", "com.example.Demo", "version",
             [this](const int32_t& v) {
                 std::cout << "[server] version property changed: " << v << std::endl;
                 mVerChanged = true;
                 mNewVer = v;
             });
+        if (st.isError()) {
+            std::cout << "[server] listenVersion FAILED: " << st.message() << std::endl;
+        }
     }
 
     bool mVerChanged { false };

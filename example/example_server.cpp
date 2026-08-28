@@ -246,13 +246,16 @@ public:
 
     //! 注册本地属性变更监听（供外部 main 调用）
     void listenVersion() {
-        (void)session().onLocalPropertyChanged<int32_t>(
+        Status st = session().onLocalPropertyChanged<int32_t>(
             "/com/example/demo","com.example.Demo","version",
             [this](const int32_t& v) {
                 std::cout << "[server] version changed: " << v << std::endl;
                 mVerChanged = true;
                 mNewVer = v;
             });
+        if (st.isError()) {
+            std::cout << "[server] listenVersion FAILED: " << st.message() << std::endl;
+        }
     }
     bool mVerChanged { false };
     int32_t mNewVer { 0 };
@@ -538,10 +541,13 @@ int main() {
                 }).isSuccess());
 
         // 通过远端修改触发
-        (void)syncClient.setRemoteProperty<std::string>(
+        Status stRemote = syncClient.setRemoteProperty<std::string>(
             svc, path, iface, "description", std::string("remote-set"));
-        srvPropFlag.wait();
-        TEST("Server::onPropertyChanged fired", newDesc == "remote-set");
+        TEST("Server::setRemoteProperty trigger", stRemote.isSuccess());
+        if (stRemote.isSuccess()) {
+            srvPropFlag.wait();
+            TEST("Server::onPropertyChanged fired", newDesc == "remote-set");
+        }
     }
 
     // ⑤ 信号监听 — 在事件循环启动前注册（避免线程竞争）
@@ -559,6 +565,20 @@ int main() {
             signalReceived.set();
         });
     TEST("listenSignal clear", stListen.isSuccess());
+
+    // fdReady 信号监听（与 clear 一样，须在事件循环启动前注册）
+    Status stFd = asyncClient.listenSignal(
+        svc, path, iface, "fdReady",
+        [](UnixFd fd) {
+            std::cout << "  [client] signal 'fdReady' received: fd="
+                      << fd.get() << std::endl;
+            char buf[8] = {0};
+            gFdSignalReadOk = (::read(fd.get(), buf, 5) == 5
+                && std::string(buf) == "hello");
+            gFdSignalFd = fd.get();
+            gFdSignalFlag.set();
+        });
+    TEST("listenSignal fdReady", stFd.isSuccess());
 
     // ⑥ 启动客户端事件循环
     std::cout << "\n=== Step 6: Starting client event loop ===" << std::endl;
@@ -681,48 +701,29 @@ int main() {
             TEST("echoFdList pipe create", false);
         }
     }
-    {
-        // fd 信号：服务端 emit fdReady，客户端回调内读取
-        gFdSignalFlag.reset();
-        gFdSignalReadOk = false;
-        gFdSignalFd = -1;
+    // fdReady 信号：服务端 emit fdReady，客户端回调内读取
+    gFdSignalFlag.reset();
+    gFdSignalReadOk = false;
+    gFdSignalFd = -1;
 
-        Status stSig = asyncClient.listenSignal(
-            svc, path, iface, "fdReady",
-            [](UnixFd fd) {
-                std::cout << "  [client] signal 'fdReady' received: fd="
-                          << fd.get() << std::endl;
-                char buf[8] = {0};
-                // fd 归回调参数所有，读取须在回调内完成
-                gFdSignalReadOk = (::read(fd.get(), buf, 5) == 5
-                    && std::string(buf) == "hello");
-                gFdSignalFd = fd.get();
-                gFdSignalFlag.set();
-            });
-        TEST("listenSignal fdReady", stSig.isSuccess());
+    int pipefd[2];
+    if (::pipe(pipefd) == 0) {
+        ::fcntl(pipefd[0], F_SETFL,
+            ::fcntl(pipefd[0], F_GETFL, 0) | O_NONBLOCK);
 
-        if (stSig.isSuccess()) {
-            int pipefd[2];
-            if (::pipe(pipefd) == 0) {
-                ::fcntl(pipefd[0], F_SETFL,
-                    ::fcntl(pipefd[0], F_GETFL, 0) | O_NONBLOCK);
+        TEST("fdSignal write", ::write(pipefd[1], "hello", 5) == 5);
+        auto r = syncClient.callSync(
+            svc, path, iface, "triggerFdSignal", UnixFd(pipefd[0]));
+        TEST("triggerFdSignal call", !r.isError());
 
-                // 先写数据再触发，确保回调里 read 不阻塞
-                TEST("fdSignal write", ::write(pipefd[1], "hello", 5) == 5);
-                auto r = syncClient.callSync(
-                    svc, path, iface, "triggerFdSignal", UnixFd(pipefd[0]));
-                TEST("triggerFdSignal call", !r.isError());
-
-                gFdSignalFlag.wait();
-                std::this_thread::sleep_for(std::chrono::milliseconds(100));
-                TEST("fdReady signal received", gFdSignalFlag.get());
-                TEST("fdReady fd valid", gFdSignalFd >= 0);
-                TEST("fdReady data read inside callback", gFdSignalReadOk);
-                ::close(pipefd[1]);
-            } else {
-                TEST("fdSignal pipe create", false);
-            }
-        }
+        gFdSignalFlag.wait();
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        TEST("fdReady signal received", gFdSignalFlag.get());
+        TEST("fdReady fd valid", gFdSignalFd >= 0);
+        TEST("fdReady data read inside callback", gFdSignalReadOk);
+        ::close(pipefd[1]);
+    } else {
+        TEST("fdSignal pipe create", false);
     }
 
     // ⑩ 关闭服务 — 用 syncClient（无事件循环，不会竞争）

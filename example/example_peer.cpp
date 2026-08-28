@@ -122,7 +122,10 @@ int main() {
 
     // 由 server 线程 emit 信号
     server.post([&server] {
-        (void)server.emit(PATH, IFACE, "onNotify", 100, std::string("hello from server"));
+        Status st = server.emit(PATH, IFACE, "onNotify", 100, std::string("hello from server"));
+        if (st.isError()) {
+            std::cout << "[server] emit onNotify FAILED: " << st.message() << std::endl;
+        }
     });
 
     auto sigResult = signalFuture.get();
