@@ -41,14 +41,18 @@ int PropertyHandler::onPropertyChanged(Adaptor::RawBusMessagePtr aMsg, void* aUs
 
     //! Read s -> interface name
     std::string iface;
-    message.read(iface);
+    Status st = message.read(iface);
+    if (st.isError()) {
+        return 0;
+    }
+
     auto ifaceProps = self->callbacks.find(iface);
     if (ifaceProps == self->callbacks.end()) {
         return 0;
     }
 
     //! Read a{sv}
-    Status st = Adaptor::RawMessage::enterContainer(
+    st = Adaptor::RawMessage::enterContainer(
         message.rawMessage(), SD_BUS_TYPE_ARRAY, "{sv}");
     if (st.isError()) {
         return 0;
@@ -62,7 +66,11 @@ int PropertyHandler::onPropertyChanged(Adaptor::RawBusMessagePtr aMsg, void* aUs
         }
 
         std::string key;
-        message.read(key);
+        st = message.read(key);
+        if (st.isError()) {
+            return 0;
+        }
+
         auto it = ifaceProps->second.find(key);
         if (it != ifaceProps->second.end()) {
             it->second(message);
@@ -87,7 +95,11 @@ int PropertyHandler::onPropertyChanged(Adaptor::RawBusMessagePtr aMsg, void* aUs
 
     while (!Adaptor::RawMessage::isEnd(message.rawMessage(), false)) {
         std::string key;
-        message.read(key);
+        Status st = message.read(key);
+        if (st.isError()) {
+            return 0;
+        }
+
         auto it = ifaceProps->second.find(key);
         if (it != ifaceProps->second.end()) {
             auto reply = getRemoteProperty(
