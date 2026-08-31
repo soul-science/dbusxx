@@ -99,6 +99,20 @@ public:
             aVal = (tmp != 0);
 
         }
+        else if constexpr (std::is_same_v<rawType, UnixFd>) {
+            //! sd-bus hands out the fd *borrowed* from the message (it keeps
+            //! ownership and closes it on sd_bus_message_unref). We must dup()
+            //! it so the UnixFd owns its own handle — otherwise closing it here
+            //! and again on message free double-closes (safe_close -EBADF abort).
+            int fd = -1;
+            st = Adaptor::RawMessage::popBasic(
+                mRawMsg.get(), BasicSignature<rawType>::value, fd);
+            if (st.isError()) {
+                return st;
+            }
+
+            aVal.reset(::dup(fd));
+        }
         else if constexpr (isVectorV<rawType>) {
             using ElemType = typename rawType::value_type;
             st = Adaptor::RawMessage::enterContainer(
@@ -269,6 +283,11 @@ public:
             int tmp = aVal ? 1 : 0;
             st = Adaptor::RawMessage::appendBasic(
                 mRawMsg.get(), BasicSignature<rawType>::value, &tmp);
+        }
+        else if constexpr (std::is_same_v<rawType, UnixFd>) {
+            int fd = aVal.get();
+            st = Adaptor::RawMessage::appendBasic(
+                mRawMsg.get(), BasicSignature<rawType>::value, &fd);
         }
         else if constexpr (isVectorV<rawType> || isArrayV<rawType>) {
             using ElemType = typename rawType::value_type;

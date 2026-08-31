@@ -51,7 +51,7 @@ public:
     Reply& operator=(Reply&&) = default;
 
     //! @brief Return the parsed return value (only valid when `isError()` is false).
-    [[nodiscard]] inline Ret value() const {
+    [[nodiscard]] inline const Ret& value() const {
         return mValue;
     }
 

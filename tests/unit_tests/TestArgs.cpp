@@ -31,6 +31,14 @@ struct Point20 {
     int32_t f11, f12, f13, f14, f15, f16, f17, f18, f19, f20;
 };
 
+//! Aggregate with a UnixFd member — aggregate-ness only depends on the outer
+//! class (no user ctors / virtuals / private members), NOT on member types.
+struct WithFd {
+    UnixFd      fd;
+    std::string path;
+    int32_t     flags;
+};
+
 } //! namespace
 
 //! --- BasicSignature: every primitive maps to its D-Bus type char ------------
@@ -120,6 +128,24 @@ static_assert(isValidArgs<int32_t, std::string, Point>());
 static_assert(!isValidArgs<int32_t, void>());
 static_assert(isValidArgs<>());
 
+//! --- UnixFd -----------------------------------------------------------------
+static_assert(BasicSignature<UnixFd>::value == 'h');
+static_assert(isValidArg<UnixFd>());
+static_assert(isValidArg<std::vector<UnixFd>>());
+static_assert(!isStructV<UnixFd>);          //! user-provided ctor → non-aggregate
+static_assert(memberCountV<UnixFd> == 0);
+
+//! --- struct containing a UnixFd member -------------------------------------
+//! UnixFd itself is not an aggregate, but the *outer* aggregate can still hold
+//! it as a member; the library then maps it to (hsi).
+static_assert(isStructV<WithFd>);
+static_assert(memberCountV<WithFd> == 3);
+static_assert(std::is_same_v<memberTypeT<0, WithFd>, UnixFd>);
+static_assert(std::is_same_v<memberTypeT<1, WithFd>, std::string>);
+static_assert(isValidArg<WithFd>());
+static_assert(isValidArg<std::vector<WithFd>>());
+static_assert(isValidArg<std::map<std::string, WithFd>>());
+
 //! --- ArgTypeAdaptor ---------------------------------------------------------
 static_assert(std::is_same_v<ArgTypeAdaptor<float>::type, double>);
 static_assert(std::is_same_v<ArgTypeAdaptor<std::string_view>::type, const char*>);
@@ -182,4 +208,12 @@ TEST(ArgsTest, TieAsTuple) {
     static_assert(std::is_same_v<std::tuple_element_t<0, decltype(t)>, int32_t&>);
     EXPECT_EQ(std::get<0>(t), 10);
     EXPECT_EQ(std::get<1>(t), 20);
+}
+
+TEST(ArgsTest, GetSignatureUnixFd) {
+    EXPECT_STREQ(getSignature<UnixFd>().c_str(), "h");
+    EXPECT_STREQ(getSignature<std::vector<UnixFd>>().c_str(), "ah");
+    //! struct with an fd member → (hsi)
+    EXPECT_STREQ(getSignature<WithFd>().c_str(), "(hsi)");
+    EXPECT_STREQ(getSignature<std::vector<WithFd>>().c_str(), "a(hsi)");
 }

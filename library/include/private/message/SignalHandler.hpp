@@ -28,7 +28,7 @@ struct SignalHandler {
             if constexpr (traits::argSize) {
                 std::tuple<typename ArgTypeAdaptor<std::decay_t<Args>>::type...> tpl;
                 message.read(tpl);
-                std::apply(self->callback, tpl);
+                std::apply(self->callback, std::move(tpl));
             } else {
                 self->callback();
             }

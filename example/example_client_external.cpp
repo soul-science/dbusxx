@@ -48,8 +48,12 @@ public:
 
     void triggerSignal(int a, int b) {
         std::cout << "[server] triggerSignal(" << a << ", " << b << ")" << std::endl;
-        (void)emit("/com/example/ext", "com.example.External",
+        Status st = emit("/com/example/ext", "com.example.External",
             "mySignal", a, b);
+        if (st.isError()) {
+            std::cout << "[server] emit mySignal FAILED: " << st.message() << std::endl;
+            return;
+        }
     }
     DBUSXX_METHOD(triggerSignal)
 
@@ -204,9 +208,12 @@ int main() {
             });
         TEST("onPropertyChanged register", st2.isSuccess());
 
-        (void)c.setProperty<int32_t>("counter", 99);
-        propFlag.wait();
-        TEST("onPropertyChanged fired", propNewVal == 99);
+        Status stSet = c.setProperty<int32_t>("counter", 99);
+        TEST("setProperty counter", stSet.isSuccess());
+        if (stSet.isSuccess()) {
+            propFlag.wait();
+            TEST("onPropertyChanged fired", propNewVal == 99);
+        }
     }
 
     // 重连测试 — 手动重启 dbus daemon

@@ -9,13 +9,17 @@
 
 #include <chrono>
 #include <cstdint>
+#include <fcntl.h>
 #include <memory>
 #include <string>
 #include <thread>
+#include <unistd.h>
+#include <vector>
 
 #include "Server.hpp"
 #include "Client.hpp"
 #include "Reply.hpp"
+#include "UnixFd.hpp"
 #include "TestUtil.hpp"
 
 using namespace Dbusxx;
@@ -34,6 +38,12 @@ public:
 
     std::string echoString(const std::string& s) { return s; }
     DBUSXX_METHOD(echoString)
+
+    UnixFd echoFd(UnixFd fd) { return fd; }
+    DBUSXX_METHOD(echoFd)
+
+    std::vector<UnixFd> echoFdList(std::vector<UnixFd> fds) { return fds; }
+    DBUSXX_METHOD(echoFdList)
 
     DBUSXX_PROPERTY_RW(counter, int32_t, 0)
 };
@@ -108,4 +118,48 @@ TEST_F(BusDaemonE2ETest, PropertyReadWrite) {
     auto after = mClient->getProperty<int32_t>("counter");
     EXPECT_FALSE(after.isError()) << after.errorMessage();
     EXPECT_EQ(after.value(), 7);
+}
+
+TEST_F(BusDaemonE2ETest, UnixFdEcho) {
+    int fds[2];
+    ASSERT_EQ(::pipe(fds), 0);
+    ::fcntl(fds[0], F_SETFL, ::fcntl(fds[0], F_GETFL, 0) | O_NONBLOCK);
+
+    auto rep = mClient->callSync<UnixFd>("echoFd", UnixFd(fds[0]));
+    ASSERT_FALSE(rep.isError()) << rep.errorMessage();
+    EXPECT_GE(rep.value().get(), 0);
+
+    //! Functional round-trip through the real daemon (SCM_RIGHTS).
+    ASSERT_EQ(::write(fds[1], "hello", 5), 5);
+    char buf[8] = {0};
+    EXPECT_EQ(::read(rep.value().get(), buf, 5), 5);
+    EXPECT_STREQ(buf, "hello");
+
+    ::close(fds[1]);
+}
+
+TEST_F(BusDaemonE2ETest, UnixFdListEcho) {
+    int pa[2], pb[2];
+    ASSERT_EQ(::pipe(pa), 0);
+    ASSERT_EQ(::pipe(pb), 0);
+    ::fcntl(pa[0], F_SETFL, ::fcntl(pa[0], F_GETFL, 0) | O_NONBLOCK);
+    ::fcntl(pb[0], F_SETFL, ::fcntl(pb[0], F_GETFL, 0) | O_NONBLOCK);
+
+    std::vector<UnixFd> in;
+    in.push_back(UnixFd(pa[0]));
+    in.push_back(UnixFd(pb[0]));
+    auto rep = mClient->callSync<std::vector<UnixFd>>("echoFdList", in);
+    ASSERT_FALSE(rep.isError()) << rep.errorMessage();
+    ASSERT_EQ(rep.value().size(), 2u);
+    EXPECT_GE(rep.value()[0].get(), 0);
+    EXPECT_GE(rep.value()[1].get(), 0);
+    EXPECT_NE(rep.value()[0].get(), rep.value()[1].get());
+
+    ASSERT_EQ(::write(pa[1], "AB", 2), 2);
+    char buf[4] = {0};
+    EXPECT_EQ(::read(rep.value()[0].get(), buf, 2), 2);
+    EXPECT_STREQ(buf, "AB");
+
+    ::close(pa[1]);
+    ::close(pb[1]);
 }

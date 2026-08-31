@@ -102,7 +102,7 @@ public:
             );
             return addMethod(aName,
                 [aCls, aFunc] (Args... aArgs) -> Ret {
-                    return (aCls->*aFunc)(aArgs...);
+                    return (aCls->*aFunc)(std::move(aArgs)...);
                 }
             );
         }
