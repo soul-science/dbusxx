@@ -69,6 +69,19 @@ private:
     sd_bus* mBus { nullptr };
 };
 
+//! Abort the benchmark (reporting `aWhat`) if `aSt` is not success; returns
+//! true when aborted. Guards against silently benchmarking a failed path
+//! (e.g. an unsupported value type) as if it were a success.
+//! Declared before the templates below: it is a non-dependent call, so
+//! two-phase name lookup needs it visible at the template definition point.
+inline bool abortOnError(benchmark::State& state, Status aSt, const char* aWhat) {
+    if (aSt.isError()) {
+        state.SkipWithError(aWhat);
+        return true;
+    }
+    return false;
+}
+
 //! Write-only micro-benchmark for a fixed value (each iteration builds a fresh
 //! message so the append always starts from an empty buffer).
 template <typename T>
@@ -80,8 +93,9 @@ void benchWrite(benchmark::State& state, const T& val) {
 
     for (auto _ : state) {
         auto msg = bb.newMessage();
-        Status st = msg.write(val);
-        benchmark::DoNotOptimize(st);
+        if (abortOnError(state, msg.write(val), "write failed")) {
+            return;
+        }
     }
 }
 
@@ -96,10 +110,19 @@ void benchRoundTrip(benchmark::State& state, const T& val) {
 
     for (auto _ : state) {
         auto msg = bb.newMessage();
-        benchmark::DoNotOptimize(msg.write(val));
-        BenchmarkUtil::sealMessage(msg);
+        if (abortOnError(state, msg.write(val), "write failed")) {
+            return;
+        }
+
+        if (abortOnError(state, BenchmarkUtil::sealMessage(msg), "seal failed")) {
+            return;
+        }
+
         T out {};
-        benchmark::DoNotOptimize(msg.read(out));
+        if (abortOnError(state, msg.read(out), "read failed")) {
+            return;
+        }
+
         benchmark::DoNotOptimize(out);
     }
 }
@@ -170,7 +193,9 @@ static void writeVectorInt(benchmark::State& state) {
 
     for (auto _ : state) {
         auto msg = bb.newMessage();
-        benchmark::DoNotOptimize(msg.write(val));
+        if (abortOnError(state, msg.write(val), "write failed")) {
+            return;
+        }
     }
 }
 BENCHMARK(writeVectorInt);
@@ -185,10 +210,18 @@ static void roundTripVectorInt(benchmark::State& state) {
 
     for (auto _ : state) {
         auto msg = bb.newMessage();
-        benchmark::DoNotOptimize(msg.write(val));
-        BenchmarkUtil::sealMessage(msg);
+        if (abortOnError(state, msg.write(val), "write failed")) {
+            return;
+        }
+
+        if (abortOnError(state, BenchmarkUtil::sealMessage(msg), "seal failed")) {
+            return;
+        }
+
         std::vector<int32_t> out;
-        benchmark::DoNotOptimize(msg.read(out));
+        if (abortOnError(state, msg.read(out), "read failed")) {
+            return;
+        }
         benchmark::DoNotOptimize(out.size());
     }
 }
@@ -204,7 +237,9 @@ static void writeVectorString(benchmark::State& state) {
 
     for (auto _ : state) {
         auto msg = bb.newMessage();
-        benchmark::DoNotOptimize(msg.write(val));
+        if (abortOnError(state, msg.write(val), "write failed")) {
+            return;
+        }
     }
 }
 BENCHMARK(writeVectorString);
@@ -220,7 +255,9 @@ static void writeMapStringInt(benchmark::State& state) {
 
     for (auto _ : state) {
         auto msg = bb.newMessage();
-        benchmark::DoNotOptimize(msg.write(val));
+        if (abortOnError(state, msg.write(val), "write failed")) {
+            return;
+        }
     }
 }
 BENCHMARK(writeMapStringInt);
@@ -236,10 +273,19 @@ static void roundTripMapStringInt(benchmark::State& state) {
 
     for (auto _ : state) {
         auto msg = bb.newMessage();
-        benchmark::DoNotOptimize(msg.write(val));
-        BenchmarkUtil::sealMessage(msg);
+        if (abortOnError(state, msg.write(val), "write failed")) {
+            return;
+        }
+
+        if (abortOnError(state, BenchmarkUtil::sealMessage(msg), "seal failed")) {
+            return;
+        }
+
         std::map<std::string, int32_t> out;
-        benchmark::DoNotOptimize(msg.read(out));
+        if (abortOnError(state, msg.read(out), "read failed")) {
+            return;
+        }
+
         benchmark::DoNotOptimize(out.size());
     }
 }
@@ -255,7 +301,9 @@ static void writeTuple(benchmark::State& state) {
 
     for (auto _ : state) {
         auto msg = bb.newMessage();
-        benchmark::DoNotOptimize(msg.write(val));
+        if (abortOnError(state, msg.write(val), "write failed")) {
+            return;
+        }
     }
 }
 BENCHMARK(writeTuple);
@@ -290,14 +338,24 @@ static void roundTripMultiArg(benchmark::State& state) {
 
     for (auto _ : state) {
         auto msg = bb.newMessage();
-        benchmark::DoNotOptimize(
-            msg.write(int32_t(1), std::string("two"), double(3.5), bool(true)));
-        BenchmarkUtil::sealMessage(msg);
+        Status st = msg.write(int32_t(1), std::string("two"), double(3.5), bool(true));
+        if (abortOnError(state, st, "write failed")) {
+            return;
+        }
+
+        if (abortOnError(state, BenchmarkUtil::sealMessage(msg), "seal failed")) {
+            return;
+        }
+
         int32_t a = 0;
         std::string b;
         double c = 0.0;
         bool d = false;
-        benchmark::DoNotOptimize(msg.read(a, b, c, d));
+        st = msg.read(a, b, c, d);
+        if (abortOnError(state, st, "read failed")) {
+            return;
+        }
+
         benchmark::DoNotOptimize(a);
         benchmark::DoNotOptimize(b);
         benchmark::DoNotOptimize(c);
@@ -321,7 +379,9 @@ static void writeLargeString(benchmark::State& state) {
 
     for (auto _ : state) {
         auto msg = bb.newMessage();
-        benchmark::DoNotOptimize(msg.write(payload));
+        if (abortOnError(state, msg.write(payload), "write failed")) {
+            return;
+        }
     }
     state.SetBytesProcessed(state.iterations() * static_cast<int64_t>(n));
 }
@@ -340,10 +400,19 @@ static void roundTripLargeString(benchmark::State& state) {
 
     for (auto _ : state) {
         auto msg = bb.newMessage();
-        benchmark::DoNotOptimize(msg.write(payload));
-        BenchmarkUtil::sealMessage(msg);
+        if (abortOnError(state, msg.write(payload), "write failed")) {
+            return;
+        }
+
+        if (abortOnError(state, BenchmarkUtil::sealMessage(msg), "seal failed")) {
+            return;
+        }
+
         std::string out;
-        benchmark::DoNotOptimize(msg.read(out));
+        if (abortOnError(state, msg.read(out), "read failed")) {
+            return;
+        }
+
         benchmark::DoNotOptimize(out.size());
     }
     state.SetBytesProcessed(state.iterations() * static_cast<int64_t>(n));
@@ -367,7 +436,9 @@ static void writeLargeVector(benchmark::State& state) {
 
     for (auto _ : state) {
         auto msg = bb.newMessage();
-        benchmark::DoNotOptimize(msg.write(val));
+        if (abortOnError(state, msg.write(val), "write failed")) {
+            return;
+        }
     }
     state.SetItemsProcessed(state.iterations() * static_cast<int64_t>(n));
 }
@@ -390,10 +461,19 @@ static void roundTripLargeVector(benchmark::State& state) {
 
     for (auto _ : state) {
         auto msg = bb.newMessage();
-        benchmark::DoNotOptimize(msg.write(val));
-        BenchmarkUtil::sealMessage(msg);
+        if (abortOnError(state, msg.write(val), "write failed")) {
+            return;
+        }
+
+        if (abortOnError(state, BenchmarkUtil::sealMessage(msg), "seal failed")) {
+            return;
+        }
+
         std::vector<int32_t> out;
-        benchmark::DoNotOptimize(msg.read(out));
+        if (abortOnError(state, msg.read(out), "read failed")) {
+            return;
+        }
+
         benchmark::DoNotOptimize(out.size());
     }
     state.SetItemsProcessed(state.iterations() * static_cast<int64_t>(n));

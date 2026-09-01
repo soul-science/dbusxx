@@ -64,7 +64,7 @@ public:
 
     DBUSXX_PROPERTY_RW(counter, int32_t, 0)
 
-    //! Emits the registered `tick` signal from the server's own thread.
+    //! Emits the registered `tick` signal. Thread-safe: can be invoked from any thread.
     void fireTick(int32_t v) {
         benchmark::DoNotOptimize(
             emit("/com/bench", "com.bench.Iface", "tick", v));

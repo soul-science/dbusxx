@@ -156,12 +156,16 @@ inline bool busAvailable() {
 //! connection per message would dominate the measured write/read cost.
 inline Dbusxx::Private::MessagePrivate makeMessage(sd_bus* aBus) {
     sd_bus_message* raw = nullptr;
-    if (aBus) {
+    if (aBus &&
         sd_bus_message_new_signal(
-            aBus, &raw, "/bench/path", "bench.iface", "BenchMethod");
+            aBus, &raw, "/bench/path", "bench.iface", "BenchMethod") >= 0 &&
+        raw != nullptr) {
+        return Dbusxx::Private::MessagePrivate(
+            Dbusxx::Adaptor::RawMessageSharePtr(raw, true));
     }
+
     return Dbusxx::Private::MessagePrivate(
-        Dbusxx::Adaptor::RawMessageSharePtr(raw, true));
+        Dbusxx::Adaptor::RawMessageSharePtr(nullptr, false));
 }
 
 //! Seal a message so its payload becomes readable (sd-bus refuses to read an
