@@ -13,7 +13,7 @@ stages:
     gccVersion: 11.1.0
     commands:
     - apt-get update
-    - apt-get install -y cmake g++ pkg-config libsystemd-dev libgtest-dev libbenchmark-dev
+    - apt-get install -y cmake g++ pkg-config libsystemd-dev dbus libgtest-dev libbenchmark-dev
     - ""
     - rm -rf build_release
     - ""
