@@ -1,6 +1,6 @@
 version: "1.0"
-name: 构建、部署到自有主机
-displayName: 构建、部署到自有主机
+name: CI
+displayName: CI
 stages:
 - name: 构建
   displayName: 构建
