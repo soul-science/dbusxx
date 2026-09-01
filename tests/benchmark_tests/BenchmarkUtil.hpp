@@ -8,9 +8,11 @@
 //! and run without any dependency on the unit-test tree.
 
 #include <cctype>
+#include <cerrno>
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <sstream>
 #include <string>
 #include <thread>
@@ -56,11 +58,17 @@ public:
 
         int fds[2];
         if (::pipe(fds) != 0) {
+            std::fprintf(stderr,
+                "[dbusxx benchmarks] BusDaemon: pipe() failed: %s\n",
+                std::strerror(errno));
             return false;
         }
 
         pid_t pid = ::fork();
         if (pid < 0) {
+            std::fprintf(stderr,
+                "[dbusxx benchmarks] BusDaemon: fork() failed: %s\n",
+                std::strerror(errno));
             ::close(fds[0]);
             ::close(fds[1]);
             return false;
@@ -80,6 +88,11 @@ public:
                     "--session", "--nofork",
                     "--print-address=1", "--print-pid=1",
                     static_cast<char*>(nullptr));
+            //! stderr is untouched in the child, so this shows up in the log
+            //! when /usr/bin/dbus-daemon is missing or not executable.
+            std::fprintf(stderr,
+                "[dbusxx benchmarks] BusDaemon child: execv(/usr/bin/dbus-daemon) failed: %s\n",
+                std::strerror(errno));
             ::_exit(127);
         }
 
@@ -88,6 +101,10 @@ public:
         ssize_t n = ::read(fds[0], buf, sizeof(buf) - 1);
         ::close(fds[0]);
         if (n <= 0) {
+            std::fprintf(stderr,
+                "[dbusxx benchmarks] BusDaemon: no address from daemon "
+                "(read=%zd) — dbus-daemon missing or failed to start?\n",
+                n);
             ::kill(pid, SIGKILL);
             ::waitpid(pid, nullptr, 0);
             return false;
@@ -110,6 +127,9 @@ public:
             }
         }
         if (addr.empty() || pidStr.empty()) {
+            std::fprintf(stderr,
+                "[dbusxx benchmarks] BusDaemon: cannot parse daemon output: '%s'\n",
+                output.c_str());
             ::kill(pid, SIGKILL);
             ::waitpid(pid, nullptr, 0);
             return false;
