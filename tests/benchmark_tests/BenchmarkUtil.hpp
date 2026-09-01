@@ -18,6 +18,8 @@
 #include <thread>
 
 #include <csignal>
+#include <fcntl.h>
+#include <poll.h>
 #include <sys/prctl.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -97,39 +99,82 @@ public:
         }
 
         ::close(fds[1]);
-        char buf[4096];
-        ssize_t n = ::read(fds[0], buf, sizeof(buf) - 1);
-        ::close(fds[0]);
-        if (n <= 0) {
-            std::fprintf(stderr,
-                "[dbusxx benchmarks] BusDaemon: no address from daemon "
-                "(read=%zd) — dbus-daemon missing or failed to start?\n",
-                n);
-            ::kill(pid, SIGKILL);
-            ::waitpid(pid, nullptr, 0);
-            return false;
-        }
-        buf[n] = '\0';
 
+        //! The daemon prints the address and pid on separate lines, which can
+        //! arrive in separate pipe reads (especially under load) — a single
+        //! read() may return only the address line, leaving pidStr empty and
+        //! failing the parse (seen as a spurious "no private daemon"). Keep
+        //! reading until both lines are seen, with a poll() timeout so a
+        //! stuck daemon can't hang us forever.
+        std::string collected;
         std::string addr;
         std::string pidStr;
-        const std::string output(buf);
-        std::istringstream iss(output);
-        std::string line;
-        while (std::getline(iss, line)) {
-            if (line.empty()) {
-                continue;
+        {
+            //! Read non-blocking so poll() can actually enforce the deadline:
+            //! a blocking read() would bypass the outer 5s timeout if the
+            //! daemon wrote the address line but then stalled (no pid line).
+            const int fl = ::fcntl(fds[0], F_GETFL, 0);
+            if (fl >= 0) {
+                ::fcntl(fds[0], F_SETFL, fl | O_NONBLOCK);
             }
-            if (line.compare(0, 5, "unix:") == 0) {
-                addr = line;
-            } else if (std::isdigit(static_cast<unsigned char>(line[0]))) {
-                pidStr = line;
+
+            struct pollfd pfd = { fds[0], POLLIN, 0 };
+            char buf[4096];
+            const auto deadline = std::chrono::steady_clock::now()
+                                  + std::chrono::seconds(5);
+            while (std::chrono::steady_clock::now() < deadline) {
+                const ssize_t n = ::read(fds[0], buf, sizeof(buf) - 1);
+                if (n > 0) {
+                    buf[n] = '\0';
+                    collected += buf;
+                } else if (n == 0) {
+                    break;  //! daemon closed stdout (e.g. exec failed)
+                } else {
+                    const int e = errno;
+                    if (e == EINTR) {
+                        continue;
+                    }
+                    if (e != EAGAIN && e != EWOULDBLOCK) {
+                        break;
+                    }
+                }
+
+                //! Re-parse whatever we have accumulated so far.
+                addr.clear();
+                pidStr.clear();
+                std::istringstream iss(collected);
+                std::string line;
+                while (std::getline(iss, line)) {
+                    if (line.empty()) {
+                        continue;
+                    }
+                    if (line.compare(0, 5, "unix:") == 0) {
+                        addr = line;
+                    } else if (std::isdigit(static_cast<unsigned char>(line[0]))) {
+                        pidStr = line;
+                    }
+                }
+                if (!addr.empty() && !pidStr.empty()) {
+                    break;
+                }
+
+                //! Wait for more data; bounded by poll's timeout, and the
+                //! outer deadline guards the whole loop (no spin, no hang).
+                const int r = ::poll(&pfd, 1, 200);
+                if (r < 0 && errno != EINTR) {
+                    break;
+                }
             }
         }
+        ::close(fds[0]);
+
         if (addr.empty() || pidStr.empty()) {
             std::fprintf(stderr,
-                "[dbusxx benchmarks] BusDaemon: cannot parse daemon output: '%s'\n",
-                output.c_str());
+                "[dbusxx benchmarks] BusDaemon: cannot parse daemon output: '%s'"
+                " (addr=%s pid=%s)\n",
+                collected.c_str(),
+                addr.empty() ? "<none>" : addr.c_str(),
+                pidStr.empty() ? "<none>" : pidStr.c_str());
             ::kill(pid, SIGKILL);
             ::waitpid(pid, nullptr, 0);
             return false;

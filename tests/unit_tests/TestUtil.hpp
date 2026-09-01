@@ -7,6 +7,7 @@
 //! private D-Bus daemon harness for business-layer (Server/Client) tests.
 
 #include <cctype>
+#include <cerrno>
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
@@ -15,6 +16,8 @@
 #include <thread>
 
 #include <csignal>
+#include <fcntl.h>
+#include <poll.h>
 #include <sys/prctl.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -91,32 +94,70 @@ public:
         }
 
         ::close(fds[1]);
-        char buf[4096];
-        ssize_t n = ::read(fds[0], buf, sizeof(buf) - 1);
-        ::close(fds[0]);
-        if (n <= 0) {
-            ::kill(pid, SIGKILL);
-            ::waitpid(pid, nullptr, 0);
-            return false;
-        }
-        buf[n] = '\0';
 
-        //! The daemon prints two lines: the bus address (unix:...) and the pid.
+        //! The daemon prints the address and pid on separate lines, which can
+        //! arrive in separate pipe reads (especially under load) — a single
+        //! read() may return only the address line and fail the parse. Keep
+        //! reading until both lines are seen (poll() timeout guards a hang).
+        std::string collected;
         std::string addr;
         std::string pidStr;
-        const std::string output(buf);
-        std::istringstream iss(output);
-        std::string line;
-        while (std::getline(iss, line)) {
-            if (line.empty()) {
-                continue;
+        {
+            //! Read non-blocking so poll() can actually enforce the deadline:
+            //! a blocking read() would bypass the outer 5s timeout if the
+            //! daemon wrote the address line but then stalled (no pid line).
+            const int fl = ::fcntl(fds[0], F_GETFL, 0);
+            if (fl >= 0) {
+                ::fcntl(fds[0], F_SETFL, fl | O_NONBLOCK);
             }
-            if (line.compare(0, 5, "unix:") == 0) {
-                addr = line;
-            } else if (std::isdigit(static_cast<unsigned char>(line[0]))) {
-                pidStr = line;
+
+            struct pollfd pfd = { fds[0], POLLIN, 0 };
+            char buf[4096];
+            const auto deadline = std::chrono::steady_clock::now()
+                                  + std::chrono::seconds(5);
+            while (std::chrono::steady_clock::now() < deadline) {
+                const ssize_t n = ::read(fds[0], buf, sizeof(buf) - 1);
+                if (n > 0) {
+                    buf[n] = '\0';
+                    collected += buf;
+                } else if (n == 0) {
+                    break;  //! daemon closed stdout (e.g. exec failed)
+                } else {
+                    const int e = errno;
+                    if (e == EINTR) {
+                        continue;
+                    }
+                    if (e != EAGAIN && e != EWOULDBLOCK) {
+                        break;
+                    }
+                }
+
+                addr.clear();
+                pidStr.clear();
+                std::istringstream iss(collected);
+                std::string line;
+                while (std::getline(iss, line)) {
+                    if (line.empty()) {
+                        continue;
+                    }
+                    if (line.compare(0, 5, "unix:") == 0) {
+                        addr = line;
+                    } else if (std::isdigit(static_cast<unsigned char>(line[0]))) {
+                        pidStr = line;
+                    }
+                }
+                if (!addr.empty() && !pidStr.empty()) {
+                    break;
+                }
+
+                const int r = ::poll(&pfd, 1, 200);
+                if (r < 0 && errno != EINTR) {
+                    break;
+                }
             }
         }
+        ::close(fds[0]);
+
         if (addr.empty() || pidStr.empty()) {
             ::kill(pid, SIGKILL);
             ::waitpid(pid, nullptr, 0);
