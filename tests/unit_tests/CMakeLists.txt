@@ -89,4 +89,13 @@ target_link_libraries(sdbusxx_unit_tests
         # this machine ships gtest only. No test here uses gmock mocks.
 )
 
-add_test(NAME sdbusxx_unit_tests COMMAND sdbusxx_unit_tests)
+# Save the console (human-readable) output of the unit tests too. GTest has
+# no native console-to-file flag (only --gtest_output=xml|json), so tee it out
+# to the same ci/ reports directory as the benchmarks.
+file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/ci)
+add_test(
+    NAME
+        sdbusxx_unit_tests
+    COMMAND
+        bash -c "$<TARGET_FILE:sdbusxx_unit_tests> 2>&1 | tee ${CMAKE_BINARY_DIR}/ci/unit_tests_report.txt"
+)

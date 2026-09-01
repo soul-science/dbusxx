@@ -64,10 +64,26 @@ target_link_libraries(sdbusxx_benchmarks
         ${DBUSXX_BENCH_LINK}
 )
 
-# Registered with CTest but DISABLED by default: benchmarks are long-running,
-# so a plain `ctest` should only run the fast unit tests. Run them explicitly:
-#   cmake --build build_release --target sdbusxx_benchmarks
+# Benchmarks are long-running, so by default a plain `ctest` only runs the
+# fast unit tests (the benchmark is registered with DISABLED). To also run
+# them via ctest, configure with:  cmake -DDBUSXX_CTEST_BENCHMARKS=ON
+# Every run (ctest or direct) writes a human-readable console report via
+# --benchmark_out to ${CMAKE_BINARY_DIR}/ci/. To iterate on a subset during
+# development instead of the full run:
 #   ./build_release/tests/benchmark_tests/sdbusxx_benchmarks \
 #       --benchmark_filter='E2EBench/*' --benchmark_min_time=0.1
-add_test(NAME sdbusxx_benchmarks COMMAND sdbusxx_benchmarks --benchmark_min_time=0.2)
-set_tests_properties(sdbusxx_benchmarks PROPERTIES DISABLED TRUE)
+option(DBUSXX_CTEST_BENCHMARKS "Run benchmarks via ctest (default OFF)" OFF)
+file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/ci)
+add_test(
+    NAME
+        sdbusxx_benchmarks
+    COMMAND
+        sdbusxx_benchmarks
+            --benchmark_min_time=0.2
+            --benchmark_out=${CMAKE_BINARY_DIR}/ci/benchmark_tests_report.txt
+            --benchmark_out_format=console
+)
+
+if(NOT DBUSXX_CTEST_BENCHMARKS)
+    set_tests_properties(sdbusxx_benchmarks PROPERTIES DISABLED TRUE)
+endif()
