@@ -89,13 +89,17 @@ target_link_libraries(sdbusxx_unit_tests
         # this machine ships gtest only. No test here uses gmock mocks.
 )
 
-# Save the console (human-readable) output of the unit tests too. GTest has
-# no native console-to-file flag (only --gtest_output=xml|json), so tee it out
-# to the same ci/ reports directory as the benchmarks.
+# Report output matches the benchmark add_test style: pass a native output
+# flag straight to the test binary, no shell wrapper (so the exit code is the
+# test's own — ctest sees real pass/fail). GTest has no console-to-file flag,
+# only --gtest_output=json|xml, so this writes structured JSON (analogous to
+# the benchmark's --benchmark_out). The human-readable console output is still
+# captured by ctest into <build>/Testing/Temporary/LastTest.log.
 file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/ci)
 add_test(
     NAME
         sdbusxx_unit_tests
     COMMAND
-        bash -c "$<TARGET_FILE:sdbusxx_unit_tests> 2>&1 | tee ${CMAKE_BINARY_DIR}/ci/unit_tests_report.txt"
+        sdbusxx_unit_tests
+            --gtest_output=xml:${CMAKE_BINARY_DIR}/ci/unit_tests_report.xml
 )
