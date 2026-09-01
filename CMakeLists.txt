@@ -47,3 +47,11 @@ if(DBUSXX_BUILD_TESTS)
     enable_testing()
     add_subdirectory(tests/unit_tests)
 endif()
+
+# benchmarks (Google Benchmark; spawns its own private dbus-daemon, so no
+# system D-Bus daemon is required — pure-logic / serialization / E2E layers)
+option(DBUSXX_BUILD_BENCHMARKS "Build benchmarks" ON)
+if(DBUSXX_BUILD_BENCHMARKS)
+    enable_testing()
+    add_subdirectory(tests/benchmark_tests)
+endif()
