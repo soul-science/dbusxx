@@ -1,0 +1,190 @@
+#ifndef DBUSXX_BENCHMARK_UTIL_HPP
+#define DBUSXX_BENCHMARK_UTIL_HPP
+
+//! Shared helpers for the Google Benchmark suite in tests/benchmark_tests/.
+//! Provides a *private* D-Bus daemon harness (fully isolated from the system
+//! bus) plus bus/message construction helpers used by the serialization and
+//! end-to-end benchmarks. Self-contained on purpose: benchmarks must build
+//! and run without any dependency on the unit-test tree.
+
+#include <cctype>
+#include <chrono>
+#include <cstdio>
+#include <cstdlib>
+#include <sstream>
+#include <string>
+#include <thread>
+
+#include <csignal>
+#include <sys/prctl.h>
+#include <sys/wait.h>
+#include <unistd.h>
+
+#include <systemd/sd-bus.h>
+
+#include "private/adaptor/RawMessageSharePtr.hpp"
+#include "private/message/MessagePrivate.hpp"
+
+namespace Dbusxx::BenchmarkUtil {
+
+//! A private D-Bus daemon spawned as a child process, fully isolated from the
+//! system bus. On start() it also overrides the DBUS_SESSION_BUS_ADDRESS
+//! environment variable so every `userSession()` / `Client(USER, ...)` /
+//! `sd_bus_open_user()` in this process connects to this private daemon.
+//! Kills the child on destruction.
+class BusDaemon {
+public:
+    BusDaemon() = default;
+    BusDaemon(const BusDaemon&) = delete;
+    BusDaemon& operator=(const BusDaemon&) = delete;
+    BusDaemon(BusDaemon&&) = delete;
+    BusDaemon& operator=(BusDaemon&&) = delete;
+
+    ~BusDaemon() {
+        if (mPid > 0) {
+            ::kill(mPid, SIGTERM);
+            ::waitpid(mPid, nullptr, 0);
+        }
+    }
+
+    //! Spawn `/usr/bin/dbus-daemon` with a private session bus. Returns false
+    //! if the binary is missing or the address can't be read. Idempotent.
+    bool start() {
+        if (mPid > 0) {
+            return true;
+        }
+
+        int fds[2];
+        if (::pipe(fds) != 0) {
+            return false;
+        }
+
+        pid_t pid = ::fork();
+        if (pid < 0) {
+            ::close(fds[0]);
+            ::close(fds[1]);
+            return false;
+        }
+        if (pid == 0) {
+            //! Child: ask the kernel to SIGTERM us when the parent dies.
+            const pid_t ppid = ::getppid();
+            ::prctl(PR_SET_PDEATHSIG, SIGTERM);
+            if (::getppid() != ppid) {
+                ::_exit(127);
+            }
+
+            ::dup2(fds[1], STDOUT_FILENO);
+            ::close(fds[0]);
+            ::close(fds[1]);
+            ::execl("/usr/bin/dbus-daemon", "dbus-daemon",
+                    "--session", "--nofork",
+                    "--print-address=1", "--print-pid=1",
+                    static_cast<char*>(nullptr));
+            ::_exit(127);
+        }
+
+        ::close(fds[1]);
+        char buf[4096];
+        ssize_t n = ::read(fds[0], buf, sizeof(buf) - 1);
+        ::close(fds[0]);
+        if (n <= 0) {
+            ::kill(pid, SIGKILL);
+            ::waitpid(pid, nullptr, 0);
+            return false;
+        }
+        buf[n] = '\0';
+
+        std::string addr;
+        std::string pidStr;
+        const std::string output(buf);
+        std::istringstream iss(output);
+        std::string line;
+        while (std::getline(iss, line)) {
+            if (line.empty()) {
+                continue;
+            }
+            if (line.compare(0, 5, "unix:") == 0) {
+                addr = line;
+            } else if (std::isdigit(static_cast<unsigned char>(line[0]))) {
+                pidStr = line;
+            }
+        }
+        if (addr.empty() || pidStr.empty()) {
+            ::kill(pid, SIGKILL);
+            ::waitpid(pid, nullptr, 0);
+            return false;
+        }
+
+        mAddress = addr;
+        mPid = std::atoi(pidStr.c_str());
+        ::setenv("DBUS_SESSION_BUS_ADDRESS", mAddress.c_str(), 1);
+        return true;
+    }
+
+    const std::string& address() const { return mAddress; }
+
+private:
+    pid_t mPid { -1 };
+    std::string mAddress;
+};
+
+//! Connect to the session bus (pointed at the private daemon by BusDaemon).
+//! Returns nullptr on failure.
+inline sd_bus* makeBus() {
+    sd_bus* bus = nullptr;
+    if (sd_bus_open_user(&bus) < 0) {
+        return nullptr;
+    }
+    return bus;
+}
+
+//! True when a session D-Bus daemon is reachable. Detected once and cached.
+inline bool busAvailable() {
+    static const bool available = [] {
+        sd_bus* bus = nullptr;
+        if (sd_bus_open_user(&bus) < 0) {
+            return false;
+        }
+        sd_bus_unref(bus);
+        return true;
+    }();
+    return available;
+}
+
+//! Create an empty signal message on a *persistent* bus (caller keeps owning
+//! `aBus`). Reusing one bus across iterations is essential: opening a fresh
+//! connection per message would dominate the measured write/read cost.
+inline Dbusxx::Private::MessagePrivate makeMessage(sd_bus* aBus) {
+    sd_bus_message* raw = nullptr;
+    if (aBus) {
+        sd_bus_message_new_signal(
+            aBus, &raw, "/bench/path", "bench.iface", "BenchMethod");
+    }
+    return Dbusxx::Private::MessagePrivate(
+        Dbusxx::Adaptor::RawMessageSharePtr(raw, true));
+}
+
+//! Seal a message so its payload becomes readable (sd-bus refuses to read an
+//! unsealed message). Must be called between write() and read().
+inline Dbusxx::Status sealMessage(Dbusxx::Private::MessagePrivate& aMsg) {
+    return Dbusxx::Adaptor::RawErrorConvert::makeStatus(
+        sd_bus_message_seal(aMsg.rawMessage(), 1, 0));
+}
+
+//! Poll `f()` until it returns true or the deadline passes (no fixed sleeps).
+template<typename F>
+inline bool waitUntil(F&& f, int aTimeoutMs = 3000) {
+    auto deadline = std::chrono::steady_clock::now()
+                    + std::chrono::milliseconds(aTimeoutMs);
+    while (std::chrono::steady_clock::now() < deadline) {
+        if (f()) {
+            return true;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    }
+    return f();
+}
+
+} //! namespace Dbusxx::BenchmarkUtil
+
+#endif //! DBUSXX_BENCHMARK_UTIL_HPP
