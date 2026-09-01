@@ -13,19 +13,16 @@ stages:
     gccVersion: 11.1.0
     commands:
     - apt-get update
-    - apt-get install -y cmake g++ pkg-config libsystemd-dev libgtest-dev
+    - apt-get install -y cmake g++ pkg-config libsystemd-dev libgtest-dev libbenchmark-dev
     - ""
     - rm -rf build_release
-    - rm -rf build_unit_tests
     - ""
     - cmake -S . -B build_release -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_STANDARD=17
-      -DCMAKE_CXX_STANDARD_REQUIRED=ON
+      -DCMAKE_CXX_STANDARD_REQUIRED=ON -DDBUSXX_CTEST_BENCHMARKS=ON
     - cmake --build build_release
     - ""
-    - cmake -S . -B build_unit_tests -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_STANDARD=17
-      -DCMAKE_CXX_STANDARD_REQUIRED=ON
-    - cmake --build build_unit_tests --target sdbusxx_unit_tests
-    - ctest --test-dir build_unit_tests --rerun-failed --output-on-failure
+    - '# Run ci'
+    - ctest --test-dir build_release --rerun-failed --output-on-failure
     artifacts:
     - name: BUILD_ARTIFACT
       path:
@@ -49,7 +46,8 @@ stages:
     tagName: master_build
     upstreamArtifact:
     - BUILD_ARTIFACT
-    assertFiles: []
+    assertFiles:
+    - build_release
     prerelease: false
     allowUpdate: true
     strategy:
