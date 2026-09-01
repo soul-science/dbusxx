@@ -286,6 +286,14 @@ BENCHMARK_REGISTER_F(E2EBench, propertySet)
 //! ---------------------------------------------------------------------------
 
 BENCHMARK_DEFINE_F(E2EBench, signalEmitReceive)(benchmark::State& state) {
+    //! Guard the warm-up below: when SetUp failed (e.g. no bus daemon), the
+    //! `for (auto _ : state)` loop is skipped by Google Benchmark, but this
+    //! block sits *before* the loop and would still dereference the
+    //! uninitialised mServer → NULL deref / SegFault. Bail out explicitly.
+    if (state.error_occurred()) {
+        return;
+    }
+
     //! One synchronous warm-up so the match rule is guaranteed live before the
     //! timed iterations. If the warm-up signal is missed the subscription is
     //! not yet live — report and bail out instead of burning 3s per iteration.
