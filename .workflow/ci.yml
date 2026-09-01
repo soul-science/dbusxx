@@ -1,6 +1,6 @@
 version: "1.0"
-name: CI
-displayName: CI
+name: ci
+displayName: ci
 stages:
 - name: 构建
   displayName: 构建
