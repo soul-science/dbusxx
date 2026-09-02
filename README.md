@@ -303,6 +303,7 @@ int main() {
 | `float` | `d` | 序列化时按 `double` 适配 |
 | `std::string` / `std::string_view` | `s` | UTF-8 字符串 |
 | `const char*` / `char*` | `s` | C 风格字符串 |
+| `UnixFd` | `h` | Unix 文件描述符（RAII：拷贝 = `dup`；可作方法参数/返回值/信号参数/结构体成员，⚠️ **不能用作属性 property**，详见 [docs/cn/UnixFd.md](docs/cn/UnixFd.md)） |
 
 ### 容器
 

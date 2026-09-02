@@ -6,7 +6,7 @@
 
 `Message` 是对一条原始 D-Bus 消息的类型安全、流式（stream-like）包装。你可以用 `operator<<` / `write()` 追加参数，用 `operator>>` / `read()` 提取参数。它也是 `Reply<Ret>` 的基类。
 
-`Message` 内部通过 `Private::MessagePrivate`（PIMPL）持有底层 `sd-bus` 消息句柄，支持基本类型、`std::string`、容器、结构体等的自动编解码。
+`Message` 内部通过 `Private::MessagePrivate`（PIMPL）持有底层 `sd-bus` 消息句柄，支持基本类型、`std::string`、容器、`UnixFd` 文件描述符、结构体等的自动编解码。
 
 ## 类：`Message`
 

@@ -20,6 +20,7 @@ dbusxx 是一个基于 systemd sd-bus 的 C++17 D-Bus 库，支持方法、信�
 | [Message.md](Message.md) | `Message.hpp` | 类型安全的 D-Bus 消息（流式读写） |
 | [Reply.md](Reply.md) | `Reply.hpp` | 类型化回复（方法返回值） |
 | [PendingReply.md](PendingReply.md) | `PendingReply.hpp` | 异步调用句柄 |
+| [UnixFd.md](UnixFd.md) | `UnixFd.hpp` | 消息中传递的 Unix 文件描述符（RAII） |
 | [Status.md](Status.md) | `Status.hpp` | 状态码与错误处理 |
 | [Utils.md](Utils.md) | `Utils.hpp` | 通用类型（`SessionType`） |
 

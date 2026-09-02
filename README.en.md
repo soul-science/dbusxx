@@ -308,6 +308,7 @@ Methods, signals and properties all accept these types; they are checked at comp
 | `float` | `d` | adapted to `double` when serializing |
 | `std::string` / `std::string_view` | `s` | UTF-8 string |
 | `const char*` / `char*` | `s` | C-style string |
+| `UnixFd` | `h` | Unix file descriptor (RAII: copy = `dup`; usable as a method arg/return, signal parameter or struct member; ⚠️ **not usable as a property**, see [docs/en/UnixFd.en.md](docs/en/UnixFd.en.md)) |
 
 ### Containers
 
