@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <deque>
 #include <functional>
+#include <memory>
 #include <mutex>
 #include <thread>
 #include <type_traits>
@@ -17,7 +18,7 @@
 
 namespace Dbusxx {
 namespace Private {
-class LooperPrivate {
+class LooperPrivate : public std::enable_shared_from_this<LooperPrivate> {
     static constexpr uint64_t EVENT_FD_SIGNAL { 1 };
 public:
     LooperPrivate() = default;

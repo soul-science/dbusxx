@@ -295,7 +295,24 @@ std::shared_ptr<Private::ReplyAsyncHandler> callAsync(
         st = callMsg.write(aArgs...);
     }
 
-    auto repHandler = std::make_shared<Private::ReplyAsyncHandler>();
+    //! Thread-affine deletion: ~ReplyAsyncHandler unrefs the sd-bus slot /
+    //! reply message, which touches non-atomic sd-bus refcounts, so it must run
+    //! on the session's driving thread (via the owner poster registered by the
+    //! Looper). Without a poster (session driven directly, no Looper) the
+    //! handler is destroyed in place — the caller must then release pending
+    //! handles on the same thread that processes the bus.
+    const auto poster = aSession->ownerPoster();
+    std::shared_ptr<Private::ReplyAsyncHandler> repHandler(
+        new Private::ReplyAsyncHandler(),
+        [poster](Private::ReplyAsyncHandler* aHandler) {
+            if (poster) {
+                poster([aHandler] {
+                    delete aHandler;
+                });
+            } else {
+                delete aHandler;
+            }
+        });
     if (st.isError()) {
         repHandler->setStatus(st);
         //! Finish synchronously: the PendingReply will deliver this error

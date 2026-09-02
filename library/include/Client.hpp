@@ -8,6 +8,7 @@
 #include <string_view>
 #include <thread>
 #include <tuple>
+#include <type_traits>
 #include <utility>
 
 #include "Looper.hpp"
@@ -27,6 +28,23 @@ namespace Dbusxx {
  * to plug into an external #Looper.
  */
 class Client {
+    //! True when the first argument of an async call is a completion callback
+    //! (callable as void(Reply<Ret>)). Used to disambiguate the two callAsync
+    //! overloads by SFINAE, mirroring Session::CallbackLikeFirstArg. Without
+    //! it the callback form would win overload resolution for a plain data
+    //! argument (T&& beats const Args&), making the PendingReply form
+    //! unreachable and turning valid calls into hard compile errors.
+    template<typename Ret, typename... Args>
+    struct CallbackLikeFirstArg {
+        static constexpr bool value = false;
+    };
+
+    template<typename Ret, typename First, typename... Rest>
+    struct CallbackLikeFirstArg<Ret, First, Rest...> {
+        static constexpr bool value =
+            std::is_invocable_r_v<void, First, Reply<Ret>>;
+    };
+
 struct ServerInfo {
     std::string name;
     std::string path;
@@ -119,7 +137,8 @@ public:
      * @param aArgs         call arguments
      * @return PendingReply<Ret> handle for the in-flight call
      */
-    template<typename Ret=void, uint64_t TimeoutUsec=0, typename... Args>
+    template<typename Ret=void, uint64_t TimeoutUsec=0, typename... Args,
+        std::enable_if_t<!CallbackLikeFirstArg<Ret, Args...>::value, int> = 0>
     [[nodiscard]] PendingReply<Ret> callAsync(std::string_view aMethod, const Args&... aArgs) {
         if (mLooper->isOwnerThread()) {
             return mAsyncPtr->callAsync<Ret, TimeoutUsec>(
@@ -152,7 +171,8 @@ public:
      * @param aArgs        call arguments
      * @return Status indicating whether the call was dispatched
      */
-    template<typename Ret=void, uint64_t TimeoutUsec=0, typename Callback, typename... Args>
+    template<typename Ret=void, uint64_t TimeoutUsec=0, typename Callback, typename... Args,
+        std::enable_if_t<std::is_invocable_r_v<void, Callback, Reply<Ret>>, int> = 0>
     [[nodiscard]] Status callAsync(std::string_view aMethod, Callback&& aCallback, const Args&... aArgs) {
         if (mLooper->isOwnerThread()) {
             return mAsyncPtr->callAsync<Ret, TimeoutUsec>(

@@ -45,6 +45,14 @@ public:
     std::vector<UnixFd> echoFdList(std::vector<UnixFd> fds) { return fds; }
     DBUSXX_METHOD(echoFdList)
 
+    //! Slow method: sleeps before replying so a client can abandon an async
+    //! call (PendingReply dropped) while the reply is still in flight.
+    std::string slowEcho(const std::string& s) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(200));
+        return s;
+    }
+    DBUSXX_METHOD(slowEcho)
+
     DBUSXX_PROPERTY_RW(counter, int32_t, 0)
 };
 
@@ -162,4 +170,26 @@ TEST_F(BusDaemonE2ETest, UnixFdListEcho) {
 
     ::close(pa[1]);
     ::close(pb[1]);
+}
+
+//! Regression: an async call abandoned (PendingReply destroyed) before its
+//! reply arrives must not crash when the reply shows up later. The handler
+//! (and its sd-bus slot) must be torn down on the bus-processing thread, so
+//! the late reply must never touch a freed / refcounted-out handler.
+TEST_F(BusDaemonE2ETest, AsyncAbandonBeforeReply) {
+    //! Fire a slow call and abandon it inside this scope before the server
+    //! answers (server sleeps 200 ms; the waitFor is only 10 ms).
+    {
+        auto pend = mClient->callAsync<std::string>("slowEcho", std::string("x"));
+        EXPECT_FALSE(pend.waitFor(10))
+            << "expected a timeout while the reply is still in flight";
+    }   //! pend destroyed here = the call is abandoned
+
+    //! Give the server time to answer the abandoned call; nothing may crash.
+    std::this_thread::sleep_for(std::chrono::milliseconds(400));
+
+    //! The client must still work afterwards.
+    auto rep = mClient->callSync<int32_t>("echoInt", 5);
+    ASSERT_FALSE(rep.isError()) << rep.errorMessage();
+    EXPECT_EQ(rep.value(), 5);
 }

@@ -136,6 +136,24 @@ void LooperPrivate::run() {
     }
 
     mThreadId = std::this_thread::get_id();
+
+    //! Register the "run on my (driving) thread" dispatcher so async reply
+    //! handlers can be destroyed (slot/message unref) on this sd-bus
+    //! processing thread, never on whichever thread drops the last
+    //! PendingReply. Captures a weak ref: after this looper dies (its thread
+    //! is joined, no concurrency), tasks simply run in place.
+    mSession->setOwnerPoster(
+        [weak = std::weak_ptr<LooperPrivate>(shared_from_this())](
+            std::function<void()> aTask) {
+            auto self = weak.lock();
+            if (!self || std::this_thread::get_id() == self->mThreadId.load()) {
+                aTask();
+                return;
+            }
+
+            self->post(std::move(aTask));
+        });
+
     Status st = Adaptor::RawEvent::loop(mEvent.get());
     if (mStatus.load().isSuccess()) {
         mStatus = st;
