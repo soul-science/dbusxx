@@ -6,7 +6,7 @@
 
 `Message` is a type-safe, stream-like wrapper around a raw D-Bus message. Append arguments with `operator<<` / `write()`, and extract them with `operator>>` / `read()`. It is also the base class of `Reply<Ret>`.
 
-Internally `Message` holds the underlying `sd-bus` message handle via `Private::MessagePrivate` (PIMPL) and supports automatic (de)serialization of basic types, `std::string`, containers, structs, etc.
+Internally `Message` holds the underlying `sd-bus` message handle via `Private::MessagePrivate` (PIMPL) and supports automatic (de)serialization of basic types, `std::string`, containers, `UnixFd` file descriptors, structs, etc.
 
 ## Class: `Message`
 

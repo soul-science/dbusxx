@@ -20,6 +20,7 @@ Organized by "core → supporting":
 | [Message.en.md](Message.en.md) | `Message.hpp` | Type-safe D-Bus message (stream-style read/write) |
 | [Reply.en.md](Reply.en.md) | `Reply.hpp` | Typed reply (method return value) |
 | [PendingReply.en.md](PendingReply.en.md) | `PendingReply.hpp` | Async-call handle |
+| [UnixFd.en.md](UnixFd.en.md) | `UnixFd.hpp` | Unix file descriptors passed in messages (RAII) |
 | [Status.en.md](Status.en.md) | `Status.hpp` | Status codes and error handling |
 | [Utils.en.md](Utils.en.md) | `Utils.hpp` | Common types (`SessionType`) |
 
