@@ -123,6 +123,23 @@ public:
         mPeerAcceptedCb = std::move(aCb);
     }
 
+    //! Dispatcher that runs a task on the thread driving this session (the
+    //! Looper thread; registered by LooperPrivate::run). Async-reply handlers
+    //! use it so their destruction — sd-bus slot/message unref, which touches
+    //! non-atomic sd-bus refcounts — always happens on the sd-bus processing
+    //! thread, never on whichever thread happens to release the last
+    //! PendingReply. Empty when the session is driven directly (no Looper);
+    //! callers must then release pending handles on the bus-processing thread.
+    using OwnerPoster = std::function<void(std::function<void()>)>;
+
+    void setOwnerPoster(OwnerPoster aPoster) {
+        mOwnerPoster = std::move(aPoster);
+    }
+
+    inline const OwnerPoster& ownerPoster() const {
+        return mOwnerPoster;
+    }
+
     void addMethodEntry(const std::string& aKey, std::string_view aName,
         std::string aInput, std::string aOutput,
         Adaptor::RawBusMessageHandler aCallback, void* aData,
@@ -181,6 +198,7 @@ private:
     std::string mServiceName;
     bool mIsServer{false};
     std::function<Status()> mPeerAcceptedCb;
+    OwnerPoster mOwnerPoster;
 
     ObjectMap mRegisteredObjects;
     SignalHandlerVector mRegisteredSigHandlers;
