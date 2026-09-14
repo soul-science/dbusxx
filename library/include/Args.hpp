@@ -77,7 +77,7 @@ inline constexpr std::size_t memberCountV = memberCountImpl<T>::value;
 //! tieAsTuple overloads are macro-generated so the field-count limit
 //! can be raised without hand-writing each overload.
 //! To support more than 20 fields, extend DBUSXX_DETAIL_FIELDS_N and
-//! DBUSXX_DETAIL_TIE_TUPLE_N (and bump the static_assert below).
+//! DBUSXX_DETAIL_TIE_TUPLE_N (and advance the static_assert below).
 //! ------------------------------------------------------------------
 //! Single-level ## is enough here: the right operand is always a literal (1..20),
 //! which ## does not need to expand first. Keep the two-level CAT form only if
