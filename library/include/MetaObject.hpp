@@ -82,8 +82,8 @@ protected:
 /**
  * @def DBUSXX_SIGNAL
  * @brief Expose a D-Bus signal with the given argument types.
- * @param aSignal signal name to expose
- * @param ...     signal argument types (e.g. `int32_t, std::string`)
+ * @param aSignal       signal name to expose
+ * @param __VA_ARGS__   signal argument types (e.g. `int32_t, std::string`)
  */
 #define DBUSXX_SIGNAL(aSignal, ...)                                                         \
     static inline int _dbusxx_reg_##aSignal = [] {                                          \
@@ -103,19 +103,19 @@ protected:
 /**
  * @def DBUSXX_PROPERTY_RO
  * @brief Expose a read-only property (the wrapper owns its own copy of the value).
- * @param aName      property name to expose
- * @param aType      property value type
- * @param aInitValue initial value
+ * @param aName         property name to expose
+ * @param aType         property value type
+ * @param __VA_ARGS__   initial values
  */
-#define DBUSXX_PROPERTY_RO(aName, aType, aInitValue)                                        \
-    static inline int _dbusxx_reg_prop_##aName = [] {                                        \
+#define DBUSXX_PROPERTY_RO(aName, aType, ...)                                               \
+    static inline int _dbusxx_reg_prop_##aName = [] {                                       \
         Self::registry().push_back({                                                        \
             #aName,                                                                         \
             Self::sPath,                                                                    \
             Self::sIface,                                                                   \
             [](void* aBuilder, void* aObj) -> void {                                        \
                 auto* builder = static_cast<::Dbusxx::Session::RegisterBuilder*>(aBuilder); \
-                builder->addProperty<aType>(#aName, aInitValue, false);                     \
+                builder->addProperty<aType>(#aName, __VA_ARGS__, false);                    \
             }                                                                               \
         });                                                                                 \
         return 0;                                                                           \
@@ -124,19 +124,19 @@ protected:
 /**
  * @def DBUSXX_PROPERTY_RW
  * @brief Expose a read-write property (the wrapper owns its own copy of the value).
- * @param aName      property name to expose
- * @param aType      property value type
- * @param aInitValue initial value
+ * @param aName         property name to expose
+ * @param aType         property value type
+ * @param __VA_ARGS__   initial values
  */
-#define DBUSXX_PROPERTY_RW(aName, aType, aInitValue)                                        \
-    static inline int _dbusxx_reg_prop_##aName = [] {                                        \
+#define DBUSXX_PROPERTY_RW(aName, aType, ...)                                               \
+    static inline int _dbusxx_reg_prop_##aName = [] {                                       \
         Self::registry().push_back({                                                        \
             #aName,                                                                         \
             Self::sPath,                                                                    \
             Self::sIface,                                                                   \
             [](void* aBuilder, void* aObj) -> void {                                        \
                 auto* builder = static_cast<::Dbusxx::Session::RegisterBuilder*>(aBuilder); \
-                builder->addProperty<aType>(#aName, aInitValue, true);                      \
+                builder->addProperty<aType>(#aName, __VA_ARGS__, true);                     \
             }                                                                               \
         });                                                                                 \
         return 0;                                                                           \
