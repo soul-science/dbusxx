@@ -593,7 +593,7 @@ std::vector<Error> validateAst(const Ast::Root& aAstRoot) {
                 report(
                     errs,
                     "field '" + f.name +
-                        "' is not a valid identifier in struct" + s.name,
+                        "' is not a valid identifier in struct '" + s.name + "'",
                     f.loc
                 );
             }

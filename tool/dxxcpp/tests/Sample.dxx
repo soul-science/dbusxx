@@ -1,0 +1,57 @@
+//! dxxcpp end-to-end sample: .dxx -> Lexer -> Parser -> Sema -> Codegen
+//! Syntax follows the spec in note/dxx.md
+
+//! package declaration (decides the namespace and the object path)
+package com.example.calc;
+
+//! custom types
+struct Point {
+    int32 x;
+    int32 y;
+};
+
+//! type alias
+using ConfigMap = map<string, string>;
+
+//! calculator interface
+interface Calculator {
+    //! basic arithmetic
+    method add(int32 a, int32 b) -> int32;
+    method multiply(int32 a, int32 b) -> int32;
+
+    //! struct parameter
+    method translate(Point p, int32 dx) -> Point;
+
+    //! void method with a string parameter
+    method notify(string msg);
+
+    //! timeout control (milliseconds)
+    @timeout(3000) method getConfig() -> ConfigMap;
+
+    //! no return value + deprecated
+    @deprecated method legacy(int32 code);
+
+    //! signals
+    signal valueChanged(int32 oldVal, int32 newVal);
+
+    //! properties
+    @readonly property version -> string{"1.0.0"};
+    property counter -> int32{0};
+    property metadata -> map<string, string>{};
+    //! no initializer: Codegen emits a value-initialized expression instead
+    property untouched -> int32;
+    property tags -> map<string, string>;
+    //! multi-value initializer: passed verbatim to DBUSXX_PROPERTY_*,
+    //! the C++ compiler builds the container
+    property samples -> vector<int32>{1, 2, 3};
+    //! struct / container properties need the generated operator==
+    //! (the property setter compares the old value with the new one)
+    property origin -> Point{1, 2};
+    property history -> vector<Point>{{1, 2}, {3, 4}};
+};
+
+//! second interface: exercises the multi-interface output
+interface Logger {
+    method log(string message);
+    signal logAdded(string message);
+};
