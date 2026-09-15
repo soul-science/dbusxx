@@ -21,8 +21,14 @@ stages:
       -DCMAKE_CXX_STANDARD_REQUIRED=ON -DDBUSXX_CTEST_BENCHMARKS=ON
     - cmake --build build_release
     - ""
-    - '# Run ci'
+    - '# Run dbusxx ci'
     - ctest --test-dir build_release --rerun-failed --output-on-failure
+    - ""
+    - '# Run dxxcpp ci'
+    - cd tool/dxxcpp
+    - cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DCMAKE_CXX_STANDARD=17 -DCMAKE_CXX_STANDARD_REQUIRED=ON
+    - cmake --build build
+    - ctest --test-dir build --rerun-failed --output-on-failure
     artifacts:
     - name: BUILD_ARTIFACT
       path:
