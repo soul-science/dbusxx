@@ -1,0 +1,13 @@
+//! CLI negative input: an interface member that is not method/signal/property
+//! Expectation: dxxcpp reports errors and exits non-zero (dxxcpp_cli_bad_input)
+package com.example.bad;
+
+struct Point {
+    int32 x;
+    int32 y;
+};
+
+interface Broken {
+    method add(int32 a, int32 b) -> int32;
+    foo bar;
+};

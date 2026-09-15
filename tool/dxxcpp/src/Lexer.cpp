@@ -222,7 +222,7 @@ Result tokenize(std::string_view aSource) {
             continue;
         }
 
-        //! Number literal: 123 / 1.5 / -1 / +1 / 1e-3 / 0x1F / 1'000 都算一个 token
+        //! Number literal: 123 / 1.5 / -1 / +1 / 1e-3 / 0x1F is one token each
         const char next = cur.peek(1);
         const bool signStart = (c == '-' || c == '+') &&
             (isDigit(next) || (next == '.' && isDigit(cur.peek(2))));
