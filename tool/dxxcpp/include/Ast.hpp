@@ -44,11 +44,11 @@ struct Type {
     std::vector<Type> templateType;
     Loc loc;
 
-    bool isVector() {
+    bool isVector() const {
         return name == VECTOR_STR;
     }
 
-    bool isMap() {
+    bool isMap() const {
         return name == MAP_STR;
     }
 

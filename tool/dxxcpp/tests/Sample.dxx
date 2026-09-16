@@ -31,6 +31,10 @@ interface Calculator {
     //! no return value + deprecated
     @deprecated method legacy(int32 code);
 
+    //! @sync / @async: the Proxy gets only the shape asked for
+    @sync method syncOnly(int32 val) -> int32;
+    @async method asyncOnly(int32 val) -> bool;
+
     //! signals
     signal valueChanged(int32 oldVal, int32 newVal);
 

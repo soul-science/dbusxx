@@ -60,9 +60,16 @@ endforeach()
 file(READ "${OUT_DIR}/CalculatorProxy.hpp" PROXY)
 foreach(NEEDLE
     "#include <dbusxx/Client.hpp>"
+    "#include <functional>"
     "class CalculatorProxy"
     "callSync"
-    "[[deprecated]]")
+    "[[deprecated]]"
+    "Dbusxx::Reply<std::int32_t> syncOnly(std::int32_t val)"
+    "Dbusxx::PendingReply<std::int32_t> addAsync"
+    "Dbusxx::PendingReply<bool> asyncOnlyAsync"
+    "Dbusxx::Status addAsync(std::function<void(Dbusxx::Reply<std::int32_t>)> aCallback"
+    "Dbusxx::Status asyncOnlyAsync(std::function<void(Dbusxx::Reply<bool>)> aCallback"
+    "mClient.callAsync<bool>(\"asyncOnly\", std::move(aCallback), val)")
     string(FIND "${PROXY}" "${NEEDLE}" FOUND_AT)
     if(FOUND_AT EQUAL -1)
         message(FATAL_ERROR "CalculatorProxy.hpp misses '${NEEDLE}'")

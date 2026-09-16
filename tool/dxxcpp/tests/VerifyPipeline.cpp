@@ -80,6 +80,63 @@ void caseKeywordParamName() {
     expectContains("proxy: callSync args", aProxy, "callSync<bool>(\"f\", new_, class_)");
 }
 
+//! Only methods live in the Proxy, so <method>Async may also be a property name
+void caseAsyncSuffixOnProperty() {
+    section("a property named <method>Async is not a collision");
+    const std::string aSrc =
+        "package com.example.a;\n"
+        "interface I {\n"
+        "    method f(int32 val) -> int32;\n"
+        "    property fAsync -> int32{0};\n"
+        "};\n";
+
+    const Parser::Result aParserResult = Parser::parse(aSrc);
+    if (!aParserResult.root) {
+        fail("parse", aParserResult.errors.empty() ? "no root" : aParserResult.errors[0].msg);
+        return;
+    }
+
+    const Sema::Result aSemaResult = Sema::analyze(*aParserResult.root);
+    if (!aSemaResult.ir) {
+        fail("sema", aSemaResult.errors.empty() ? "no ir" : aSemaResult.errors[0].msg);
+        return;
+    }
+
+    ok("method f + property fAsync accepted");
+    const std::string aProxy = Codegen::genProxyHeader(*aSemaResult.ir,
+        aSemaResult.ir->interfaces[0]);
+    expectContains("proxy: async shape kept", aProxy,
+        "Dbusxx::PendingReply<std::int32_t> fAsync(std::int32_t val)");
+}
+
+//! @sync generates no callback overload, so "aCallback" is a legal parameter name
+void caseSyncOnlyCallbackParam() {
+    section("@sync: a parameter named like the generated callback is fine");
+    const std::string aSrc =
+        "package com.example.a;\n"
+        "interface I {\n"
+        "    @sync method f(int32 aCallback) -> int32;\n"
+        "};\n";
+
+    const Parser::Result aParserResult = Parser::parse(aSrc);
+    if (!aParserResult.root) {
+        fail("parse", aParserResult.errors.empty() ? "no root" : aParserResult.errors[0].msg);
+        return;
+    }
+
+    const Sema::Result aSemaResult = Sema::analyze(*aParserResult.root);
+    if (!aSemaResult.ir) {
+        fail("sema", aSemaResult.errors.empty() ? "no ir" : aSemaResult.errors[0].msg);
+        return;
+    }
+
+    ok("@sync method with a parameter named aCallback accepted");
+    const std::string aProxy = Codegen::genProxyHeader(*aSemaResult.ir,
+        aSemaResult.ir->interfaces[0]);
+    expectContains("proxy: only the sync shape", aProxy,
+        "mClient.callSync<std::int32_t>(\"f\", aCallback)");
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -193,7 +250,23 @@ int main(int argc, char** argv) {
     expectContains("proxy: timeout", aProxy,
         "callSync<std::map<std::string, std::string>, 3000000>(\"getConfig\"");
     expectContains("proxy: deprecated", aProxy, "[[deprecated]]");
-    expectContains("proxy: oneway", aProxy, "callSync(\"legacy\"");
+
+    section("codegen: proxy shapes (@sync / @async)");
+    expectContains("proxy: async handle", aProxy, "Dbusxx::PendingReply<std::int32_t> addAsync(");
+    expectContains("proxy: async callback", aProxy,
+        "Dbusxx::Status addAsync(std::function<void(Dbusxx::Reply<std::int32_t>)> aCallback,");
+    expectContains("proxy: async call", aProxy,
+        "mClient.callAsync<std::int32_t>(\"add\", std::move(aCallback), a, b)");
+    expectContains("proxy: @sync signature", aProxy,
+        "Dbusxx::Reply<std::int32_t> syncOnly(std::int32_t val)");
+    expectContains("proxy: @sync call", aProxy,
+        "mClient.callSync<std::int32_t>(\"syncOnly\", val)");
+    expectContains("proxy: @async handle", aProxy,
+        "Dbusxx::PendingReply<bool> asyncOnlyAsync(std::int32_t val)");
+    expectContains("proxy: @async callback", aProxy,
+        "Dbusxx::Status asyncOnlyAsync(std::function<void(Dbusxx::Reply<bool>)> aCallback,");
+    expectContains("proxy: @async call", aProxy,
+        "mClient.callAsync<bool>(\"asyncOnly\", std::move(aCallback), val)");
 
     section("codegen: LoggerSkeleton.hpp");
     const std::string aLogger = Codegen::genSkeletonHeader(*aSemaResult.ir,
@@ -204,6 +277,8 @@ int main(int argc, char** argv) {
     expectContains("logger: signal", aLogger, "DBUSXX_SIGNAL(logAdded, std::string)");
 
     caseKeywordParamName();
+    caseAsyncSuffixOnProperty();
+    caseSyncOnlyCallbackParam();
 
     if (gFail != 0) {
         std::cout << "\n[RESULT] " << gFail << " check(s) FAILED\n";

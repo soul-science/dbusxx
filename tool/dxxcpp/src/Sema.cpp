@@ -434,6 +434,11 @@ std::vector<Error> checkAnnotations(AnnTarget aT, const std::vector<Ast::Annotat
                 report(errs, "@" + a.name + " is only for method", a.loc);
             }
 
+            if ((a.name == ANNS_SYNC_STR && seen.count(ANNS_ASYNC_STR.data()) > 0)
+                || (a.name == ANNS_ASYNC_STR && seen.count(ANNS_SYNC_STR.data()) > 0)) {
+                report(errs, "@sync and @async are mutually exclusive", a.loc);
+            }
+
             if (a.value) {
                 report(errs, "@" + a.name + " doesn't require a value", a.loc);
             }
@@ -459,15 +464,15 @@ bool hasAnnotation(const std::vector<Ast::Annotation>& aAnnos, const std::string
     );
 }
 
-std::optional<std::string> annotationValue(const std::vector<Ast::Annotation>& aAnns,
-  const std::string& aName) {
-    for (const auto& a : aAnns) {
-        if (a.name == aName) {
-            return a.value;
+std::vector<Ast::Annotation>::const_iterator findAnnotation(
+  const std::vector<Ast::Annotation>& aAnns, const std::string& aName) {
+    for (auto iter = aAnns.begin(); iter != aAnns.end(); ++iter) {
+        if (iter->name == aName) {
+            return iter;
         }
     }
 
-    return std::nullopt;
+    return aAnns.end();
 }
 }
 
@@ -678,6 +683,18 @@ std::vector<Error> validateAst(const Ast::Root& aAstRoot) {
 
             //! Check param
             for (const auto& p : m.params) {
+                //! The generated async shape declares its own completion callback,
+                //! so a parameter with that name would be declared twice
+                if (!hasAnnotation(m.annotations, ANNS_SYNC_STR.data())
+                    && p.name == Ir::ASYNC_CALLBACK_PARAM) {
+                    report(
+                        errs,
+                        "parameter '" + p.name + "' of method '" + m.name +
+                            "' collides with the generated async callback",
+                        p.loc
+                    );
+                }
+
                 appendErrors(errs, checkType(aAstRoot, p.type));
             }
 
@@ -709,6 +726,27 @@ std::vector<Error> validateAst(const Ast::Root& aAstRoot) {
             appendErrors(errs, checkAnnotations(AnnTarget::PROPERTY, pr.annotations));
 
             appendErrors(errs, checkType(aAstRoot, pr.type));
+        }
+
+        //! The Proxy generates <name>Async for every method that has an async
+        //! shape (@sync suppresses it), so the generated name must not collide
+        //! with another method (properties and signals are not part of the Proxy)
+        std::unordered_set<std::string> methodNames;
+        for (const auto& m : ifce.methods) {
+            methodNames.emplace(m.name);
+        }
+
+        for (const auto& m : ifce.methods) {
+            const std::string asyncName = m.name + std::string(Ir::ASYNC_SUFFIX);
+            if (!hasAnnotation(m.annotations, ANNS_SYNC_STR.data())
+                && methodNames.count(asyncName) > 0) {
+                report(
+                    errs,
+                    "method '" + m.name + "' generates '" + asyncName +
+                        "', which is already a method of " + ifce.name,
+                    m.loc
+                );
+            }
         }
     }
 
@@ -833,9 +871,18 @@ Result generateIr(const Ast::Root& aAstRoot) {
             Ir::Method im;
             im.name = am.name;
             im.deprecated = hasAnnotation(am.annotations, ANNS_DEPRECATED_STR.data());
-            auto timeout = annotationValue(am.annotations, ANNS_TIMEOUT_STR.data());
-            if (timeout) {
-                im.timeoutUsec = std::stoull(*timeout) * 1000;
+            auto timeoutIt = findAnnotation(am.annotations, ANNS_TIMEOUT_STR.data());
+            if (timeoutIt != am.annotations.end() && timeoutIt->value) {
+                im.timeoutUsec = std::stoull(*timeoutIt->value) * 1000;
+            }
+
+            auto isSync = findAnnotation(am.annotations, ANNS_SYNC_STR.data());
+            auto isAsync = findAnnotation(am.annotations, ANNS_ASYNC_STR.data());
+            if (isSync != am.annotations.end()) {
+                im.callMode = Ir::Method::CallMode::Sync;
+            }
+            else if (isAsync != am.annotations.end()) {
+                im.callMode = Ir::Method::CallMode::Async;
             }
 
             for (const auto& ap : am.params) {

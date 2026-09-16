@@ -21,6 +21,8 @@ struct CalcImpl : CalculatorInterface {
     ConfigMap getConfig() override { return {}; }
     void notify(const std::string& msg) override {}
     void legacy(std::int32_t code) override {}
+    std::int32_t syncOnly(std::int32_t val) override { return val; }
+    bool asyncOnly(std::int32_t val) override { return val != 0; }
 };
 
 struct LoggerImpl : LoggerInterface {
@@ -44,6 +46,15 @@ int main() {
     (void)aReply;
     (void)aNotifySt;
     (void)aSt;
+
+    //! @sync -> only the synchronous shape, @async -> only the two async ones
+    //! (the async pair shares the <name>Async name, the bare name is not generated)
+    auto aSyncReply = aCalcProxy.syncOnly(1);
+    auto aPending = aCalcProxy.asyncOnlyAsync(1);
+    auto aAsyncStatus = aCalcProxy.asyncOnlyAsync([] (Dbusxx::Reply<bool>) {}, 1);
+    (void)aSyncReply;
+    (void)aPending;
+    (void)aAsyncStatus;
 
     return 0;
 }

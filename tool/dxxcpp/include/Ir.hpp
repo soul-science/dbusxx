@@ -5,6 +5,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <variant>
 #include <vector>
@@ -15,6 +16,12 @@ namespace Ir {
 using TypeId = std::uint32_t;
 //! Type name location
 using NameIdx = std::uint32_t;
+
+//! Names of the shapes generated for a method that has an async one: the Proxy
+//! declares <name><ASYNC_SUFFIX>, whose callback overload takes
+//! ASYNC_CALLBACK_PARAM first. Sema rejects declarations that would collide.
+inline constexpr std::string_view ASYNC_SUFFIX { "Async" };
+inline constexpr std::string_view ASYNC_CALLBACK_PARAM { "aCallback" };
 
 struct TypeBase {
     NameIdx name;
@@ -65,10 +72,17 @@ struct AliasType {
 };
 
 struct Method {
+    enum class CallMode {
+        Both = 0,
+        Sync,
+        Async
+    };
+
     std::string name;
     std::vector<Parameter> params;
     std::optional<TypeId> ret;
     std::optional<std::uint64_t> timeoutUsec;
+    CallMode callMode { CallMode::Both };
     bool deprecated { false };
 };
 

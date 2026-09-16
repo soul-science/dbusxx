@@ -81,6 +81,50 @@ std::string callArgs(const std::vector<Ir::Parameter>& aParams) {
     return s;
 }
 
+//! Generate parameter list: "std::int32_t a, const Point& p"
+std::string paramDeclList(const Ir::Root& aIr, const std::vector<Ir::Parameter>& aParams) {
+    std::string decl;
+    for (size_t i = 0; i < aParams.size(); ++i) {
+        if (i) {
+            decl += ", ";
+        }
+
+        decl += paramDecl(aIr, aParams[i]);
+    }
+
+    return decl;
+}
+
+//! Generate one client call: mClient.<api><Ret[, TimeoutUsec]>("name"[, leadArg][, args])
+std::string callExpr(const Ir::Root& aIr, const Ir::Method& aMethod,
+  const std::string& aApi, const std::string& aLeadArg = "") {
+    std::string call = "mClient." + aApi;
+
+    if (aMethod.ret) {
+        call += "<" + cppType(aIr, *aMethod.ret);
+        if (aMethod.timeoutUsec) {
+            call += ", " + std::to_string(*aMethod.timeoutUsec);
+        }
+
+        call += ">";
+    }
+    else if (aMethod.timeoutUsec) {
+        call += "<void, " + std::to_string(*aMethod.timeoutUsec) + ">";
+    }
+
+    call += "(\"" + aMethod.name + "\"";
+    if (!aLeadArg.empty()) {
+        call += ", " + aLeadArg;
+    }
+
+    const std::string args = callArgs(aMethod.params);
+    if (!args.empty()) {
+        call += ", " + args;
+    }
+
+    return call + ")";
+}
+
 //! Parameter wrapper: Convert any actual parameter into a string
 //! Therefore, all placeholders for call points should use %s
 class Arg {
@@ -328,16 +372,8 @@ std::string genSkeletonHeader(const Ir::Root& aIr, const Ir::Interface& aIfce) {
     output += line(INDENT_SIZE, "virtual ~%sInterface() = default;", aIfce.name);
     for (const auto& m : aIfce.methods) {
         std::string ret = m.ret ? cppType(aIr, *m.ret) : "void";
-        std::string decl;
-        for (size_t i = 0; i < m.params.size(); ++i) {
-            if (i) {
-                decl += ", ";
-            }
-
-            decl += paramDecl(aIr, m.params[i]);
-        }
-
-        output += line(INDENT_SIZE, "virtual %s %s(%s) = 0;", ret, m.name, decl);
+        output += line(INDENT_SIZE, "virtual %s %s(%s) = 0;", ret, m.name,
+            paramDeclList(aIr, m.params));
     }
 
     output += line(0, "};");
@@ -358,15 +394,6 @@ std::string genSkeletonHeader(const Ir::Root& aIr, const Ir::Interface& aIfce) {
     //! Definition of methods
     for (const auto& method : aIfce.methods) {
         std::string ret = method.ret ? cppType(aIr, *method.ret) : "void";
-        std::string decl;
-        for (size_t i = 0; i < method.params.size(); ++i) {
-            if (i) {
-                decl += ", ";
-            }
-
-            decl += paramDecl(aIr, method.params[i]);
-        }
-
         output += '\n';
         if (method.deprecated) {
             //! Using comments instead of [[deprecated]]:
@@ -374,7 +401,8 @@ std::string genSkeletonHeader(const Ir::Root& aIr, const Ir::Interface& aIfce) {
             output += line(INDENT_SIZE, "// @deprecated");
         }
 
-        output += line(INDENT_SIZE, "%s %s(%s) {", ret, method.name, decl);
+        output += line(INDENT_SIZE, "%s %s(%s) {", ret, method.name,
+            paramDeclList(aIr, method.params));
         std::string call = "mIface->" + method.name +
             "(" + callArgs(method.params) + ")";
         output += line(INDENT_SIZE * 2, "%s;", (method.ret ? "return " + call : call));
@@ -419,6 +447,93 @@ std::string genSkeletonHeader(const Ir::Root& aIr, const Ir::Interface& aIfce) {
     return output;
 }
 
+namespace {
+//! Shape of one generated Proxy method: the async versions differ from the sync
+//! one only by these fields
+struct ProxyMethod {
+    std::string note;        //! Comment above the function
+    std::string replyType;   //! Dbusxx::Reply<T> / Dbusxx::PendingReply<T> / Dbusxx::Status
+    std::string nameSuffix;  //! Appended to the .dxx method name ("" or "Async")
+    std::string leadParam;   //! Extra leading parameter (the async callback), may be empty
+    std::string api;         //! Client member used by the call
+    std::string leadArg;     //! Argument passed for leadParam, may be empty
+};
+
+//! Dbusxx::<aWrapper><T>, or void when the method has no return value
+std::string replyTypeOf(const Ir::Root& aIr, const Ir::Method& aMethod,
+  const std::string& aWrapper) {
+    return "Dbusxx::" + aWrapper + "<" +
+        (aMethod.ret ? cppType(aIr, *aMethod.ret) : "void") + ">";
+}
+
+//! Timeout note appended to the comment above a method
+std::string timeoutNote(const Ir::Method& aMethod) {
+    return aMethod.timeoutUsec ?
+        (" [timeout=" + std::to_string(*aMethod.timeoutUsec) + "us]") : std::string();
+}
+
+//! Generate one Proxy method in the shape described by aSpec
+std::string genProxyMethod(const Ir::Root& aIr, const Ir::Method& aMethod,
+  const ProxyMethod& aSpec) {
+    std::string output;
+
+    std::string decl = aSpec.leadParam;
+    const std::string params = paramDeclList(aIr, aMethod.params);
+    if (!params.empty()) {
+        if (!decl.empty()) {
+            decl += ", ";
+        }
+
+        decl += params;
+    }
+
+    output += line(INDENT_SIZE, "%s", aSpec.note + timeoutNote(aMethod));
+
+    //! Only use "deprecated" in Proxy to expose to user
+    if (aMethod.deprecated) {
+        output += line(INDENT_SIZE, "[[deprecated]]");
+    }
+
+    output += line(INDENT_SIZE, "[[nodiscard]] %s %s%s(%s) {",
+        aSpec.replyType, aMethod.name, aSpec.nameSuffix, decl);
+    output += line(INDENT_SIZE * 2, "return %s;",
+        callExpr(aIr, aMethod, aSpec.api, aSpec.leadArg));
+    output += line(INDENT_SIZE, "}");
+    output += '\n';
+
+    return output;
+}
+
+//! Synchronous shape: Reply<T> from callSync
+ProxyMethod syncSpec(const Ir::Root& aIr, const Ir::Method& aMethod) {
+    return ProxyMethod {
+        "//! Sync: return Dbusxx::Reply",
+        replyTypeOf(aIr, aMethod, "Reply"), "", "", "callSync", ""
+    };
+}
+
+//! Asynchronous shape returning a handle: PendingReply<T> from callAsync
+ProxyMethod asyncSpec(const Ir::Root& aIr, const Ir::Method& aMethod) {
+    return ProxyMethod {
+        "//! Async: return Dbusxx::PendingReply",
+        replyTypeOf(aIr, aMethod, "PendingReply"),
+        std::string(Ir::ASYNC_SUFFIX), "", "callAsync", ""
+    };
+}
+
+//! Asynchronous shape taking a callback: Status from callAsync, callback first
+ProxyMethod asyncCallbackSpec(const Ir::Root& aIr, const Ir::Method& aMethod) {
+    const std::string callbackParam(Ir::ASYNC_CALLBACK_PARAM);
+    ProxyMethod spec = asyncSpec(aIr, aMethod);
+    spec.note = "//! Async: return Dbusxx::Status";
+    spec.replyType = "Dbusxx::Status";
+    spec.leadParam = "std::function<void(" + replyTypeOf(aIr, aMethod, "Reply") + ")> " +
+        callbackParam;
+    spec.leadArg = "std::move(" + callbackParam + ")";
+    return spec;
+}
+} // namespace
+
 //! Proxy Generator
 std::string genProxyHeader(const Ir::Root& aIr, const Ir::Interface& aIfce) {
     std::string output;
@@ -435,14 +550,18 @@ std::string genProxyHeader(const Ir::Root& aIr, const Ir::Interface& aIfce) {
 
     //! Included header files
     output += line(0, "#include <dbusxx/Client.hpp>");
+    output += line(0, "#include <dbusxx/PendingReply.hpp>");
     output += line(0, "#include <dbusxx/Reply.hpp>");
+    output += line(0, "#include <dbusxx/Status.hpp>");
+    output += line(0, "#include <functional>");
     output += '\n';
 
     output += line(0, "#include \"Types.hpp\"");
     output += '\n';
 
     output += line(0, "#ifndef DBUSXX_SERVICE_NAME");
-    output += line(0, "#error \"DBUSXX_SERVICE_NAME must be defined (e.g. -DDBUSXX_SERVICE_NAME=\\\"com.example.app\\\")\"");
+    output += line(0, "#error \"DBUSXX_SERVICE_NAME must be defined"
+        "(e.g. -DDBUSXX_SERVICE_NAME=\\\"com.example.app\\\")\"");
     output += line(0, "#endif");
     output += '\n';
 
@@ -467,61 +586,14 @@ std::string genProxyHeader(const Ir::Root& aIr, const Ir::Interface& aIfce) {
 
     //! Definition of methods
     for (const auto& method : aIfce.methods) {
-        std::string decl;
-        for (size_t i = 0; i < method.params.size(); ++i) {
-            if (i) {
-                decl += ", ";
-            }
-
-            decl += paramDecl(aIr, method.params[i]);
+        if (method.callMode != Ir::Method::CallMode::Async) {
+            output += genProxyMethod(aIr, method, syncSpec(aIr, method));
         }
 
-        const std::string args = callArgs(method.params);
-        const std::string replyType = method.ret ?
-            ("Dbusxx::Reply<" + cppType(aIr, *method.ret) + ">")
-            : "Dbusxx::Reply<void>";
-
-        std::string note = "// " + std::string(method.ret ? "sync" : "oneway");
-        if (method.timeoutUsec) {
-            note += " [timeout=" + std::to_string(*method.timeoutUsec) + "us]";
+        if (method.callMode != Ir::Method::CallMode::Sync) {
+            output += genProxyMethod(aIr, method, asyncSpec(aIr, method));
+            output += genProxyMethod(aIr, method, asyncCallbackSpec(aIr, method));
         }
-
-        output += line(INDENT_SIZE, "%s", note);
-
-        //! Only use "deprecated" in Proxy to expose to user
-        if (method.deprecated) {
-            output += line(INDENT_SIZE, "[[deprecated]]");
-        }
-
-        output += line(INDENT_SIZE, "[[nodiscard]] %s %s(%s) {",
-            replyType, method.name, decl);
-
-        std::string call;
-        if (method.ret && method.timeoutUsec) {
-            call = "mClient.callSync<" + cppType(aIr, *method.ret) + ", " +
-                std::to_string(*method.timeoutUsec) + ">(\"" + method.name + "\"";
-        }
-        else if (method.ret) {
-            call = "mClient.callSync<" +
-                cppType(aIr, *method.ret) + ">(\"" + method.name + "\"";
-        }
-        else if (method.timeoutUsec) {
-            call = "mClient.callSync<void, " +
-                std::to_string(*method.timeoutUsec) + ">(\"" + method.name + "\"";
-        }
-        else {
-            call = "mClient.callSync(\"" + method.name + "\"";
-        }
-
-        if (!args.empty()) {
-            call += ", " + args;
-        }
-
-        call += ")";
-
-        output += line(INDENT_SIZE * 2, "return %s;", call);
-        output += line(INDENT_SIZE, "}");
-        output += '\n';
     }
 
     //! Definition of private variable

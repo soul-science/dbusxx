@@ -44,6 +44,10 @@ static Root makeCodegenRoot() {
         aInterface.methods.push_back(method("notify", { field(base("string"), "msg") }));
         aInterface.methods.push_back(method("legacy", { field(base("int32"), "code") },
             std::nullopt, { ann("deprecated") }));
+        aInterface.methods.push_back(method("syncOnly", { field(base("int32"), "val") },
+            base("int32"), { ann("sync") }));
+        aInterface.methods.push_back(method("asyncOnly", { field(base("int32"), "val") },
+            base("bool"), { ann("async") }));
 
         aInterface.signals.push_back(signal("valueChanged",
             { field(base("int32"), "old"), field(base("int32"), "new") }));
@@ -145,6 +149,42 @@ int main() {
     expectContains("proxy: timeout", aProxy, "callSync<std::map<std::string, std::string>, 3000000>(\"getConfig\"");
     expectContains("proxy: oneway", aProxy, "callSync(\"notify\"");
     expectContains("proxy: deprecated", aProxy, "[[deprecated]]");
+
+    // ---- Proxy: a method without @sync/@async gets both shapes ----
+    expectContains("proxy: async handle", aProxy,
+        "Dbusxx::PendingReply<std::int32_t> addAsync(");
+    expectContains("proxy: async callback", aProxy,
+        "Dbusxx::Status addAsync(std::function<void(Dbusxx::Reply<std::int32_t>)> aCallback,");
+    expectContains("proxy: async call keeps timeout", aProxy,
+        "mClient.callAsync<std::map<std::string, std::string>, 3000000>(\"getConfig\", "
+        "std::move(aCallback))");
+
+    // ---- Proxy: @sync -> the synchronous shape only ----
+    expectContains("proxy: @sync signature", aProxy,
+        "[[nodiscard]] Dbusxx::Reply<std::int32_t> syncOnly(std::int32_t val)");
+    expectContains("proxy: @sync call", aProxy,
+        "mClient.callSync<std::int32_t>(\"syncOnly\", val)");
+    //! The absence checks must name the shape, not the bare "<name>Async":
+    //! "asyncOnly" contains "syncOnly", so "syncOnlyAsync" also occurs inside
+    //! the generated "asyncOnlyAsync"
+    expectNotContains("proxy: @sync has no async handle", aProxy,
+        "Dbusxx::PendingReply<std::int32_t> syncOnly");
+    expectNotContains("proxy: @sync has no async callback", aProxy,
+        "Dbusxx::Status syncOnly(");
+
+    // ---- Proxy: @async -> the two asynchronous shapes only ----
+    expectContains("proxy: @async handle", aProxy,
+        "[[nodiscard]] Dbusxx::PendingReply<bool> asyncOnlyAsync(std::int32_t val)");
+    expectContains("proxy: @async handle call", aProxy,
+        "mClient.callAsync<bool>(\"asyncOnly\", val)");
+    expectContains("proxy: @async callback", aProxy,
+        "Dbusxx::Status asyncOnlyAsync(std::function<void(Dbusxx::Reply<bool>)> aCallback, "
+        "std::int32_t val)");
+    expectContains("proxy: @async callback call", aProxy,
+        "mClient.callAsync<bool>(\"asyncOnly\", std::move(aCallback), val)");
+    expectNotContains("proxy: @async has no sync shape", aProxy, "Dbusxx::Reply<bool> asyncOnly(");
+    expectNotContains("proxy: @async has no sync call", aProxy,
+        "callSync<bool>(\"asyncOnly\"");
     if (gFail != 0) {
         std::cout << "[RESULT] " << gFail << " codegen check(s) FAILED\n";
         return 1;

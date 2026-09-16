@@ -193,6 +193,30 @@ Ast::Root dupField() {
     return aRoot;
 }
 
+// method f + method fAsync: the generated async variant of f is fAsync
+Ast::Root asyncSuffixCollision() {
+    using namespace tb;
+    auto aRoot = pkg();
+    Ast::Interface aInterface;
+    aInterface.name = "I";
+    aInterface.methods.push_back(method("f", {}));
+    aInterface.methods.push_back(method("fAsync", {}));
+    aRoot.interfaces.push_back(std::move(aInterface));
+    return aRoot;
+}
+
+// a parameter named like the completion callback generated for <name>Async
+Ast::Root callbackParamCollision() {
+    using namespace tb;
+    auto aRoot = pkg();
+    Ast::Interface aInterface;
+    aInterface.name = "I";
+    aInterface.methods.push_back(method("f", { field(base("int32"), "aCallback") },
+        base("int32")));
+    aRoot.interfaces.push_back(std::move(aInterface));
+    return aRoot;
+}
+
 // a struct and an alias share a name
 Ast::Root dupType() {
     using namespace tb;
@@ -313,6 +337,17 @@ Ast::Root deprecatedWithValue() {
     Ast::Interface aInterface;
     aInterface.name = "I";
     aInterface.methods.push_back(method("f", {}, std::nullopt, { ann("deprecated", "1") }));
+    aRoot.interfaces.push_back(std::move(aInterface));
+    return aRoot;
+}
+
+// Both @sync and @async on method
+Ast::Root BothSyncAsyncOnMethod() {
+    using namespace tb;
+    auto aRoot = pkg();
+    Ast::Interface aInterface;
+    aInterface.name = "I";
+    aInterface.methods.push_back(method("f", {}, std::nullopt, { ann("sync"), ann("async") }));
     aRoot.interfaces.push_back(std::move(aInterface));
     return aRoot;
 }
@@ -474,6 +509,10 @@ int main() {
         { "map arity",              { "map<K, V>: only need 2 template args" }, mapArity },
         { "dup member (method/method)",  { "duplicate member" }, dupMember },
         { "dup member (method/property)",{ "duplicate member" }, dupMemberMethodProp },
+        { "Async suffix collision",  { "generates 'fAsync', which is already a method" },
+          asyncSuffixCollision },
+        { "callback param collision", { "collides with the generated async callback" },
+          callbackParamCollision },
         { "dup struct field",       { "duplicate field" }, dupField },
         { "dup type (struct/alias)",{ "duplicate type name" }, dupType },
         { "reserved type name",     { "is reserved" }, reservedName },
@@ -487,6 +526,7 @@ int main() {
         { "@timeout(abc)",          { "@timeout needs a positive integer" }, timeoutNotANumber },
         { "@readonly with value",   { "@readonly doesn't require a value" }, readonlyWithValue },
         { "@deprecated with value", { "@deprecated doesn't require a value" }, deprecatedWithValue },
+        { "Both @sync and @async on method", { "@sync and @async are mutually exclusive" }, BothSyncAsyncOnMethod},
         { "@sync on property",      { "@sync is only for method" }, syncOnProperty },
         { "duplicate annotation",   { "duplicate annotation" }, dupAnnotation },
         { "vector<T> arity",        { "vector<T> only need 1 template arg" }, vectorArity },
