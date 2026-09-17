@@ -61,7 +61,7 @@ bool parseArguments(int aArgc, char const* aArgv[], Options* aOut) {
         std::string inlineValue;
         bool hasInlineValue = false;
 
-        //! "--option=value" -> option, value 
+        //! "--option=value" -> option, value
         const std::size_t equal = arg.find('=');
         if (arg.rfind("--", 0) == 0 && equal != std::string::npos) {
             inlineValue = arg.substr(equal + 1);
@@ -106,7 +106,7 @@ bool parseArguments(int aArgc, char const* aArgv[], Options* aOut) {
                 return false;
             }
 
-            //! -o <dir> / --output-dir <dir> 
+            //! -o <dir> / --output-dir <dir>
             if (!setOutputFolder(aArgv[++i], aOut)) {
                 return false;
             }

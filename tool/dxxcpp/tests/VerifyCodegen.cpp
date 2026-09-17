@@ -41,6 +41,9 @@ static Root makeCodegenRoot() {
             { field(named("Point"), "p"), field(base("int32"), "dx") }, named("Point")));
         aInterface.methods.push_back(method("getConfig", {}, named("ConfigMap"),
             { ann("timeout", "3000") }));
+        //! void + @timeout: the call keeps the explicit <void, TimeoutUsec>
+        aInterface.methods.push_back(method("ping", {}, std::nullopt,
+            { ann("timeout", "500") }));
         aInterface.methods.push_back(method("notify", { field(base("string"), "msg") }));
         aInterface.methods.push_back(method("legacy", { field(base("int32"), "code") },
             std::nullopt, { ann("deprecated") }));
@@ -51,6 +54,8 @@ static Root makeCodegenRoot() {
 
         aInterface.signals.push_back(signal("valueChanged",
             { field(base("int32"), "old"), field(base("int32"), "new") }));
+        aInterface.signals.push_back(signal("legacyEvent",
+            { field(base("int32"), "code") }, { ann("deprecated") }));
 
         aInterface.properties.push_back(property("version", base("string"), "{\"1.0.0\"}",
             { ann("readonly") }));
@@ -141,6 +146,9 @@ int main() {
     expectContains("skel: prop no init (map)", aSkeleton,
         "DBUSXX_PROPERTY_RW(config, decltype(std::map<std::string, std::string>{}), {})");
     expectContains("skel: deprecated is comment only", aSkeleton, "// @deprecated");
+    //! The comment must belong to the deprecated signal, not to a deprecated method
+    expectContains("skel: deprecated signal is comment only", aSkeleton,
+        "// @deprecated\n    DBUSXX_SIGNAL(legacyEvent, std::int32_t)");
     expectNotContains("skel: no [[deprecated]]", aSkeleton, "[[deprecated]]");
 
     // ---- Proxy ----
@@ -149,6 +157,23 @@ int main() {
     expectContains("proxy: timeout", aProxy, "callSync<std::map<std::string, std::string>, 3000000>(\"getConfig\"");
     expectContains("proxy: oneway", aProxy, "callSync(\"notify\"");
     expectContains("proxy: deprecated", aProxy, "[[deprecated]]");
+
+    // ---- Proxy: signal listeners ----
+    expectContains("proxy: signal listener", aProxy,
+        "[[nodiscard]] Dbusxx::Status onValueChanged("
+        "std::function<void(std::int32_t old, std::int32_t new_)> aCallback)");
+    expectContains("proxy: signal listener call", aProxy,
+        "mClient.listenSignal(\"valueChanged\", std::move(aCallback))");
+    expectContains("proxy: deprecated signal listener", aProxy,
+        "[[deprecated]]\n    [[nodiscard]] Dbusxx::Status onLegacyEvent(");
+
+    // ---- Proxy: a void method keeps the explicit <void, TimeoutUsec> ----
+    expectContains("proxy: void + timeout", aProxy,
+        "mClient.callSync<void, 500000>(\"ping\")");
+    expectContains("proxy: void + timeout async", aProxy,
+        "mClient.callAsync<void, 500000>(\"ping\")");
+    expectContains("proxy: void + timeout callback", aProxy,
+        "mClient.callAsync<void, 500000>(\"ping\", std::move(aCallback))");
 
     // ---- Proxy: a method without @sync/@async gets both shapes ----
     expectContains("proxy: async handle", aProxy,

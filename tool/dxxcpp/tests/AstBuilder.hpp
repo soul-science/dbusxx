@@ -65,10 +65,12 @@ inline Ast::Method method(std::string aName, std::vector<Ast::Parameter> aParams
     return aMethod;
 }
 
-inline Ast::Signal signal(std::string aName, std::vector<Ast::Parameter> aParams) {
+inline Ast::Signal signal(std::string aName, std::vector<Ast::Parameter> aParams,
+  std::vector<Ast::Annotation> aAnns = {}) {
     Ast::Signal aSignal;
     aSignal.name = std::move(aName);
     aSignal.params = std::move(aParams);
+    aSignal.annotations = std::move(aAnns);
     return aSignal;
 }
 

@@ -1,6 +1,7 @@
 #ifndef DXXCPP_IR_HPP
 #define DXXCPP_IR_HPP
 
+#include <cctype>
 #include <cstdint>
 #include <memory>
 #include <optional>
@@ -19,9 +20,21 @@ using NameIdx = std::uint32_t;
 
 //! Names of the shapes generated for a method that has an async one: the Proxy
 //! declares <name><ASYNC_SUFFIX>, whose callback overload takes
-//! ASYNC_CALLBACK_PARAM first. Sema rejects declarations that would collide.
+//! CALLBACK_PARAM first. Sema rejects declarations that would collide.
 inline constexpr std::string_view ASYNC_SUFFIX { "Async" };
-inline constexpr std::string_view ASYNC_CALLBACK_PARAM { "aCallback" };
+inline constexpr std::string_view CALLBACK_PARAM { "aCallback" };
+
+//! Listener the Proxy declares for a signal: "on" + the signal name with its
+//! first letter capitalized. Sema rejects declarations that would collide.
+inline std::string signalListenerName(const std::string& aSignalName) {
+    std::string listener = aSignalName;
+    if (!listener.empty() && std::isalpha(static_cast<unsigned char>(listener[0]))) {
+        listener[0] = static_cast<char>(
+            std::toupper(static_cast<unsigned char>(listener[0])));
+    }
+
+    return "on" + listener;
+}
 
 struct TypeBase {
     NameIdx name;
@@ -89,6 +102,7 @@ struct Method {
 struct Signal {
     std::string name;
     std::vector<Parameter> params;
+    bool deprecated { false };
 };
 
 struct Property {

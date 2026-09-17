@@ -28,6 +28,9 @@ interface Calculator {
     //! timeout control (milliseconds)
     @timeout(3000) method getConfig() -> ConfigMap;
 
+    //! void + @timeout: the generated call must keep <void, TimeoutUsec>
+    @timeout(500) method ping();
+
     //! no return value + deprecated
     @deprecated method legacy(int32 code);
 
@@ -36,7 +39,7 @@ interface Calculator {
     @async method asyncOnly(int32 val) -> bool;
 
     //! signals
-    signal valueChanged(int32 oldVal, int32 newVal);
+    @deprecated signal valueChanged(int32 oldVal, int32 newVal);
 
     //! properties
     @readonly property version -> string{"1.0.0"};

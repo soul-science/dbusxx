@@ -137,6 +137,39 @@ void caseSyncOnlyCallbackParam() {
         "mClient.callSync<std::int32_t>(\"f\", aCallback)");
 }
 
+//! Names only collide when both are really generated: @async drops the bare name
+void caseAsyncOnlyNamesAreFree() {
+    section("@async: the bare name stays free for other shapes");
+    const std::string aSrc =
+        "package com.example.a;\n"
+        "interface I {\n"
+        "    method f(int32 val) -> int32;\n"
+        "    @async method fAsync(int32 val) -> bool;\n"
+        "    signal valueChanged(int32 oldVal);\n"
+        "    @async method onValueChanged(int32 val) -> int32;\n"
+        "};\n";
+
+    const Parser::Result aParserResult = Parser::parse(aSrc);
+    if (!aParserResult.root) {
+        fail("parse", aParserResult.errors.empty() ? "no root" : aParserResult.errors[0].msg);
+        return;
+    }
+
+    const Sema::Result aSemaResult = Sema::analyze(*aParserResult.root);
+    if (!aSemaResult.ir) {
+        fail("sema", aSemaResult.errors.empty() ? "no ir" : aSemaResult.errors[0].msg);
+        return;
+    }
+
+    ok("@async methods do not occupy the bare name");
+    const std::string aProxy = Codegen::genProxyHeader(*aSemaResult.ir,
+        aSemaResult.ir->interfaces[0]);
+    expectContains("proxy: async shape of the plain method", aProxy,
+        "Dbusxx::PendingReply<std::int32_t> fAsync(std::int32_t val)");
+    expectContains("proxy: signal listener coexists", aProxy,
+        "Dbusxx::Status onValueChanged(std::function<void(std::int32_t oldVal)> aCallback)");
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -268,6 +301,17 @@ int main(int argc, char** argv) {
     expectContains("proxy: @async call", aProxy,
         "mClient.callAsync<bool>(\"asyncOnly\", std::move(aCallback), val)");
 
+    section("codegen: proxy void + @timeout, signal listeners");
+    expectContains("proxy: void + timeout", aProxy,
+        "mClient.callSync<void, 500000>(\"ping\")");
+    expectContains("proxy: void + timeout callback", aProxy,
+        "mClient.callAsync<void, 500000>(\"ping\", std::move(aCallback))");
+    expectContains("proxy: listener", aProxy,
+        "Dbusxx::Status onValueChanged(std::function<void(std::int32_t oldVal, "
+        "std::int32_t newVal)> aCallback)");
+    expectContains("proxy: listener call", aProxy,
+        "mClient.listenSignal(\"valueChanged\", std::move(aCallback))");
+
     section("codegen: LoggerSkeleton.hpp");
     const std::string aLogger = Codegen::genSkeletonHeader(*aSemaResult.ir,
         aSemaResult.ir->interfaces[1]);
@@ -279,6 +323,7 @@ int main(int argc, char** argv) {
     caseKeywordParamName();
     caseAsyncSuffixOnProperty();
     caseSyncOnlyCallbackParam();
+    caseAsyncOnlyNamesAreFree();
 
     if (gFail != 0) {
         std::cout << "\n[RESULT] " << gFail << " check(s) FAILED\n";

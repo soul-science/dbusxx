@@ -23,6 +23,7 @@ struct CalcImpl : CalculatorInterface {
     void legacy(std::int32_t code) override {}
     std::int32_t syncOnly(std::int32_t val) override { return val; }
     bool asyncOnly(std::int32_t val) override { return val != 0; }
+    void ping() override {}
 };
 
 struct LoggerImpl : LoggerInterface {
@@ -55,6 +56,14 @@ int main() {
     (void)aSyncReply;
     (void)aPending;
     (void)aAsyncStatus;
+
+    //! void + @timeout: all three shapes carry <void, TimeoutUsec>
+    auto aPingReply = aCalcProxy.ping();
+    auto aPingPending = aCalcProxy.pingAsync();
+    auto aPingStatus = aCalcProxy.pingAsync([] (Dbusxx::Reply<void>) {});
+    (void)aPingReply;
+    (void)aPingPending;
+    (void)aPingStatus;
 
     return 0;
 }

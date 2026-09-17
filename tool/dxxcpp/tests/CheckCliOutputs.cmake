@@ -69,6 +69,10 @@ foreach(NEEDLE
     "Dbusxx::PendingReply<bool> asyncOnlyAsync"
     "Dbusxx::Status addAsync(std::function<void(Dbusxx::Reply<std::int32_t>)> aCallback"
     "Dbusxx::Status asyncOnlyAsync(std::function<void(Dbusxx::Reply<bool>)> aCallback"
+    "Dbusxx::Status onValueChanged(std::function<void("
+    "std::int32_t newVal)> aCallback)"
+    "mClient.listenSignal(\"valueChanged\", std::move(aCallback))"
+    "mClient.callSync<void, 500000>(\"ping\")"
     "mClient.callAsync<bool>(\"asyncOnly\", std::move(aCallback), val)")
     string(FIND "${PROXY}" "${NEEDLE}" FOUND_AT)
     if(FOUND_AT EQUAL -1)

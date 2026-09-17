@@ -95,34 +95,39 @@ std::string paramDeclList(const Ir::Root& aIr, const std::vector<Ir::Parameter>&
     return decl;
 }
 
-//! Generate one client call: mClient.<api><Ret[, TimeoutUsec]>("name"[, leadArg][, args])
-std::string callExpr(const Ir::Root& aIr, const Ir::Method& aMethod,
-  const std::string& aApi, const std::string& aLeadArg = "") {
+//! Generate one client call: mClient.<api><retType[, TimeoutUsec]>(rpc[args])
+std::string callExpr(const std::string& aApi, const std::string& aRetType,
+  const std::string& aTimeout, const std::string& aRpc, const std::string& aArgs) {
     std::string call = "mClient." + aApi;
-
-    if (aMethod.ret) {
-        call += "<" + cppType(aIr, *aMethod.ret);
-        if (aMethod.timeoutUsec) {
-            call += ", " + std::to_string(*aMethod.timeoutUsec);
+    if (!aRetType.empty() || !aTimeout.empty()) {
+        call += "<";
+        if (aTimeout.empty()) {
+            call += aRetType;
+        } else if (aRetType.empty()) {
+            call += "void, " + aTimeout;
+        } else {
+            call += aRetType + ", " + aTimeout;
         }
 
         call += ">";
     }
-    else if (aMethod.timeoutUsec) {
-        call += "<void, " + std::to_string(*aMethod.timeoutUsec) + ">";
-    }
 
-    call += "(\"" + aMethod.name + "\"";
-    if (!aLeadArg.empty()) {
-        call += ", " + aLeadArg;
-    }
+    call += "(\"" + aRpc + "\"";
+    call += (aArgs.empty() ? "" : ", " + aArgs) + ")";
+    return call;
+}
 
+//! Generate one client call: mClient.<api><Ret[, TimeoutUsec]>("name"[, leadArg][, args])
+std::string callExpr(const Ir::Root& aIr, const Ir::Method& aMethod,
+  const std::string& aApi, const std::string& aLeadArg = "") {
     const std::string args = callArgs(aMethod.params);
-    if (!args.empty()) {
-        call += ", " + args;
-    }
-
-    return call + ")";
+    return callExpr(
+        aApi,
+        aMethod.ret ? cppType(aIr, *aMethod.ret) : "",
+        aMethod.timeoutUsec ? std::to_string(*aMethod.timeoutUsec) : "",
+        aMethod.name,
+        aLeadArg.empty() ? args : (args.empty() ? aLeadArg : aLeadArg + ", " + args)
+    );
 }
 
 //! Parameter wrapper: Convert any actual parameter into a string
@@ -213,7 +218,7 @@ std::string dbusPath(const std::string& aPackage) {
     for (char c : aPackage) {
         p += (c == '.') ? '/' : c;
     }
-        
+
     return p;
 }
 
@@ -352,11 +357,11 @@ std::string genSkeletonHeader(const Ir::Root& aIr, const Ir::Interface& aIfce) {
     output += line(0, "#include <memory>");
     output += '\n';
 
-    //! 
+    //!
     output += line(0, "#include \"Types.hpp\"");
     output += '\n';
 
-    //! 
+    //!
     output += line(0, "#ifndef DBUSXX_SERVICE_NAME");
     output += line(0, "#error \"DBUSXX_SERVICE_NAME must be defined (e.g. -DDBUSXX_SERVICE_NAME=\\\"com.example.app\\\")\"");
     output += line(0, "#endif");
@@ -418,6 +423,12 @@ std::string genSkeletonHeader(const Ir::Root& aIr, const Ir::Interface& aIfce) {
             types += cppType(aIr, signal.params[i].type);
         }
         output += '\n';
+        if (signal.deprecated) {
+            //! Using comments instead of [[deprecated]]:
+            //! DBUSXX_SIGNAL only registers the signal, there is nothing to mark
+            output += line(INDENT_SIZE, "// @deprecated");
+        }
+
         output += line(INDENT_SIZE, "DBUSXX_SIGNAL(%s%s)", signal.name,
                   (types.empty() ? "" : ", " + types));
     }
@@ -523,7 +534,7 @@ ProxyMethod asyncSpec(const Ir::Root& aIr, const Ir::Method& aMethod) {
 
 //! Asynchronous shape taking a callback: Status from callAsync, callback first
 ProxyMethod asyncCallbackSpec(const Ir::Root& aIr, const Ir::Method& aMethod) {
-    const std::string callbackParam(Ir::ASYNC_CALLBACK_PARAM);
+    const std::string callbackParam(Ir::CALLBACK_PARAM);
     ProxyMethod spec = asyncSpec(aIr, aMethod);
     spec.note = "//! Async: return Dbusxx::Status";
     spec.replyType = "Dbusxx::Status";
@@ -575,13 +586,32 @@ std::string genProxyHeader(const Ir::Root& aIr, const Ir::Interface& aIfce) {
 
     //! Definition of constructor
     output += line(INDENT_SIZE, "explicit %sProxy()", aIfce.name);
-    output += line(INDENT_SIZE * 2, ": mClient(Dbusxx::SessionType::USER, DBUSXX_SERVICE_NAME,");
+    output += line(
+        INDENT_SIZE * 2,
+        ": mClient(Dbusxx::SessionType::USER, DBUSXX_SERVICE_NAME,"
+    );
     output += line(INDENT_SIZE * 2, "\"%s\", \"%s\") {}", path, fullIface);
     output += '\n';
-    output += line(INDENT_SIZE, "%sProxy(const %sProxy&) = delete;", aIfce.name, aIfce.name);
-    output += line(INDENT_SIZE, "%sProxy& operator=(const %sProxy&) = delete;", aIfce.name, aIfce.name);
-    output += line(INDENT_SIZE, "%sProxy(%sProxy&&) = default;", aIfce.name, aIfce.name);
-    output += line(INDENT_SIZE, "%sProxy& operator=(%sProxy&&) = default;", aIfce.name, aIfce.name);
+    output += line(
+        INDENT_SIZE,
+        "%sProxy(const %sProxy&) = delete;",
+        aIfce.name, aIfce.name
+    );
+    output += line(
+        INDENT_SIZE,
+        "%sProxy& operator=(const %sProxy&) = delete;",
+        aIfce.name, aIfce.name
+    );
+    output += line(
+        INDENT_SIZE,
+        "%sProxy(%sProxy&&) = default;",
+        aIfce.name, aIfce.name
+    );
+    output += line(
+        INDENT_SIZE,
+        "%sProxy& operator=(%sProxy&&) = default;",
+        aIfce.name, aIfce.name
+    );
     output += '\n';
 
     //! Definition of methods
@@ -594,6 +624,35 @@ std::string genProxyHeader(const Ir::Root& aIr, const Ir::Interface& aIfce) {
             output += genProxyMethod(aIr, method, asyncSpec(aIr, method));
             output += genProxyMethod(aIr, method, asyncCallbackSpec(aIr, method));
         }
+    }
+
+    //! Definition of signals
+    for (const auto& signal : aIfce.signals) {
+        //! Only use "deprecated" in Proxy to expose to user
+        if (signal.deprecated) {
+            output += line(INDENT_SIZE, "[[deprecated]]");
+        }
+
+        std::string callback =
+            "std::function<void(" +
+            paramDeclList(aIr, signal.params) + ")> " +
+            std::string(Ir::CALLBACK_PARAM);
+
+        output += line(
+            INDENT_SIZE,
+            "[[nodiscard]] Dbusxx::Status %s(%s) {",
+            Ir::signalListenerName(signal.name), callback);
+        output += line(
+            INDENT_SIZE * 2,
+            "return %s;",
+            callExpr(
+                "listenSignal", "", "",
+                signal.name,
+                "std::move(" + std::string(Ir::CALLBACK_PARAM) + ")"
+            )
+        );
+        output += line(INDENT_SIZE, "}");
+        output += '\n';
     }
 
     //! Definition of private variable
