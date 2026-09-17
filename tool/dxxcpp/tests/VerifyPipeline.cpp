@@ -260,6 +260,8 @@ int main(int argc, char** argv) {
     expectContains("skel: struct param", aSkeleton, "const Point& p");
     expectContains("skel: signal", aSkeleton,
         "DBUSXX_SIGNAL(valueChanged, std::int32_t, std::int32_t)");
+    expectContains("skel: deprecated signal is a comment", aSkeleton,
+        "// @deprecated\n    DBUSXX_SIGNAL(legacyEvent, std::int32_t)");
     expectContains("skel: prop RO", aSkeleton,
         "DBUSXX_PROPERTY_RO(version, std::string, {\"1.0.0\"})");
     expectContains("skel: prop RW", aSkeleton, "DBUSXX_PROPERTY_RW(counter, std::int32_t, {0})");
@@ -311,6 +313,10 @@ int main(int argc, char** argv) {
         "std::int32_t newVal)> aCallback)");
     expectContains("proxy: listener call", aProxy,
         "mClient.listenSignal(\"valueChanged\", std::move(aCallback))");
+    expectContains("proxy: deprecated listener", aProxy,
+        "[[deprecated]]\n    [[nodiscard]] Dbusxx::Status onLegacyEvent(");
+    expectContains("proxy: deprecated listener call", aProxy,
+        "mClient.listenSignal(\"legacyEvent\", std::move(aCallback))");
 
     section("codegen: LoggerSkeleton.hpp");
     const std::string aLogger = Codegen::genSkeletonHeader(*aSemaResult.ir,
