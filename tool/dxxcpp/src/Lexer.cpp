@@ -232,7 +232,7 @@ Result tokenize(std::string_view aSource) {
             continue;
         }
 
-        //! String literal 
+        //! String literal
         if (c == '"') {
             scanString(cur, res.errors, line, col);
             res.tokens.push_back(makeToken(Kind::String, cur, start, line, col));

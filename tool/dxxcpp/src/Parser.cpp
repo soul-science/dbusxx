@@ -214,7 +214,7 @@ struct Ctx {
     }
 };
 
-//! Recursive parsing type 
+//! Recursive parsing type
 bool parseType(Ctx& aCtx, Ast::Type& aOut, std::size_t aDepth = 0) {
     if (aDepth >= MAX_TYPE_NEST) {
         aCtx.report("type nesting is too deep (max " +

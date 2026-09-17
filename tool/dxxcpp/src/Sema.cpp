@@ -5,6 +5,7 @@
 #include <string>
 #include <string_view>
 #include <unordered_set>
+#include <utility>
 
 #include "Cpp.hpp"
 
@@ -103,7 +104,7 @@ bool isIdentifier(const std::string& aStr) {
             return false;
         }
     }
-        
+
     return true;
 }
 
@@ -686,7 +687,7 @@ std::vector<Error> validateAst(const Ast::Root& aAstRoot) {
                 //! The generated async shape declares its own completion callback,
                 //! so a parameter with that name would be declared twice
                 if (!hasAnnotation(m.annotations, ANNS_SYNC_STR.data())
-                    && p.name == Ir::ASYNC_CALLBACK_PARAM) {
+                  && p.name == Ir::CALLBACK_PARAM) {
                     report(
                         errs,
                         "parameter '" + p.name + "' of method '" + m.name +
@@ -728,25 +729,40 @@ std::vector<Error> validateAst(const Ast::Root& aAstRoot) {
             appendErrors(errs, checkType(aAstRoot, pr.type));
         }
 
-        //! The Proxy generates <name>Async for every method that has an async
-        //! shape (@sync suppresses it), so the generated name must not collide
-        //! with another method (properties and signals are not part of the Proxy)
-        std::unordered_set<std::string> methodNames;
-        for (const auto& m : ifce.methods) {
-            methodNames.emplace(m.name);
-        }
+        //! Every name the Proxy declares must be unique: a method becomes
+        //! <name> (unless @async) plus <name>Async (unless @sync), a signal
+        //! becomes its listener name (properties are not part of the Proxy)
+        std::vector<std::pair<std::string, std::string>> generated;
+        auto addGenerated = [&](const std::string& aName, const std::string& aOwner,
+          const Ast::Loc& aLoc) {
+            for (const auto& [name, owner] : generated) {
+                if (name == aName) {
+                    report(
+                        errs,
+                        "'" + aName + "' is generated twice in " + ifce.name +
+                            ": by " + owner + " and " + aOwner,
+                        aLoc
+                    );
+                    return;
+                }
+            }
+
+            generated.emplace_back(aName, aOwner);
+        };
 
         for (const auto& m : ifce.methods) {
-            const std::string asyncName = m.name + std::string(Ir::ASYNC_SUFFIX);
-            if (!hasAnnotation(m.annotations, ANNS_SYNC_STR.data())
-                && methodNames.count(asyncName) > 0) {
-                report(
-                    errs,
-                    "method '" + m.name + "' generates '" + asyncName +
-                        "', which is already a method of " + ifce.name,
-                    m.loc
-                );
+            const std::string owner = "method '" + m.name + "'";
+            if (!hasAnnotation(m.annotations, ANNS_ASYNC_STR.data())) {
+                addGenerated(m.name, owner, m.loc);
             }
+
+            if (!hasAnnotation(m.annotations, ANNS_SYNC_STR.data())) {
+                addGenerated(m.name + std::string(Ir::ASYNC_SUFFIX), owner, m.loc);
+            }
+        }
+
+        for (const auto& s : ifce.signals) {
+            addGenerated(Ir::signalListenerName(s.name), "signal '" + s.name + "'", s.loc);
         }
     }
 
@@ -902,6 +918,7 @@ Result generateIr(const Ast::Root& aAstRoot) {
         for (const auto& as : ai.signals) {
             Ir::Signal is;
             is.name = as.name;
+            is.deprecated = hasAnnotation(as.annotations, ANNS_DEPRECATED_STR.data());
             for (const auto& ap : as.params) {
                 is.params.push_back(
                     Ir::Parameter{ ap.name, lowerType(ap.type) }

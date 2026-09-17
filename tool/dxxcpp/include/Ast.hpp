@@ -64,7 +64,7 @@ using Parameter = Field;
 
 /**
  * @brief Indicate a struct
- * 
+ *
  * Ex:
  *   struct Point {
  *       int32 x;
@@ -79,7 +79,7 @@ struct StructType {
 
 /**
  * @brief Indicate a alias(using)
- * 
+ *
  * Ex: using ConfigMap = map<string, string>;
  */
 struct AliasType {
@@ -90,7 +90,7 @@ struct AliasType {
 
 /**
  * @brief Indicate an annotation
- * 
+ *
  * Ex:
  *   - @readonly       -> name="readonly", value=nullopt
  *   - @timeout(3000)  -> name="timeout", value="3000"
@@ -104,7 +104,7 @@ struct Annotation {
 
 /**
  * @brief Indicate a method
- * 
+ *
  * Ex:
  *   - @deprecated method add(int32 a, int32 b) -> int32;
  *   - @timeout(3000) method getConfig() -> ConfigMap;
@@ -128,7 +128,7 @@ struct Method {
 
 /**
  * @brief Indicate a signal
- * 
+ *
  * Ex:
  *   - signal valueChanged(int32 oldVal, int32 newVal);
  */
@@ -141,7 +141,7 @@ struct Signal {
 
 /**
  * @brief Indicate a property
- * 
+ *
  * Ex:
  *   - @readonly property version -> int32{1};
  *   - property label -> string{"default"};
@@ -157,7 +157,7 @@ struct Property {
 
 /**
  * @brief Indicate an interface
- * 
+ *
  * Ex:
  *   interface Calculator {
  *       method add(...) -> int32;
@@ -188,7 +188,7 @@ struct Interface {
 
 /**
  * @brief Indicate a root of .dxx
- * 
+ *
  * Contains:
  *   - package:     package like "com.example.app"
  *   - structs:     struct list

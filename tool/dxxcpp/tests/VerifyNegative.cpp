@@ -217,6 +217,31 @@ Ast::Root callbackParamCollision() {
     return aRoot;
 }
 
+// signal valueChanged + method onValueChanged: both generate onValueChanged
+Ast::Root listenerNameCollision() {
+    using namespace tb;
+    auto aRoot = pkg();
+    Ast::Interface aInterface;
+    aInterface.name = "I";
+    aInterface.methods.push_back(method("onValueChanged", { field(base("int32"), "v") },
+        base("int32")));
+    aInterface.signals.push_back(signal("valueChanged", { field(base("int32"), "oldVal") }));
+    aRoot.interfaces.push_back(std::move(aInterface));
+    return aRoot;
+}
+
+// signal value + signal Value: the listener name of both is onValue
+Ast::Root listenerNameFolded() {
+    using namespace tb;
+    auto aRoot = pkg();
+    Ast::Interface aInterface;
+    aInterface.name = "I";
+    aInterface.signals.push_back(signal("value", { field(base("int32"), "v") }));
+    aInterface.signals.push_back(signal("Value", { field(base("int32"), "v") }));
+    aRoot.interfaces.push_back(std::move(aInterface));
+    return aRoot;
+}
+
 // a struct and an alias share a name
 Ast::Root dupType() {
     using namespace tb;
@@ -509,8 +534,15 @@ int main() {
         { "map arity",              { "map<K, V>: only need 2 template args" }, mapArity },
         { "dup member (method/method)",  { "duplicate member" }, dupMember },
         { "dup member (method/property)",{ "duplicate member" }, dupMemberMethodProp },
-        { "Async suffix collision",  { "generates 'fAsync', which is already a method" },
+        { "Async suffix collision",
+          { "'fAsync' is generated twice in I", "by method 'f' and method 'fAsync'" },
           asyncSuffixCollision },
+        { "signal listener vs method",
+          { "'onValueChanged' is generated twice in I", "by method 'onValueChanged'" },
+          listenerNameCollision },
+        { "signal listener folding",
+          { "'onValue' is generated twice in I", "by signal 'value' and signal 'Value'" },
+          listenerNameFolded },
         { "callback param collision", { "collides with the generated async callback" },
           callbackParamCollision },
         { "dup struct field",       { "duplicate field" }, dupField },
