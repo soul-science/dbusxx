@@ -39,7 +39,14 @@ interface Calculator {
     @async method asyncOnly(int32 val) -> bool;
 
     //! signals
-    @deprecated signal valueChanged(int32 oldVal, int32 newVal);
+    //! Skeleton side: registration only (DBUSXX_SIGNAL); Proxy side: a permanent
+    //! on<Name> listener (capture only objects outliving the Proxy).
+    signal valueChanged(int32 oldVal, int32 newVal);
+
+    //! @deprecated signal: the listener is still generated, but carries
+    //! [[deprecated]] on the Proxy side, so calling it in a
+    //! -Werror=deprecated-declarations build fails on purpose
+    @deprecated signal legacyEvent(int32 code);
 
     //! properties
     @readonly property version -> string{"1.0.0"};

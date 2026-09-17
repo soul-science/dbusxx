@@ -50,6 +50,8 @@ foreach(NEEDLE
     "DBUSXX_PROPERTY_RW(history, std::vector<Point>, {{1, 2}, {3, 4}})"
     "DBUSXX_PROPERTY_RW(untouched, std::int32_t, std::int32_t{})"
     "DBUSXX_PROPERTY_RW(tags, decltype(std::map<std::string, std::string>{}), {})"
+    "DBUSXX_SIGNAL(valueChanged, std::int32_t, std::int32_t)"
+    "// @deprecated\n    DBUSXX_SIGNAL(legacyEvent, std::int32_t)"
     "class CalculatorServer final : public Dbusxx::Server<CalculatorServer>")
     string(FIND "${SKELETON}" "${NEEDLE}" FOUND_AT)
     if(FOUND_AT EQUAL -1)
@@ -69,9 +71,9 @@ foreach(NEEDLE
     "Dbusxx::PendingReply<bool> asyncOnlyAsync"
     "Dbusxx::Status addAsync(std::function<void(Dbusxx::Reply<std::int32_t>)> aCallback"
     "Dbusxx::Status asyncOnlyAsync(std::function<void(Dbusxx::Reply<bool>)> aCallback"
-    "Dbusxx::Status onValueChanged(std::function<void("
-    "std::int32_t newVal)> aCallback)"
+    "Dbusxx::Status onValueChanged(std::function<void(std::int32_t oldVal, std::int32_t newVal)> aCallback)"
     "mClient.listenSignal(\"valueChanged\", std::move(aCallback))"
+    "mClient.listenSignal(\"legacyEvent\", std::move(aCallback))"
     "mClient.callSync<void, 500000>(\"ping\")"
     "mClient.callAsync<bool>(\"asyncOnly\", std::move(aCallback), val)")
     string(FIND "${PROXY}" "${NEEDLE}" FOUND_AT)

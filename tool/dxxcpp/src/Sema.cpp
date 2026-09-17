@@ -4,6 +4,7 @@
 #include <functional>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <unordered_set>
 #include <utility>
 
@@ -732,22 +733,18 @@ std::vector<Error> validateAst(const Ast::Root& aAstRoot) {
         //! Every name the Proxy declares must be unique: a method becomes
         //! <name> (unless @async) plus <name>Async (unless @sync), a signal
         //! becomes its listener name (properties are not part of the Proxy)
-        std::vector<std::pair<std::string, std::string>> generated;
+        std::unordered_map<std::string, std::string> generated;
         auto addGenerated = [&](const std::string& aName, const std::string& aOwner,
           const Ast::Loc& aLoc) {
-            for (const auto& [name, owner] : generated) {
-                if (name == aName) {
-                    report(
-                        errs,
-                        "'" + aName + "' is generated twice in " + ifce.name +
-                            ": by " + owner + " and " + aOwner,
-                        aLoc
-                    );
-                    return;
-                }
+            const auto [aIt, aInserted] = generated.emplace(aName, aOwner);
+            if (!aInserted) {
+                report(
+                    errs,
+                    "'" + aName + "' is generated twice in " + ifce.name +
+                        ": by " + aIt->second + " and " + aOwner,
+                    aLoc
+                );
             }
-
-            generated.emplace_back(aName, aOwner);
         };
 
         for (const auto& m : ifce.methods) {

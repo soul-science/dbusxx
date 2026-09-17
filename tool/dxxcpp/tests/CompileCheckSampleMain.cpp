@@ -1,5 +1,6 @@
-//! CLI output compile check: headers generated from Sample.dxx used as real
-//! code (syntax only). Covers Types.hpp, both Skeleton and both Proxy headers.
+//! CLI output compile check: the headers generated from Sample.dxx are used as
+//! real code (-fsyntax-only), instantiating every shape a user can write --
+//! Types.hpp, both skeletons, all method call shapes and the signal listeners.
 #define DBUSXX_SERVICE_NAME "com.example.app"
 #include <cstdint>
 #include <map>
@@ -39,8 +40,8 @@ int main() {
     (void)aCalc;
     (void)aLogger;
 
-    //! Properties and signals are registration-only (DBUSXX_* macros);
-    //! method call sites must instantiate
+    //! Properties are registration-only, so only the method call sites are
+    //! instantiated here.
     auto aReply = aCalcProxy.getConfig();
     auto aNotifySt = aCalcProxy.notify("hello");
     auto aSt = aLoggerProxy.log("hello");
@@ -48,8 +49,8 @@ int main() {
     (void)aNotifySt;
     (void)aSt;
 
-    //! @sync -> only the synchronous shape, @async -> only the two async ones
-    //! (the async pair shares the <name>Async name, the bare name is not generated)
+    //! @sync -> sync shape only; @async -> the two async shapes only, both named
+    //! <name>Async (the bare name is never generated)
     auto aSyncReply = aCalcProxy.syncOnly(1);
     auto aPending = aCalcProxy.asyncOnlyAsync(1);
     auto aAsyncStatus = aCalcProxy.asyncOnlyAsync([] (Dbusxx::Reply<bool>) {}, 1);
@@ -64,6 +65,21 @@ int main() {
     (void)aPingReply;
     (void)aPingPending;
     (void)aPingStatus;
+
+    //! Each signal gets an onXxx listener (Session::listenSignal + its isValidArgs
+    //! guard). Listeners are permanent: capture only objects outliving the Proxy.
+    auto aValueChangedSt = aCalcProxy.onValueChanged(
+        [] (std::int32_t aOldVal, std::int32_t aNewVal) {
+            (void)aOldVal;
+            (void)aNewVal;
+        });
+    (void)aValueChangedSt;
+
+    //! onLegacyEvent is @deprecated, so it is deliberately not called: this check
+    //! compiles with -Werror=deprecated-declarations.
+    auto aLogAddedSt = aLoggerProxy.onLogAdded(
+        [] (const std::string& aMessage) { (void)aMessage; });
+    (void)aLogAddedSt;
 
     return 0;
 }
