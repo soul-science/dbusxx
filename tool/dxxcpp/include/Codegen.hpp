@@ -15,6 +15,10 @@ std::string cppNamespace(const std::string& aPackage);
 //! com.example.calc -> /com/example/calc
 std::string dbusPath(const std::string& aPackage);
 
+//! Generate types header file name by package
+//! com.example.calc -> ComExampleCalcTypes.hpp
+std::string typesHeaderName(const Ir::Root& aRoot);
+
 //! Generate cpp type by ir
 //! int32->std::int32_t, vector->std::vector<...>, ...
 std::string cppType(const Ir::Root& aRoot, Ir::TypeId aId);

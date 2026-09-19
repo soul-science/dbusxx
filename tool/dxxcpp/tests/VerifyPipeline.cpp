@@ -237,8 +237,15 @@ int main(int argc, char** argv) {
     std::cout << "  [ OK ] ir built, arena types=" << aSemaResult.ir->types.size()
               << " structs=" << aSemaResult.ir->structs.size() << "\n";
 
-    section("codegen: Types.hpp");
+    section("codegen: package-prefixed types header");
     const std::string aTypes = Codegen::genTypesHeader(*aSemaResult.ir);
+    const std::string aTypesName = Codegen::typesHeaderName(*aSemaResult.ir);
+    if (aTypesName == "ComExampleCalcTypes.hpp") {
+        ok("types header name: " + aTypesName);
+    } else {
+        fail("types header name", "expect ComExampleCalcTypes.hpp, got " + aTypesName);
+    }
+
     expectContains("types: ns", aTypes, "namespace Com::Example::Calc");
     expectContains("types: struct", aTypes, "struct Point {");
     expectContains("types: field", aTypes, "std::int32_t x;");
@@ -255,6 +262,8 @@ int main(int argc, char** argv) {
         "class CalculatorServer final : public Dbusxx::Server<CalculatorServer>");
     expectContains("skel: path", aSkeleton, "DBUSXX_PATH(\"/com/example/calc\")");
     expectContains("skel: iface", aSkeleton, "DBUSXX_IFACE(\"com.example.calc.Calculator\")");
+    expectContains("skel: types include", aSkeleton,
+        "#include \"ComExampleCalcTypes.hpp\"");
     expectContains("skel: method", aSkeleton, "DBUSXX_METHOD(add)");
     expectContains("skel: void method with a string arg", aSkeleton, "DBUSXX_METHOD(notify)");
     expectContains("skel: struct param", aSkeleton, "const Point& p");
@@ -285,6 +294,8 @@ int main(int argc, char** argv) {
     expectContains("proxy: timeout", aProxy,
         "callSync<std::map<std::string, std::string>, 3000000>(\"getConfig\"");
     expectContains("proxy: deprecated", aProxy, "[[deprecated]]");
+    expectContains("proxy: types include", aProxy,
+        "#include \"ComExampleCalcTypes.hpp\"");
 
     section("codegen: proxy shapes (@sync / @async)");
     expectContains("proxy: async handle", aProxy, "Dbusxx::PendingReply<std::int32_t> addAsync(");

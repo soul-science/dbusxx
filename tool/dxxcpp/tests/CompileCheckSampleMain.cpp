@@ -1,6 +1,6 @@
 //! CLI output compile check: the headers generated from Sample.dxx are used as
 //! real code (-fsyntax-only), instantiating every shape a user can write --
-//! Types.hpp, both skeletons, all method call shapes and the signal listeners.
+//! the types header, both skeletons, all method call shapes and the signal listeners.
 #define DBUSXX_SERVICE_NAME "com.example.app"
 #include <cstdint>
 #include <map>
