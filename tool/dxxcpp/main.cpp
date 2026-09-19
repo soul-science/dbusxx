@@ -46,8 +46,8 @@ void printUsage(std::ostream& aOut) {
         << "                      also accepts --output-dir=<dir> and -o<dir>\n"
         << "  -h, --help          show this help\n"
         << "\n"
-        << "outputs (one per interface, Types.hpp is shared):\n"
-        << "  Types.hpp\n"
+        << "outputs (one per interface, the types header is shared per package):\n"
+        << "  <Package>Types.hpp         e.g. ComExampleCalcTypes.hpp\n"
         << "  <Interface>Skeleton.hpp\n"
         << "  <Interface>Proxy.hpp\n"
         << "\n"
@@ -193,8 +193,8 @@ bool writeFile(const std::filesystem::path& aPath, const std::string& aText) {
 }
 
 bool generate(const Ir::Root& aIr, const std::filesystem::path& aDir) {
-    //! Generate Type.hpp
-    if (!writeFile(aDir / "Types.hpp",
+    //! Generate <Package>Types.hpp
+    if (!writeFile(aDir / Codegen::typesHeaderName(aIr),
             Codegen::genTypesHeader(aIr))) {
         return false;
     }

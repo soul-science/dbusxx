@@ -83,10 +83,19 @@ if(DXXCPP_BUILD_TESTS)
 
     # ---- CLI: .dxx -> headers (lexical/grammar/semantic/codegen chain) ----
     set(DXXCPP_CLI_OUT_DIR ${CMAKE_CURRENT_BINARY_DIR}/cli_generated)
+
+    #! The output directory must start empty: a file left over from an earlier
+    #! run would hide a rename (a stale Types.hpp used to mask the
+    #! package-prefixed header name)
+    add_test(NAME dxxcpp_cli_clean
+        COMMAND ${CMAKE_COMMAND} -E rm -rf ${DXXCPP_CLI_OUT_DIR})
+    set_tests_properties(dxxcpp_cli_clean PROPERTIES FIXTURES_SETUP dxxcpp_cli_clean)
+
     add_test(NAME dxxcpp_cli
         COMMAND dxxcpp ${CMAKE_CURRENT_SOURCE_DIR}/tests/Sample.dxx
             --output-dir=${DXXCPP_CLI_OUT_DIR})
-    set_tests_properties(dxxcpp_cli PROPERTIES FIXTURES_SETUP dxxcpp_cli_out)
+    set_tests_properties(dxxcpp_cli PROPERTIES
+        FIXTURES_REQUIRED dxxcpp_cli_clean FIXTURES_SETUP dxxcpp_cli_out)
 
     add_test(NAME dxxcpp_cli_outputs
         COMMAND ${CMAKE_COMMAND} -DOUT_DIR=${DXXCPP_CLI_OUT_DIR}
@@ -121,13 +130,20 @@ if(DXXCPP_BUILD_TESTS)
 
     #! -o<dir> attached form, and the nested output directory is created
     set(DXXCPP_CLI_ATTACHED_DIR ${CMAKE_CURRENT_BINARY_DIR}/cli_attached/nested)
+
+    #! Same reason as dxxcpp_cli_clean: the nested dir is created by the tool
+    add_test(NAME dxxcpp_cli_attached_clean
+        COMMAND ${CMAKE_COMMAND} -E rm -rf ${CMAKE_CURRENT_BINARY_DIR}/cli_attached)
+    set_tests_properties(dxxcpp_cli_attached_clean PROPERTIES
+        FIXTURES_SETUP dxxcpp_cli_attached_clean)
+
     add_test(NAME dxxcpp_cli_attached_output_dir
         COMMAND ${CMAKE_COMMAND}
             -DEXE=$<TARGET_FILE:dxxcpp> -DEXPECT=0
             "-DARGS=${CMAKE_CURRENT_SOURCE_DIR}/tests/Sample.dxx;-o${DXXCPP_CLI_ATTACHED_DIR}"
             -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/CheckExitCode.cmake)
     set_tests_properties(dxxcpp_cli_attached_output_dir PROPERTIES
-        FIXTURES_SETUP dxxcpp_cli_attached)
+        FIXTURES_REQUIRED dxxcpp_cli_attached_clean FIXTURES_SETUP dxxcpp_cli_attached)
 
     add_test(NAME dxxcpp_cli_attached_outputs
         COMMAND ${CMAKE_COMMAND} -DOUT_DIR=${DXXCPP_CLI_ATTACHED_DIR}

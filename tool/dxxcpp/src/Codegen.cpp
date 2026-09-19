@@ -25,14 +25,6 @@ std::string upper(std::string aStr) {
     return aStr;
 }
 
-std::string capital(std::string aStr) {
-    if (!aStr.empty() && std::isalpha(aStr[0])) {
-        aStr[0] = std::toupper(aStr[0]);
-    }
-
-    return aStr;
-}
-
 // com.example.calc -> COM_EXAMPLE_CALC
 std::string guardPrefix(const std::string& aPackage) {
     std::string g;
@@ -41,6 +33,36 @@ std::string guardPrefix(const std::string& aPackage) {
     }
 
     return upper(g);
+}
+
+inline std::string capital(std::string aStr) {
+    if (!aStr.empty() && std::isalpha(aStr[0])) {
+        aStr[0] = std::toupper(aStr[0]);
+    }
+
+    return aStr;
+}
+
+// com.example.calc -> ComExampleCalc
+std::string camelPackage(const std::string& aPackage, const std::string& aSeparator = "") {
+    std::string joined;
+    std::size_t start = 0;
+    while (start <= aPackage.size()) {
+        const std::size_t end = aPackage.find('.', start);
+        if (!joined.empty()) {
+            joined += aSeparator;
+        }
+
+        joined += capital(aPackage.substr(start,
+            end == std::string::npos ? std::string::npos : end - start));
+        if (end == std::string::npos) {
+            break;
+        }
+
+        start = end + 1;
+    }
+
+    return joined;
 }
 
 //! Judge if the type is scalar
@@ -192,24 +214,7 @@ std::string line(std::size_t aIndent,
 
 //! Generate namespace by package
 std::string cppNamespace(const std::string& aPackage) {
-    std::string space;
-    size_t start = 0;
-    while (start <= aPackage.size()) {
-        size_t end = aPackage.find('.', start);
-        std::string seg = aPackage.substr(start,
-            end == std::string::npos ? std::string::npos : end - start);
-        if (!space.empty()) {
-            space += "::";
-        }
-
-        space += capital(seg);
-        if (end == std::string::npos) {
-            break;
-        }
-
-        start = end + 1;
-    }
-    return space;
+    return camelPackage(aPackage, "::");
 }
 
 //! Generate dbus path by package
@@ -220,6 +225,12 @@ std::string dbusPath(const std::string& aPackage) {
     }
 
     return p;
+}
+
+//! Generate types header file name by package
+//! com.example.calc -> ComExampleCalcTypes.hpp
+std::string typesHeaderName(const Ir::Root& aRoot) {
+    return camelPackage(aRoot.package) + "Types.hpp";
 }
 
 //! Generate cpp type by ir
@@ -358,7 +369,7 @@ std::string genSkeletonHeader(const Ir::Root& aIr, const Ir::Interface& aIfce) {
     output += '\n';
 
     //!
-    output += line(0, "#include \"Types.hpp\"");
+    output += line(0, "#include \"%s\"", typesHeaderName(aIr));
     output += '\n';
 
     //!
@@ -567,7 +578,7 @@ std::string genProxyHeader(const Ir::Root& aIr, const Ir::Interface& aIfce) {
     output += line(0, "#include <functional>");
     output += '\n';
 
-    output += line(0, "#include \"Types.hpp\"");
+    output += line(0, "#include \"%s\"", typesHeaderName(aIr));
     output += '\n';
 
     output += line(0, "#ifndef DBUSXX_SERVICE_NAME");

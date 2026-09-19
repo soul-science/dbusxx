@@ -5,8 +5,11 @@ if(NOT DEFINED OUT_DIR)
     message(FATAL_ERROR "OUT_DIR is required")
 endif()
 
+#! The types header name is derived from the package (com.example.calc)
+set(TYPES_HEADER ComExampleCalcTypes.hpp)
+
 set(EXPECTED
-    Types.hpp
+    ${TYPES_HEADER}
     CalculatorSkeleton.hpp
     CalculatorProxy.hpp
     LoggerSkeleton.hpp
@@ -27,14 +30,14 @@ foreach(FILE_NAME IN LISTS EXPECTED)
     message(STATUS "found ${FILE_NAME} (${FILE_SIZE} bytes)")
 endforeach()
 
-file(READ "${OUT_DIR}/Types.hpp" TYPES_HPP)
+file(READ "${OUT_DIR}/${TYPES_HEADER}" TYPES_HPP)
 foreach(NEEDLE
     "struct Point {"
     "bool operator==(const Point& aOther) const {"
     "static_assert(std::is_aggregate_v<Point>")
     string(FIND "${TYPES_HPP}" "${NEEDLE}" FOUND_AT)
     if(FOUND_AT EQUAL -1)
-        message(FATAL_ERROR "Types.hpp misses '${NEEDLE}'")
+        message(FATAL_ERROR "${TYPES_HEADER} misses '${NEEDLE}'")
     endif()
 endforeach()
 
@@ -43,7 +46,7 @@ endforeach()
 file(READ "${OUT_DIR}/CalculatorSkeleton.hpp" SKELETON)
 foreach(NEEDLE
     "#include <dbusxx/Server.hpp>"
-    "#include \"Types.hpp\""
+    "#include \"${TYPES_HEADER}\""
     "DBUSXX_SERVICE_NAME"
     "DBUSXX_METHOD(notify)"
     "DBUSXX_PROPERTY_RW(samples, std::vector<std::int32_t>, {1, 2, 3})"
