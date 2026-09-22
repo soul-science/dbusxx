@@ -10,6 +10,7 @@
 #include "Parser.hpp"
 #include "Sema.hpp"
 
+
 namespace {
 //! Process exit code
 enum ExitCode : int {
@@ -21,6 +22,7 @@ enum ExitCode : int {
 struct Options {
     std::string input;
     std::string outputDir { "." };
+    bool listOutputs { false };
     bool showHelp { false };
 };
 
@@ -44,12 +46,14 @@ void printUsage(std::ostream& aOut) {
         << "  --dbus              backend: D-Bus (dbusxx); the only backend for now (default)\n"
         << "  -o, --output-dir    output directory for generated headers (default: current dir)\n"
         << "                      also accepts --output-dir=<dir> and -o<dir>\n"
+        << "  --list-outputs      print the names of the generated headers (one per line)\n"
+        << "                      and exit without writing or creating anything\n"
         << "  -h, --help          show this help\n"
         << "\n"
         << "outputs (one per interface, the types header is shared per package):\n"
         << "  <Package>Types.hpp         e.g. ComExampleCalcTypes.hpp\n"
-        << "  <Interface>Skeleton.hpp\n"
-        << "  <Interface>Proxy.hpp\n"
+        << "  <Interface>Skeleton.hpp / .cpp\n"
+        << "  <Interface>Proxy.hpp / .cpp\n"
         << "\n"
         << "Generated headers always include the library as <dbusxx/...> (installed layout);\n"
         << "the service well-known name is injected by the consumer via DBUSXX_SERVICE_NAME.\n";
@@ -87,6 +91,16 @@ bool parseArguments(int aArgc, char const* aArgv[], Options* aOut) {
 
             //! The only backend currently available, kept for
             //! future additional backends
+            continue;
+        }
+
+        if (arg == "--list-outputs") {
+            if (hasInlineValue) {
+                std::cerr << "error: '" << arg << "' doesn't take a value\n";
+                return false;
+            }
+
+            aOut->listOutputs = true;
             continue;
         }
 
@@ -192,23 +206,46 @@ bool writeFile(const std::filesystem::path& aPath, const std::string& aText) {
     return true;
 }
 
-bool generate(const Ir::Root& aIr, const std::filesystem::path& aDir) {
-    //! Generate <Package>Types.hpp
-    if (!writeFile(aDir / Codegen::typesHeaderName(aIr),
-            Codegen::genTypesHeader(aIr))) {
-        return false;
-    }
+//! One generated file and inner content
+struct GeneratedFile {
+    std::string name;
+    std::string text;
+};
+
+//! All outputs of one .dxx
+std::vector<GeneratedFile> buildOutputs(const Ir::Root& aIr) {
+    std::vector<GeneratedFile> files;
+    files.push_back(GeneratedFile {
+        Codegen::typesHeaderName(aIr),
+        Codegen::genTypesHeader(aIr)
+    });
 
     for (const auto& ifce : aIr.interfaces) {
-        //! Generate <Interface>Skeleton.hpp
-        if (!writeFile(aDir / (ifce.name + "Skeleton.hpp"),
-                Codegen::genSkeletonHeader(aIr, ifce))) {
-            return false;
-        }
+        files.push_back(GeneratedFile {
+            Codegen::skeletonHeaderName(ifce),
+            Codegen::genSkeletonHeader(aIr, ifce)
+        });
+        files.push_back(GeneratedFile {
+            Codegen::skeletonSourceName(ifce),
+            Codegen::genSkeletonSource(aIr, ifce)
+        });
+        files.push_back(GeneratedFile {
+            Codegen::proxyHeaderName(ifce),
+            Codegen::genProxyHeader(aIr, ifce)
+        });
+        files.push_back(GeneratedFile {
+            Codegen::proxySourceName(ifce),
+            Codegen::genProxySource(aIr, ifce)
+        });
+    }
 
-        //! Generate <Interface>Proxy.hpp
-        if (!writeFile(aDir / (ifce.name + "Proxy.hpp"),
-                Codegen::genProxyHeader(aIr, ifce))) {
+    return files;
+}
+
+bool generate(const std::vector<GeneratedFile>& aFiles,
+  const std::filesystem::path& aDir) {
+    for (const auto& aFile : aFiles) {
+        if (!writeFile(aDir / aFile.name, aFile.text)) {
             return false;
         }
     }
@@ -253,6 +290,18 @@ int main(int aArgc, char const* aArgv[]) {
         return EXIT_ERROR;
     }
 
+    const std::vector<GeneratedFile> files = buildOutputs(*sema.ir);
+
+    //! --list-outputs: report the names for build system integration;
+    //! write nothing and create no directory
+    if (opt.listOutputs) {
+        for (const auto& aFile : files) {
+            std::cout << aFile.name << "\n";
+        }
+
+        return EXIT_OK;
+    }
+
     //! Create output folder
     std::error_code ec;
     const std::filesystem::path dir(opt.outputDir);
@@ -264,7 +313,7 @@ int main(int aArgc, char const* aArgv[]) {
     }
 
     //! Generate output files
-    if (!generate(*sema.ir, dir)) {
+    if (!generate(files, dir)) {
         return EXIT_ERROR;
     }
 

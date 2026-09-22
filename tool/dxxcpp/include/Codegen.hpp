@@ -7,29 +7,31 @@
 
 
 namespace Codegen {
-//! Generate namespace by package
-//! com.example.calc -> Com::Example::Calc
-std::string cppNamespace(const std::string& aPackage);
-
-//! Generate dbus path by package
-//! com.example.calc -> /com/example/calc
-std::string dbusPath(const std::string& aPackage);
-
 //! Generate types header file name by package
 //! com.example.calc -> ComExampleCalcTypes.hpp
 std::string typesHeaderName(const Ir::Root& aRoot);
 
-//! Generate cpp type by ir
-//! int32->std::int32_t, vector->std::vector<...>, ...
-std::string cppType(const Ir::Root& aRoot, Ir::TypeId aId);
-
 //! Types Generator: struct + using + static_assert
 std::string genTypesHeader(const Ir::Root& aRoot);
 
-//! Skeleton Generator: Abstract Interface & Server(CRTP + DBUSXX_*)
+//! Per-interface generated file names
+//! <Interface>Skeleton.hpp / <Interface>Skeleton.cpp
+//! <Interface>Proxy.hpp / <Interface>Proxy.cpp
+std::string skeletonHeaderName(const Ir::Interface& aIface);
+std::string skeletonSourceName(const Ir::Interface& aIface);
+std::string proxyHeaderName(const Ir::Interface& aIface);
+std::string proxySourceName(const Ir::Interface& aIface);
+
+//! Skeleton Header Generator: declaration for Interface & Server(CRTP + DBUSXX_*)
 std::string genSkeletonHeader(const Ir::Root& aRoot, const Ir::Interface& aIface);
 
-//! Proxy Generator
+//! Skeleton Source Generator: definition for Server
+std::string genSkeletonSource(const Ir::Root& aRoot, const Ir::Interface& aIface);
+
+//! Proxy Header Generator: declarations of client API
 std::string genProxyHeader(const Ir::Root& aRoot, const Ir::Interface& aIface);
+
+//! Proxy Source Generator: definition of client API
+std::string genProxySource(const Ir::Root& aRoot, const Ir::Interface& aIface);
 } // namespace Codegen
 #endif
