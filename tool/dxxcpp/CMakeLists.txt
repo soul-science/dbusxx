@@ -84,9 +84,9 @@ if(DXXCPP_BUILD_TESTS)
     # ---- CLI: .dxx -> headers (lexical/grammar/semantic/codegen chain) ----
     set(DXXCPP_CLI_OUT_DIR ${CMAKE_CURRENT_BINARY_DIR}/cli_generated)
 
-    #! The output directory must start empty: a file left over from an earlier
-    #! run would hide a rename (a stale Types.hpp used to mask the
-    #! package-prefixed header name)
+    # The output directory must start empty: a file left over from an earlier
+    # run would hide a rename (a stale Types.hpp used to mask the
+    # package-prefixed header name)
     add_test(NAME dxxcpp_cli_clean
         COMMAND ${CMAKE_COMMAND} -E rm -rf ${DXXCPP_CLI_OUT_DIR})
     set_tests_properties(dxxcpp_cli_clean PROPERTIES FIXTURES_SETUP dxxcpp_cli_clean)
@@ -103,13 +103,13 @@ if(DXXCPP_BUILD_TESTS)
     set_tests_properties(dxxcpp_cli_outputs PROPERTIES
         FIXTURES_REQUIRED dxxcpp_cli_out)
 
-    #! Bad input must exit non-zero (WILL_FAIL turns that failure into a pass)
+    # Bad input must exit non-zero (WILL_FAIL turns that failure into a pass)
     add_test(NAME dxxcpp_cli_bad_input
         COMMAND dxxcpp ${CMAKE_CURRENT_SOURCE_DIR}/tests/Bad.dxx -o ${DXXCPP_CLI_OUT_DIR})
     set_tests_properties(dxxcpp_cli_bad_input PROPERTIES WILL_FAIL TRUE)
 
     # ---- CLI exit codes: 0 ok / 1 .dxx error / 2 usage error ----
-    #! ctest only sees zero / non-zero, so these loop back into CMake
+    # ctest only sees zero / non-zero, so these loop back into CMake
     function(dxxcpp_add_exit_code_test name expect)
         add_test(NAME ${name}
             COMMAND ${CMAKE_COMMAND}
@@ -128,10 +128,22 @@ if(DXXCPP_BUILD_TESTS)
     dxxcpp_add_exit_code_test(dxxcpp_cli_missing_input 1
         ${CMAKE_CURRENT_BINARY_DIR}/no_such_file.dxx)
 
-    #! -o<dir> attached form, and the nested output directory is created
+    # ---- --list-outputs: the names (and their order) drive the CMake helper ----
+    add_test(NAME dxxcpp_cli_list_outputs
+        COMMAND ${CMAKE_COMMAND}
+            -DEXE=$<TARGET_FILE:dxxcpp>
+            -DINPUT=${CMAKE_CURRENT_SOURCE_DIR}/tests/Sample.dxx
+            -DSIDE_EFFECT_DIR=${CMAKE_CURRENT_BINARY_DIR}/no_such_dir
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/CheckListOutputs.cmake)
+
+    dxxcpp_add_exit_code_test(dxxcpp_cli_list_outputs_no_input 2 --list-outputs)
+    dxxcpp_add_exit_code_test(dxxcpp_cli_list_outputs_bad_input 1
+        --list-outputs ${CMAKE_CURRENT_SOURCE_DIR}/tests/Bad.dxx)
+
+    # -o<dir> attached form, and the nested output directory is created
     set(DXXCPP_CLI_ATTACHED_DIR ${CMAKE_CURRENT_BINARY_DIR}/cli_attached/nested)
 
-    #! Same reason as dxxcpp_cli_clean: the nested dir is created by the tool
+    # Same reason as dxxcpp_cli_clean: the nested dir is created by the tool
     add_test(NAME dxxcpp_cli_attached_clean
         COMMAND ${CMAKE_COMMAND} -E rm -rf ${CMAKE_CURRENT_BINARY_DIR}/cli_attached)
     set_tests_properties(dxxcpp_cli_attached_clean PROPERTIES
@@ -152,7 +164,7 @@ if(DXXCPP_BUILD_TESTS)
         FIXTURES_REQUIRED dxxcpp_cli_attached)
 
     # ---- truncation fuzz: every prefix of Sample.dxx must exit 0 or 1 ----
-    #! For a sanitizer run, call FuzzTruncate.sh with the ASan build by hand
+    # For a sanitizer run, call FuzzTruncate.sh with the ASan build by hand
     add_test(NAME dxxcpp_fuzz_truncate
         COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/tests/FuzzTruncate.sh
             $<TARGET_FILE:dxxcpp> ${CMAKE_CURRENT_SOURCE_DIR}/tests/Sample.dxx)
@@ -173,17 +185,28 @@ if(DXXCPP_BUILD_TESTS)
         file(CREATE_LINK ${DXXCPP_DBUSXX_INCLUDE_DIR}
              ${DXXCPP_SHIM_DIR}/dbusxx SYMBOLIC)
 
-        #! The CLI output (a real .dxx file through all four stages) must compile too
+        # ---- generated-code compile check: the CLI output must compile ----
+        # Two views in one test: the consumer view (CompileCheckSampleMain.cpp
+        # includes the generated headers) and the library view (every generated
+        # source, whose out-of-line definitions a Proxy/Skeleton .so / .a is
+        # built from)
         add_test(NAME dxxcpp_cli_compile_check
-            COMMAND ${CMAKE_CXX_COMPILER}
-                -std=c++17
-                -fsyntax-only
-                -Werror=deprecated-declarations
-                -I ${DXXCPP_CLI_OUT_DIR}
-                -I ${DXXCPP_SHIM_DIR}
-                -I ${DXXCPP_DBUSXX_INCLUDE_DIR}
-                ${CMAKE_CURRENT_SOURCE_DIR}/tests/CompileCheckSampleMain.cpp)
+            COMMAND ${CMAKE_COMMAND}
+                -DCXX=${CMAKE_CXX_COMPILER}
+                -DSAMPLE_MAIN=${CMAKE_CURRENT_SOURCE_DIR}/tests/CompileCheckSampleMain.cpp
+                -DOUT_DIR=${DXXCPP_CLI_OUT_DIR}
+                -DSHIM_DIR=${DXXCPP_SHIM_DIR}
+                -DDBUSXX_INCLUDE_DIR=${DXXCPP_DBUSXX_INCLUDE_DIR}
+                -DSERVICE=com.example.app
+                -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/CheckCompile.cmake)
         set_tests_properties(dxxcpp_cli_compile_check PROPERTIES
             FIXTURES_REQUIRED dxxcpp_cli_out)
     endif()
 endif()
+
+# ---- install the generator ----
+# Consumers look for it next to the library (<prefix>/bin) via find_program;
+# the headers it emits are tied to the matching library version
+include(GNUInstallDirs)
+
+install(TARGETS dxxcpp RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})

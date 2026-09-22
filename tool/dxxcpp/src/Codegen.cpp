@@ -25,7 +25,7 @@ std::string upper(std::string aStr) {
     return aStr;
 }
 
-// com.example.calc -> COM_EXAMPLE_CALC
+//! com.example.calc -> COM_EXAMPLE_CALC
 std::string guardPrefix(const std::string& aPackage) {
     std::string g;
     for (char c : aPackage) {
@@ -43,7 +43,7 @@ inline std::string capital(std::string aStr) {
     return aStr;
 }
 
-// com.example.calc -> ComExampleCalc
+//! com.example.calc -> ComExampleCalc
 std::string camelPackage(const std::string& aPackage, const std::string& aSeparator = "") {
     std::string joined;
     std::size_t start = 0;
@@ -63,6 +63,66 @@ std::string camelPackage(const std::string& aPackage, const std::string& aSepara
     }
 
     return joined;
+}
+
+//! Generate namespace by package
+//! com.example.calc -> Com::Example::Calc
+std::string cppNamespace(const std::string& aPackage) {
+    return camelPackage(aPackage, "::");
+}
+
+//! Generate dbus path by package
+//! com.example.calc -> /com/example/calc
+std::string dbusPath(const std::string& aPackage) {
+    std::string p = "/";
+    for (char c : aPackage) {
+        p += (c == '.') ? '/' : c;
+    }
+
+    return p;
+}
+
+//! Generate cpp type by ir
+std::string cppType(const Ir::Root& aIr, Ir::TypeId aId) {
+    static const std::unordered_map<std::string, std::string> TYPE_MAP = {
+        {"int8", "std::int8_t"},
+        {"int16", "std::int16_t"},
+        {"int32", "std::int32_t"},
+        {"int64", "std::int64_t"},
+        {"uint8", "std::uint8_t"},
+        {"uint16", "std::uint16_t"},
+        {"uint32", "std::uint32_t"},
+        {"uint64", "std::uint64_t"},
+        {"float", "float"},
+        {"double", "double"},
+        {"bool", "bool"},
+        {"string", "std::string"},
+        {"bytes", "std::vector<std::uint8_t>"}
+    };
+
+    const Ir::TypeNode& node = aIr.type(aId);
+    if (const auto* b = std::get_if<Ir::TypeBase>(&node.kind)) {
+        auto it = TYPE_MAP.find(aIr.nameOf(b->name));
+        return it != TYPE_MAP.end() ? it->second : aIr.nameOf(b->name);
+    }
+
+    if (const auto* v = std::get_if<Ir::TypeVector>(&node.kind)) {
+        return "std::vector<" + cppType(aIr, v->element) + ">";
+    }
+
+    if (const auto* a = std::get_if<Ir::TypeArray>(&node.kind)) {
+        return "std::array<" + cppType(aIr, a->element) + ", " + std::to_string(a->n) + ">";
+    }
+
+    if (const auto* m = std::get_if<Ir::TypeMap>(&node.kind)) {
+        return "std::map<" + cppType(aIr, m->key) + ", " + cppType(aIr, m->value) + ">";
+    }
+
+    if (const auto* s = std::get_if<Ir::TypeStruct>(&node.kind)) {
+        return aIr.structBy(s->def).name;
+    }
+
+    return "?";
 }
 
 //! Judge if the type is scalar
@@ -210,22 +270,150 @@ std::string line(std::size_t aIndent,
 
     return std::string(aIndent, ' ') + body + "\n";
 }
-} // namespace
 
-//! Generate namespace by package
-std::string cppNamespace(const std::string& aPackage) {
-    return camelPackage(aPackage, "::");
+//! Check if DBUSXX_SERVICE_NAME is defined,
+//! it comes from the build system, never from the .dxx
+std::string serviceNameGuard() {
+    std::string out;
+    out += line(0, "#ifndef DBUSXX_SERVICE_NAME");
+    out += line(0, "#error \"DBUSXX_SERVICE_NAME must be defined "
+        "(e.g. -DDBUSXX_SERVICE_NAME=\\\"com.example.app\\\")\"");
+    out += line(0, "#endif");
+    return out;
 }
 
-//! Generate dbus path by package
-std::string dbusPath(const std::string& aPackage) {
-    std::string p = "/";
-    for (char c : aPackage) {
-        p += (c == '.') ? '/' : c;
+//! Dbusxx::<aWrapper><T>, or void when the method has no return value
+std::string replyTypeOf(const Ir::Root& aIr, const Ir::Method& aMethod,
+  const std::string& aWrapper) {
+    return "Dbusxx::" + aWrapper + "<" +
+        (aMethod.ret ? cppType(aIr, *aMethod.ret) : "void") + ">";
+}
+
+//! Timeout note appended to the comment above a method
+std::string timeoutNote(const Ir::Method& aMethod) {
+    return aMethod.timeoutUsec ?
+        (" [timeout=" + std::to_string(*aMethod.timeoutUsec) + "us]") : std::string();
+}
+
+//! One generated Proxy member function
+struct ProxyFunc {
+    std::string name;        //! Generated function name
+    std::string params;      //! Rendered parameter list
+    std::string replyType;   //! Return type
+    std::string note;        //! Comment above the function, may be empty
+    std::string call;        //! Rendered call returned by the definition body
+    bool deprecated { false };
+};
+
+//! The three shapes one method is generated in
+enum class MethodShape {
+    Sync,           //! <name> - Dbusxx::Reply<T> from callSync
+    AsyncHandle,    //! <name>Async - Dbusxx::PendingReply<T> from callAsync
+    AsyncCallback   //! <name>Async(aCallback, ...) - Dbusxx::Status from callAsync
+};
+
+//! Turn one method into a generic Proxy member in the requested shape
+ProxyFunc methodFunc(const Ir::Root& aIr,
+  const Ir::Method& aMethod, MethodShape aShape) {
+    std::string note;
+    std::string replyType;
+    std::string nameSuffix;
+    std::string leadParam;
+    std::string api;
+    std::string leadArg;
+
+    switch (aShape) {
+    case MethodShape::Sync:
+        note = "//! Sync: return Dbusxx::Reply";
+        replyType = replyTypeOf(aIr, aMethod, "Reply");
+        api = "callSync";
+        break;
+    case MethodShape::AsyncHandle:
+        note = "//! Async: return Dbusxx::PendingReply";
+        replyType = replyTypeOf(aIr, aMethod, "PendingReply");
+        nameSuffix = Ir::ASYNC_SUFFIX;
+        api = "callAsync";
+        break;
+    case MethodShape::AsyncCallback:
+        const std::string callbackParam(Ir::CALLBACK_PARAM);
+        note = "//! Async: return Dbusxx::Status";
+        replyType = "Dbusxx::Status";
+        nameSuffix = Ir::ASYNC_SUFFIX;
+        leadParam = "std::function<void("
+            + replyTypeOf(aIr, aMethod, "Reply") + ")> " + callbackParam;
+        api = "callAsync";
+        leadArg = "std::move(" + callbackParam + ")";
+        break;
     }
 
-    return p;
+    std::string params = leadParam;
+    const std::string decls = paramDeclList(aIr, aMethod.params);
+    if (!decls.empty()) {
+        if (!params.empty()) {
+            params += ", ";
+        }
+
+        params += decls;
+    }
+
+    return ProxyFunc {
+        aMethod.name + nameSuffix,
+        params,
+        replyType,
+        note + timeoutNote(aMethod),
+        callExpr(aIr, aMethod, api, leadArg),
+        aMethod.deprecated
+    };
 }
+
+//! A signal listener is an ordinary Proxy member
+ProxyFunc listenerFunc(const Ir::Root& aIr, const Ir::Signal& aSignal) {
+    const std::string callback(Ir::CALLBACK_PARAM);
+    return ProxyFunc {
+        Ir::signalListenerName(aSignal.name),
+        "std::function<void(" + paramDeclList(aIr, aSignal.params) + ")> " + callback,
+        "Dbusxx::Status",
+        "",
+        callExpr("listenSignal", "", "", aSignal.name,
+            "std::move(" + callback + ")"),
+        aSignal.deprecated
+    };
+}
+
+//! Generate one Proxy member: declaration for <Interface>Proxy.hpp
+//! (aDefine=false) or definition for <Interface>Proxy.cpp (aDefine=true)
+std::string genProxyFunc(const std::string& aClassName, const ProxyFunc& aFunc,
+  bool aDefine) {
+    std::string output;
+    if (aDefine) {
+        if (!aFunc.note.empty()) {
+            output += line(0, "%s", aFunc.note);
+        }
+
+        output += line(0, "%s %s::%s(%s) {",
+            aFunc.replyType, aClassName, aFunc.name, aFunc.params);
+        output += line(INDENT_SIZE, "return %s;", aFunc.call);
+        output += line(0, "}");
+        output += '\n';
+    } else {
+        if (!aFunc.note.empty()) {
+            output += line(INDENT_SIZE, "%s", aFunc.note);
+        }
+
+        //! Only use "deprecated" in Proxy to expose to user
+        if (aFunc.deprecated) {
+            output += line(INDENT_SIZE, "[[deprecated]]");
+        }
+
+        output += line(INDENT_SIZE, "[[nodiscard]] %s %s(%s);",
+            aFunc.replyType, aFunc.name, aFunc.params);
+        output += '\n';
+    }
+
+    return output;
+}
+
+} // namespace
 
 //! Generate types header file name by package
 //! com.example.calc -> ComExampleCalcTypes.hpp
@@ -233,47 +421,20 @@ std::string typesHeaderName(const Ir::Root& aRoot) {
     return camelPackage(aRoot.package) + "Types.hpp";
 }
 
-//! Generate cpp type by ir
-std::string cppType(const Ir::Root& aIr, Ir::TypeId aId) {
-    static const std::unordered_map<std::string, std::string> TYPE_MAP = {
-        {"int8", "std::int8_t"},
-        {"int16", "std::int16_t"},
-        {"int32", "std::int32_t"},
-        {"int64", "std::int64_t"},
-        {"uint8", "std::uint8_t"},
-        {"uint16", "std::uint16_t"},
-        {"uint32", "std::uint32_t"},
-        {"uint64", "std::uint64_t"},
-        {"float", "float"},
-        {"double", "double"},
-        {"bool", "bool"},
-        {"string", "std::string"},
-        {"bytes", "std::vector<std::uint8_t>"}
-    };
+std::string skeletonHeaderName(const Ir::Interface& aIface) {
+    return aIface.name + "Skeleton.hpp";
+}
 
-    const Ir::TypeNode& node = aIr.type(aId);
-    if (const auto* b = std::get_if<Ir::TypeBase>(&node.kind)) {
-        auto it = TYPE_MAP.find(aIr.nameOf(b->name));
-        return it != TYPE_MAP.end() ? it->second : aIr.nameOf(b->name);
-    }
+std::string skeletonSourceName(const Ir::Interface& aIface) {
+    return aIface.name + "Skeleton.cpp";
+}
 
-    if (const auto* v = std::get_if<Ir::TypeVector>(&node.kind)) {
-        return "std::vector<" + cppType(aIr, v->element) + ">";
-    }
+std::string proxyHeaderName(const Ir::Interface& aIface) {
+    return aIface.name + "Proxy.hpp";
+}
 
-    if (const auto* a = std::get_if<Ir::TypeArray>(&node.kind)) {
-        return "std::array<" + cppType(aIr, a->element) + ", " + std::to_string(a->n) + ">";
-    }
-
-    if (const auto* m = std::get_if<Ir::TypeMap>(&node.kind)) {
-        return "std::map<" + cppType(aIr, m->key) + ", " + cppType(aIr, m->value) + ">";
-    }
-
-    if (const auto* s = std::get_if<Ir::TypeStruct>(&node.kind)) {
-        return aIr.structBy(s->def).name;
-    }
-
-    return "?";
+std::string proxySourceName(const Ir::Interface& aIface) {
+    return aIface.name + "Proxy.cpp";
 }
 
 //! Types Generator: struct + using + static_assert
@@ -348,7 +509,7 @@ std::string genTypesHeader(const Ir::Root& aIr) {
     return out;
 }
 
-//! Skeleton Generator: Abstract Interface & Server(CRTP + DBUSXX_*)
+//! Skeleton Header Generator: declaration for Interface & Server(CRTP + DBUSXX_*)
 std::string genSkeletonHeader(const Ir::Root& aIr, const Ir::Interface& aIfce) {
     std::string output;
     const std::string hppGuardPrefix = guardPrefix(aIr.package);
@@ -368,21 +529,13 @@ std::string genSkeletonHeader(const Ir::Root& aIr, const Ir::Interface& aIfce) {
     output += line(0, "#include <memory>");
     output += '\n';
 
-    //!
     output += line(0, "#include \"%s\"", typesHeaderName(aIr));
-    output += '\n';
-
-    //!
-    output += line(0, "#ifndef DBUSXX_SERVICE_NAME");
-    output += line(0, "#error \"DBUSXX_SERVICE_NAME must be defined (e.g. -DDBUSXX_SERVICE_NAME=\\\"com.example.app\\\")\"");
-    output += line(0, "#endif");
     output += '\n';
 
     //! Definition of namespace
     output += line(0, "namespace %s {", space);
-    output += '\n';
 
-    //! Definition of Interface Class
+    //! Declaration of Interface Class
     output += line(0, "class %sInterface {", aIfce.name);
     output += line(0, "public:");
     output += line(INDENT_SIZE, "virtual ~%sInterface() = default;", aIfce.name);
@@ -395,38 +548,32 @@ std::string genSkeletonHeader(const Ir::Root& aIr, const Ir::Interface& aIfce) {
     output += line(0, "};");
     output += '\n';
 
-    //! Definition of Skeleton Class
+    //! Declaration of Skeleton Class
     output += line(0, "class %sServer final : public Dbusxx::Server<%sServer> {",
               aIfce.name, aIfce.name);
     output += line(0, "public:");
-    output += line(INDENT_SIZE, "explicit %sServer(std::unique_ptr<%sInterface> aIface)",
+    output += line(INDENT_SIZE, "explicit %sServer(std::unique_ptr<%sInterface> aIface);",
               aIfce.name, aIfce.name);
-    output += line(INDENT_SIZE * 2, ": Dbusxx::Server<%sServer>(DBUSXX_SERVICE_NAME)", aIfce.name);
-    output += line(INDENT_SIZE * 2, ", mIface(std::move(aIface)) {}");
     output += '\n';
     output += line(INDENT_SIZE, "DBUSXX_PATH(\"%s\")", pathName);
     output += line(INDENT_SIZE, "DBUSXX_IFACE(\"%s\")", ifceName);
 
-    //! Definition of methods
+    //! Declaration of methods
     for (const auto& method : aIfce.methods) {
         std::string ret = method.ret ? cppType(aIr, *method.ret) : "void";
         output += '\n';
         if (method.deprecated) {
             //! Using comments instead of [[deprecated]]:
             //! DBUSXX_METHOD will refer &Self::<this function>
-            output += line(INDENT_SIZE, "// @deprecated");
+            output += line(INDENT_SIZE, "//! @deprecated");
         }
 
-        output += line(INDENT_SIZE, "%s %s(%s) {", ret, method.name,
+        output += line(INDENT_SIZE, "%s %s(%s);", ret, method.name,
             paramDeclList(aIr, method.params));
-        std::string call = "mIface->" + method.name +
-            "(" + callArgs(method.params) + ")";
-        output += line(INDENT_SIZE * 2, "%s;", (method.ret ? "return " + call : call));
-        output += line(INDENT_SIZE, "}");
         output += line(INDENT_SIZE, "DBUSXX_METHOD(%s)", method.name);
     }
 
-    //! Definition of signals
+    //! Declaration of signals
     for (const auto& signal : aIfce.signals) {
         std::string types;
         for (size_t i = 0; i < signal.params.size(); ++i) {
@@ -437,14 +584,14 @@ std::string genSkeletonHeader(const Ir::Root& aIr, const Ir::Interface& aIfce) {
         if (signal.deprecated) {
             //! Using comments instead of [[deprecated]]:
             //! DBUSXX_SIGNAL only registers the signal, there is nothing to mark
-            output += line(INDENT_SIZE, "// @deprecated");
+            output += line(INDENT_SIZE, "//! @deprecated");
         }
 
         output += line(INDENT_SIZE, "DBUSXX_SIGNAL(%s%s)", signal.name,
                   (types.empty() ? "" : ", " + types));
     }
 
-    //! Definition of properties
+    //! Declaration of properties
     for (const auto& prop : aIfce.properties) {
         const std::string ty = cppType(aIr, prop.type);
         //! DBUSXX_PROPERTY_*, if type contains ",", using decltype(...)
@@ -469,101 +616,53 @@ std::string genSkeletonHeader(const Ir::Root& aIr, const Ir::Interface& aIfce) {
     return output;
 }
 
-namespace {
-//! Shape of one generated Proxy method: the async versions differ from the sync
-//! one only by these fields
-struct ProxyMethod {
-    std::string note;        //! Comment above the function
-    std::string replyType;   //! Dbusxx::Reply<T> / Dbusxx::PendingReply<T> / Dbusxx::Status
-    std::string nameSuffix;  //! Appended to the .dxx method name ("" or "Async")
-    std::string leadParam;   //! Extra leading parameter (the async callback), may be empty
-    std::string api;         //! Client member used by the call
-    std::string leadArg;     //! Argument passed for leadParam, may be empty
-};
+//! Skeleton Source Generator: definition for Server
+std::string genSkeletonSource(const Ir::Root& aIr, const Ir::Interface& aIfce) {
+    const std::string space = cppNamespace(aIr.package);
 
-//! Dbusxx::<aWrapper><T>, or void when the method has no return value
-std::string replyTypeOf(const Ir::Root& aIr, const Ir::Method& aMethod,
-  const std::string& aWrapper) {
-    return "Dbusxx::" + aWrapper + "<" +
-        (aMethod.ret ? cppType(aIr, *aMethod.ret) : "void") + ">";
-}
-
-//! Timeout note appended to the comment above a method
-std::string timeoutNote(const Ir::Method& aMethod) {
-    return aMethod.timeoutUsec ?
-        (" [timeout=" + std::to_string(*aMethod.timeoutUsec) + "us]") : std::string();
-}
-
-//! Generate one Proxy method in the shape described by aSpec
-std::string genProxyMethod(const Ir::Root& aIr, const Ir::Method& aMethod,
-  const ProxyMethod& aSpec) {
     std::string output;
-
-    std::string decl = aSpec.leadParam;
-    const std::string params = paramDeclList(aIr, aMethod.params);
-    if (!params.empty()) {
-        if (!decl.empty()) {
-            decl += ", ";
-        }
-
-        decl += params;
-    }
-
-    output += line(INDENT_SIZE, "%s", aSpec.note + timeoutNote(aMethod));
-
-    //! Only use "deprecated" in Proxy to expose to user
-    if (aMethod.deprecated) {
-        output += line(INDENT_SIZE, "[[deprecated]]");
-    }
-
-    output += line(INDENT_SIZE, "[[nodiscard]] %s %s%s(%s) {",
-        aSpec.replyType, aMethod.name, aSpec.nameSuffix, decl);
-    output += line(INDENT_SIZE * 2, "return %s;",
-        callExpr(aIr, aMethod, aSpec.api, aSpec.leadArg));
-    output += line(INDENT_SIZE, "}");
+    output += line(0, "#include \"%s\"", skeletonHeaderName(aIfce));
+    output += '\n';
+    output += line(0, "#include <memory>");
+    output += line(0, "#include <utility>");
     output += '\n';
 
+    //! The service well-known name is needed here
+    output += serviceNameGuard();
+    output += '\n';
+
+    output += line(0, "namespace %s {", space);
+
+    //! Definition of Constructor
+    output += line(0, "%sServer::%sServer(std::unique_ptr<%sInterface> aIface)",
+        aIfce.name, aIfce.name, aIfce.name);
+    output += line(INDENT_SIZE, ": Dbusxx::Server<%sServer>(DBUSXX_SERVICE_NAME)", aIfce.name);
+    output += line(INDENT_SIZE, ", mIface(std::move(aIface)) {}");
+    output += '\n';
+
+    //! Definition of methods
+    for (const auto& method : aIfce.methods) {
+        std::string ret = method.ret ? cppType(aIr, *method.ret) : "void";
+        std::string call = "mIface->" + method.name +
+            "(" + callArgs(method.params) + ")";
+
+        output += line(0, "%s %sServer::%s(%s) {", ret, aIfce.name, method.name,
+            paramDeclList(aIr, method.params));
+        output += line(INDENT_SIZE, "%s;", (method.ret ? "return " + call : call));
+        output += line(0, "}");
+        output += '\n';
+    }
+
+    output += line(0, "} // namespace %s", space);
     return output;
 }
 
-//! Synchronous shape: Reply<T> from callSync
-ProxyMethod syncSpec(const Ir::Root& aIr, const Ir::Method& aMethod) {
-    return ProxyMethod {
-        "//! Sync: return Dbusxx::Reply",
-        replyTypeOf(aIr, aMethod, "Reply"), "", "", "callSync", ""
-    };
-}
-
-//! Asynchronous shape returning a handle: PendingReply<T> from callAsync
-ProxyMethod asyncSpec(const Ir::Root& aIr, const Ir::Method& aMethod) {
-    return ProxyMethod {
-        "//! Async: return Dbusxx::PendingReply",
-        replyTypeOf(aIr, aMethod, "PendingReply"),
-        std::string(Ir::ASYNC_SUFFIX), "", "callAsync", ""
-    };
-}
-
-//! Asynchronous shape taking a callback: Status from callAsync, callback first
-ProxyMethod asyncCallbackSpec(const Ir::Root& aIr, const Ir::Method& aMethod) {
-    const std::string callbackParam(Ir::CALLBACK_PARAM);
-    ProxyMethod spec = asyncSpec(aIr, aMethod);
-    spec.note = "//! Async: return Dbusxx::Status";
-    spec.replyType = "Dbusxx::Status";
-    spec.leadParam = "std::function<void(" + replyTypeOf(aIr, aMethod, "Reply") + ")> " +
-        callbackParam;
-    spec.leadArg = "std::move(" + callbackParam + ")";
-    return spec;
-}
-} // namespace
-
-//! Proxy Generator
+//! Proxy Header Generator: declarations of client API
 std::string genProxyHeader(const Ir::Root& aIr, const Ir::Interface& aIfce) {
     std::string output;
     const std::string prefix = guardPrefix(aIr.package);
     const std::string ifaceU = upper(aIfce.name);
     const std::string ns = cppNamespace(aIr.package);
-    const std::string fullIface = aIr.package + "." + aIfce.name;
-    const std::string path = dbusPath(aIr.package);
 
     //! Definition of .hpp guard
     output += line(0, "#ifndef %s_%s_PROXY_HPP", prefix, ifaceU);
@@ -581,27 +680,19 @@ std::string genProxyHeader(const Ir::Root& aIr, const Ir::Interface& aIfce) {
     output += line(0, "#include \"%s\"", typesHeaderName(aIr));
     output += '\n';
 
-    output += line(0, "#ifndef DBUSXX_SERVICE_NAME");
-    output += line(0, "#error \"DBUSXX_SERVICE_NAME must be defined"
-        "(e.g. -DDBUSXX_SERVICE_NAME=\\\"com.example.app\\\")\"");
-    output += line(0, "#endif");
+    //! The service well-known name is needed here
+    output += serviceNameGuard();
     output += '\n';
 
-    //! Definition of namespace
+    //! Declaration of namespace
     output += line(0, "namespace %s {", ns);
-    output += '\n';
 
-    //! Definition of class
+    //! Declaration of class
     output += line(0, "class %sProxy {", aIfce.name);
     output += line(0, "public:");
 
-    //! Definition of constructor
-    output += line(INDENT_SIZE, "explicit %sProxy()", aIfce.name);
-    output += line(
-        INDENT_SIZE * 2,
-        ": mClient(Dbusxx::SessionType::USER, DBUSXX_SERVICE_NAME,"
-    );
-    output += line(INDENT_SIZE * 2, "\"%s\", \"%s\") {}", path, fullIface);
+    //! Declaration of constructor
+    output += line(INDENT_SIZE, "explicit %sProxy();", aIfce.name);
     output += '\n';
     output += line(
         INDENT_SIZE,
@@ -625,45 +716,24 @@ std::string genProxyHeader(const Ir::Root& aIr, const Ir::Interface& aIfce) {
     );
     output += '\n';
 
-    //! Definition of methods
+    //! Declaration of methods
     for (const auto& method : aIfce.methods) {
         if (method.callMode != Ir::Method::CallMode::Async) {
-            output += genProxyMethod(aIr, method, syncSpec(aIr, method));
+            output += genProxyFunc(aIfce.name,
+                methodFunc(aIr, method, MethodShape::Sync), false);
         }
 
         if (method.callMode != Ir::Method::CallMode::Sync) {
-            output += genProxyMethod(aIr, method, asyncSpec(aIr, method));
-            output += genProxyMethod(aIr, method, asyncCallbackSpec(aIr, method));
+            output += genProxyFunc(aIfce.name,
+                methodFunc(aIr, method, MethodShape::AsyncHandle), false);
+            output += genProxyFunc(aIfce.name,
+                methodFunc(aIr, method, MethodShape::AsyncCallback), false);
         }
     }
 
-    //! Definition of signals
+    //! Declaration of signals
     for (const auto& signal : aIfce.signals) {
-        //! Only use "deprecated" in Proxy to expose to user
-        if (signal.deprecated) {
-            output += line(INDENT_SIZE, "[[deprecated]]");
-        }
-
-        std::string callback =
-            "std::function<void(" +
-            paramDeclList(aIr, signal.params) + ")> " +
-            std::string(Ir::CALLBACK_PARAM);
-
-        output += line(
-            INDENT_SIZE,
-            "[[nodiscard]] Dbusxx::Status %s(%s) {",
-            Ir::signalListenerName(signal.name), callback);
-        output += line(
-            INDENT_SIZE * 2,
-            "return %s;",
-            callExpr(
-                "listenSignal", "", "",
-                signal.name,
-                "std::move(" + std::string(Ir::CALLBACK_PARAM) + ")"
-            )
-        );
-        output += line(INDENT_SIZE, "}");
-        output += '\n';
+        output += genProxyFunc(aIfce.name, listenerFunc(aIr, signal), false);
     }
 
     //! Definition of private variable
@@ -674,6 +744,50 @@ std::string genProxyHeader(const Ir::Root& aIr, const Ir::Interface& aIfce) {
 
     output += line(0, "} // namespace %s", ns);
     output += line(0, "#endif");
+    return output;
+}
+
+//! Proxy Source Generator: definition of client API
+std::string genProxySource(const Ir::Root& aIr, const Ir::Interface& aIfce) {
+    const std::string ns = cppNamespace(aIr.package);
+    const std::string cls = aIfce.name + "Proxy";
+    const std::string fullIface = aIr.package + "." + aIfce.name;
+    const std::string path = dbusPath(aIr.package);
+
+    std::string output;
+    output += line(0, "#include \"%s\"", proxyHeaderName(aIfce));
+    output += '\n';
+    output += line(0, "#include <utility>");
+    output += '\n';
+    output += line(0, "namespace %s {", ns);
+
+    //! Constructor
+    output += line(0, "%sProxy::%sProxy()", aIfce.name, aIfce.name);
+    output += line(INDENT_SIZE, ": mClient(Dbusxx::SessionType::USER, DBUSXX_SERVICE_NAME,");
+    output += line(INDENT_SIZE, "    \"%s\", \"%s\") {}", path, fullIface);
+    output += '\n';
+
+    //! Definition of methods
+    for (const auto& method : aIfce.methods) {
+        if (method.callMode != Ir::Method::CallMode::Async) {
+            output += genProxyFunc(cls,
+                methodFunc(aIr, method, MethodShape::Sync), true);
+        }
+
+        if (method.callMode != Ir::Method::CallMode::Sync) {
+            output += genProxyFunc(cls,
+                methodFunc(aIr, method, MethodShape::AsyncHandle), true);
+            output += genProxyFunc(cls,
+                methodFunc(aIr, method, MethodShape::AsyncCallback), true);
+        }
+    }
+
+    //! Definition of signals
+    for (const auto& signal : aIfce.signals) {
+        output += genProxyFunc(cls, listenerFunc(aIr, signal), true);
+    }
+
+    output += line(0, "} // namespace %s", ns);
     return output;
 }
 

@@ -75,9 +75,10 @@ void caseKeywordParamName() {
     const Ir::Interface& aInterface = aSemaResult.ir->interfaces[0];
     const std::string aSkeleton = Codegen::genSkeletonHeader(*aSemaResult.ir, aInterface);
     const std::string aProxy = Codegen::genProxyHeader(*aSemaResult.ir, aInterface);
+    const std::string aProxySrc = Codegen::genProxySource(*aSemaResult.ir, aInterface);
     expectContains("skeleton: new_", aSkeleton, "std::int32_t new_");
     expectContains("skeleton: class_", aSkeleton, "const std::string& class_");
-    expectContains("proxy: callSync args", aProxy, "callSync<bool>(\"f\", new_, class_)");
+    expectContains("proxy src: callSync args", aProxySrc, "callSync<bool>(\"f\", new_, class_)");
 }
 
 //! Only methods live in the Proxy, so <method>Async may also be a property name
@@ -133,7 +134,9 @@ void caseSyncOnlyCallbackParam() {
     ok("@sync method with a parameter named aCallback accepted");
     const std::string aProxy = Codegen::genProxyHeader(*aSemaResult.ir,
         aSemaResult.ir->interfaces[0]);
-    expectContains("proxy: only the sync shape", aProxy,
+    const std::string aProxySrc = Codegen::genProxySource(*aSemaResult.ir,
+        aSemaResult.ir->interfaces[0]);
+    expectContains("proxy src: only the sync shape", aProxySrc,
         "mClient.callSync<std::int32_t>(\"f\", aCallback)");
 }
 
@@ -247,12 +250,16 @@ int main(int argc, char** argv) {
     }
 
     expectContains("types: ns", aTypes, "namespace Com::Example::Calc");
-    expectContains("types: struct", aTypes, "struct Point {");
-    expectContains("types: field", aTypes, "std::int32_t x;");
+    //! Bind the field to its struct: a bare "std::int32_t x;" would also pass
+    //! if the field moved into another struct
+    expectContains("types: struct + first field", aTypes,
+        "struct Point {\n    std::int32_t x;");
     expectContains("types: using", aTypes, "using ConfigMap = std::map<std::string, std::string>;");
     expectContains("types: static_assert", aTypes, "static_assert(std::is_aggregate_v<Point>");
-    expectContains("types: operator==", aTypes, "bool operator==(const Point& aOther) const {");
-    expectContains("types: operator== field", aTypes, "return x == aOther.x");
+    expectContains("types: operator== per field", aTypes,
+        "bool operator==(const Point& aOther) const {\n"
+        "        return x == aOther.x\n"
+        "            && y == aOther.y;");
     expectContains("types: guard", aTypes, "#ifndef COM_EXAMPLE_CALC_TYPES_HPP");
 
     section("codegen: CalculatorSkeleton.hpp");
@@ -266,11 +273,12 @@ int main(int argc, char** argv) {
         "#include \"ComExampleCalcTypes.hpp\"");
     expectContains("skel: method", aSkeleton, "DBUSXX_METHOD(add)");
     expectContains("skel: void method with a string arg", aSkeleton, "DBUSXX_METHOD(notify)");
-    expectContains("skel: struct param", aSkeleton, "const Point& p");
+    expectContains("skel: struct param", aSkeleton,
+        "Point translate(const Point& p, std::int32_t dx);");
     expectContains("skel: signal", aSkeleton,
         "DBUSXX_SIGNAL(valueChanged, std::int32_t, std::int32_t)");
     expectContains("skel: deprecated signal is a comment", aSkeleton,
-        "// @deprecated\n    DBUSXX_SIGNAL(legacyEvent, std::int32_t)");
+        "//! @deprecated\n    DBUSXX_SIGNAL(legacyEvent, std::int32_t)");
     expectContains("skel: prop RO", aSkeleton,
         "DBUSXX_PROPERTY_RO(version, std::string, {\"1.0.0\"})");
     expectContains("skel: prop RW", aSkeleton, "DBUSXX_PROPERTY_RW(counter, std::int32_t, {0})");
@@ -284,49 +292,78 @@ int main(int argc, char** argv) {
         "DBUSXX_PROPERTY_RW(origin, Point, {1, 2})");
     expectContains("skel: prop nested init", aSkeleton,
         "DBUSXX_PROPERTY_RW(history, std::vector<Point>, {{1, 2}, {3, 4}})");
-    expectContains("skel: deprecated comment", aSkeleton, "// @deprecated");
+    expectContains("skel: deprecated method comment", aSkeleton,
+        "//! @deprecated\n    void legacy(std::int32_t code);");
 
-    section("codegen: CalculatorProxy.hpp");
+    section("codegen: CalculatorSkeleton.cpp");
+    const std::string aSkeletonSrc = Codegen::genSkeletonSource(*aSemaResult.ir,
+        aSemaResult.ir->interfaces[0]);
+    expectContains("skel src: header include", aSkeletonSrc,
+        "#include \"CalculatorSkeleton.hpp\"");
+    expectContains("skel src: service name guard", aSkeletonSrc,
+        "#ifndef DBUSXX_SERVICE_NAME\n#error");
+    expectContains("skel src: ctor", aSkeletonSrc,
+        "CalculatorServer::CalculatorServer(std::unique_ptr<CalculatorInterface> aIface)");
+    expectContains("skel src: method body (with return)", aSkeletonSrc,
+        "std::int32_t CalculatorServer::add(std::int32_t a, std::int32_t b) {\n"
+        "    return mIface->add(a, b);\n}");
+    expectContains("skel src: method body (void)", aSkeletonSrc,
+        "void CalculatorServer::notify(const std::string& msg) {\n"
+        "    mIface->notify(msg);\n}");
+
+    section("codegen: CalculatorProxy.hpp / .cpp");
     const std::string aProxy = Codegen::genProxyHeader(*aSemaResult.ir,
         aSemaResult.ir->interfaces[0]);
-    expectContains("proxy: sync call", aProxy, "callSync<std::int32_t>(\"add\"");
-    expectContains("proxy: struct call", aProxy, "callSync<Point>(\"translate\"");
-    expectContains("proxy: timeout", aProxy,
+    const std::string aProxySrc = Codegen::genProxySource(*aSemaResult.ir,
+        aSemaResult.ir->interfaces[0]);
+    expectContains("proxy: sync call", aProxySrc, "mClient.callSync<std::int32_t>(\"add\", a, b)");
+    expectContains("proxy: struct call", aProxySrc, "callSync<Point>(\"translate\"");
+    expectContains("proxy: timeout", aProxySrc,
         "callSync<std::map<std::string, std::string>, 3000000>(\"getConfig\"");
-    expectContains("proxy: deprecated", aProxy, "[[deprecated]]");
+    expectContains("proxy: deprecated method", aProxy,
+        "[[deprecated]]\n    [[nodiscard]] Dbusxx::Reply<void> legacy(std::int32_t code);");
     expectContains("proxy: types include", aProxy,
         "#include \"ComExampleCalcTypes.hpp\"");
+    expectContains("proxy src: header include", aProxySrc,
+        "#include \"CalculatorProxy.hpp\"");
+    expectContains("proxy: service name guard", aProxy, "#ifndef DBUSXX_SERVICE_NAME\n#error");
+    //! The well-known name is compiled in, like on the server side
+    expectContains("proxy src: ctor compiles the name in", aProxySrc,
+        "CalculatorProxy::CalculatorProxy()\n"
+        "    : mClient(Dbusxx::SessionType::USER, DBUSXX_SERVICE_NAME,");
+    expectContains("proxy: ctor takes no service name", aProxy,
+        "explicit CalculatorProxy();");
 
     section("codegen: proxy shapes (@sync / @async)");
     expectContains("proxy: async handle", aProxy, "Dbusxx::PendingReply<std::int32_t> addAsync(");
     expectContains("proxy: async callback", aProxy,
         "Dbusxx::Status addAsync(std::function<void(Dbusxx::Reply<std::int32_t>)> aCallback,");
-    expectContains("proxy: async call", aProxy,
+    expectContains("proxy: async call", aProxySrc,
         "mClient.callAsync<std::int32_t>(\"add\", std::move(aCallback), a, b)");
     expectContains("proxy: @sync signature", aProxy,
         "Dbusxx::Reply<std::int32_t> syncOnly(std::int32_t val)");
-    expectContains("proxy: @sync call", aProxy,
+    expectContains("proxy: @sync call", aProxySrc,
         "mClient.callSync<std::int32_t>(\"syncOnly\", val)");
     expectContains("proxy: @async handle", aProxy,
         "Dbusxx::PendingReply<bool> asyncOnlyAsync(std::int32_t val)");
     expectContains("proxy: @async callback", aProxy,
         "Dbusxx::Status asyncOnlyAsync(std::function<void(Dbusxx::Reply<bool>)> aCallback,");
-    expectContains("proxy: @async call", aProxy,
+    expectContains("proxy: @async call", aProxySrc,
         "mClient.callAsync<bool>(\"asyncOnly\", std::move(aCallback), val)");
 
     section("codegen: proxy void + @timeout, signal listeners");
-    expectContains("proxy: void + timeout", aProxy,
+    expectContains("proxy: void + timeout", aProxySrc,
         "mClient.callSync<void, 500000>(\"ping\")");
-    expectContains("proxy: void + timeout callback", aProxy,
+    expectContains("proxy: void + timeout callback", aProxySrc,
         "mClient.callAsync<void, 500000>(\"ping\", std::move(aCallback))");
     expectContains("proxy: listener", aProxy,
         "Dbusxx::Status onValueChanged(std::function<void(std::int32_t oldVal, "
-        "std::int32_t newVal)> aCallback)");
-    expectContains("proxy: listener call", aProxy,
+        "std::int32_t newVal)> aCallback);");
+    expectContains("proxy: listener call", aProxySrc,
         "mClient.listenSignal(\"valueChanged\", std::move(aCallback))");
     expectContains("proxy: deprecated listener", aProxy,
         "[[deprecated]]\n    [[nodiscard]] Dbusxx::Status onLegacyEvent(");
-    expectContains("proxy: deprecated listener call", aProxy,
+    expectContains("proxy: deprecated listener call", aProxySrc,
         "mClient.listenSignal(\"legacyEvent\", std::move(aCallback))");
 
     section("codegen: LoggerSkeleton.hpp");
