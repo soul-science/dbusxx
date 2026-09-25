@@ -323,27 +323,30 @@ ProxyFunc methodFunc(const Ir::Root& aIr,
     std::string leadArg;
 
     switch (aShape) {
-    case MethodShape::Sync:
-        note = "//! Sync: return Dbusxx::Reply";
-        replyType = replyTypeOf(aIr, aMethod, "Reply");
-        api = "callSync";
-        break;
-    case MethodShape::AsyncHandle:
-        note = "//! Async: return Dbusxx::PendingReply";
-        replyType = replyTypeOf(aIr, aMethod, "PendingReply");
-        nameSuffix = Ir::ASYNC_SUFFIX;
-        api = "callAsync";
-        break;
-    case MethodShape::AsyncCallback:
-        const std::string callbackParam(Ir::CALLBACK_PARAM);
-        note = "//! Async: return Dbusxx::Status";
-        replyType = "Dbusxx::Status";
-        nameSuffix = Ir::ASYNC_SUFFIX;
-        leadParam = "std::function<void("
-            + replyTypeOf(aIr, aMethod, "Reply") + ")> " + callbackParam;
-        api = "callAsync";
-        leadArg = "std::move(" + callbackParam + ")";
-        break;
+        case MethodShape::Sync: {
+            note = "//! Sync: return Dbusxx::Reply";
+            replyType = replyTypeOf(aIr, aMethod, "Reply");
+            api = "callSync";
+            break;
+        }
+        case MethodShape::AsyncHandle: {
+            note = "//! Async: return Dbusxx::PendingReply";
+            replyType = replyTypeOf(aIr, aMethod, "PendingReply");
+            nameSuffix = Ir::ASYNC_SUFFIX;
+            api = "callAsync";
+            break;
+        }
+        case MethodShape::AsyncCallback: {
+            const std::string callbackParam(Ir::CALLBACK_PARAM);
+            note = "//! Async: return Dbusxx::Status";
+            replyType = "Dbusxx::Status";
+            nameSuffix = Ir::ASYNC_SUFFIX;
+            leadParam = "std::function<void("
+                + replyTypeOf(aIr, aMethod, "Reply") + ")> " + callbackParam;
+            api = "callAsync";
+            leadArg = "std::move(" + callbackParam + ")";
+            break;
+        }
     }
 
     std::string params = leadParam;

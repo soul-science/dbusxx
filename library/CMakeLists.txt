@@ -48,17 +48,19 @@ if(NOT SYSTEMD_FOUND)
     )
 endif()
 
+include(GNUInstallDirs)
+
 # Include header file path
 target_include_directories(dbusxx
     PUBLIC
         # Use header files from the source code directory during construction
         $<BUILD_INTERFACE:${INCLUDES_DIR}>
-        # After installation, headers live in include/dbusxx/. Export two roots
-        # so both include styles work for consumers:
+        # After installation, headers live in <includedir>/dbusxx/. Export two
+        # roots so both include styles work for consumers:
         #   - `#include <dbusxx/Reply.hpp>`              -> needs the parent dir
         #   - internal `"Status.hpp"` / `"private/..."`  -> needs the dbusxx dir
-        $<INSTALL_INTERFACE:include>
-        $<INSTALL_INTERFACE:include/dbusxx>
+        $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
+        $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/dbusxx>
         # systemd headers
         ${SYSTEMD_INCLUDE_DIRS}
 )
@@ -79,31 +81,33 @@ target_compile_options(dbusxx
         ${SYSTEMD_CFLAGS_OTHER}
 )
 
-# Install .so to/usr/local/lib
+# Install the shared library into <prefix>/${CMAKE_INSTALL_LIBDIR}
 install(
     TARGETS dbusxx
     # Export dbusxxTargets and store target usage information
     EXPORT dbusxxTargets
-    # Installation location: /usr/local/lib
-    DESTINATION lib
+    # Installation location: <prefix>/${CMAKE_INSTALL_LIBDIR}
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}
 )
 
-# Install header files to /usr/local/include/dbusxx
+# Install header files to <prefix>/${CMAKE_INSTALL_INCLUDEDIR}/dbusxx
 install(
     DIRECTORY
-        ${INCLUDES_DIR}/ DESTINATION include/dbusxx
+        ${INCLUDES_DIR}/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/dbusxx
     FILES_MATCHING PATTERN
         "*.hpp"
 )
 
+set(DBUSXX_CMAKE_PACKAGE_DIR
+    "${CMAKE_INSTALL_LIBDIR}/cmake/dbusxx")
 # Install exported CMake Targets, enable 'find_package' to locate
 install(
     # Install dbusxxTargets.cmake
     EXPORT dbusxxTargets
     # Determine the export file for Target
     FILE dbusxxTargets.cmake
-    # Installation location: /usr/local/lib/cmake/dbusxx
-    DESTINATION lib/cmake/dbusxx
+    # Installation location: <prefix>/${DBUSXX_CMAKE_PACKAGE_DIR}
+    DESTINATION ${DBUSXX_CMAKE_PACKAGE_DIR}
 )
 
 # Introducing auxiliary functions -> configure_package_config_file
@@ -117,7 +121,7 @@ configure_package_config_file(
     "${CMAKE_CURRENT_BINARY_DIR}/dbusxxConfig.cmake"
     # Installation path
     INSTALL_DESTINATION
-        lib/cmake/dbusxx
+        ${DBUSXX_CMAKE_PACKAGE_DIR}
 )
 
 # Install dbusxxConfig.cmake
@@ -125,5 +129,13 @@ install(
     FILES
         "${CMAKE_CURRENT_BINARY_DIR}/dbusxxConfig.cmake"
     DESTINATION
-        lib/cmake/dbusxx
+        ${DBUSXX_CMAKE_PACKAGE_DIR}
+)
+
+# Install the generator helper: 'find_package(dbusxx)' -> dxxcpp_generate_lib()
+install(
+    FILES
+        "${CMAKE_CURRENT_SOURCE_DIR}/cmake/dxxcppGenerator.cmake"
+    DESTINATION
+        ${DBUSXX_CMAKE_PACKAGE_DIR}
 )

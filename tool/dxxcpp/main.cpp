@@ -46,7 +46,7 @@ void printUsage(std::ostream& aOut) {
         << "  --dbus              backend: D-Bus (dbusxx); the only backend for now (default)\n"
         << "  -o, --output-dir    output directory for generated headers (default: current dir)\n"
         << "                      also accepts --output-dir=<dir> and -o<dir>\n"
-        << "  --list-outputs      print the names of the generated headers (one per line)\n"
+        << "  --list-outputs      print the names of the generated files (one per line)\n"
         << "                      and exit without writing or creating anything\n"
         << "  -h, --help          show this help\n"
         << "\n"
@@ -208,6 +208,26 @@ bool writeFile(const std::filesystem::path& aPath, const std::string& aText) {
 
 //! One generated file and inner content
 struct GeneratedFile {
+    enum class Type {
+        TYPES = 0,
+        SERVER,
+        CLIENT
+    };
+
+    std::string typeToString() const {
+        switch (type) {
+        case Type::TYPES:
+            return "types";
+        case Type::SERVER:
+            return "server";
+        case Type::CLIENT:
+            return "client";
+        default:
+            return "";
+        }
+    }
+
+    Type type { Type::TYPES };
     std::string name;
     std::string text;
 };
@@ -216,24 +236,29 @@ struct GeneratedFile {
 std::vector<GeneratedFile> buildOutputs(const Ir::Root& aIr) {
     std::vector<GeneratedFile> files;
     files.push_back(GeneratedFile {
+        GeneratedFile::Type::TYPES,
         Codegen::typesHeaderName(aIr),
         Codegen::genTypesHeader(aIr)
     });
 
     for (const auto& ifce : aIr.interfaces) {
         files.push_back(GeneratedFile {
+            GeneratedFile::Type::SERVER,
             Codegen::skeletonHeaderName(ifce),
             Codegen::genSkeletonHeader(aIr, ifce)
         });
         files.push_back(GeneratedFile {
+            GeneratedFile::Type::SERVER,
             Codegen::skeletonSourceName(ifce),
             Codegen::genSkeletonSource(aIr, ifce)
         });
         files.push_back(GeneratedFile {
+            GeneratedFile::Type::CLIENT,
             Codegen::proxyHeaderName(ifce),
             Codegen::genProxyHeader(aIr, ifce)
         });
         files.push_back(GeneratedFile {
+            GeneratedFile::Type::CLIENT,
             Codegen::proxySourceName(ifce),
             Codegen::genProxySource(aIr, ifce)
         });
@@ -296,7 +321,7 @@ int main(int aArgc, char const* aArgv[]) {
     //! write nothing and create no directory
     if (opt.listOutputs) {
         for (const auto& aFile : files) {
-            std::cout << aFile.name << "\n";
+            std::cout << aFile.typeToString() << ":" << aFile.name << "\n";
         }
 
         return EXIT_OK;

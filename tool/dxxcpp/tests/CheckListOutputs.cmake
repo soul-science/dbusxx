@@ -21,18 +21,18 @@ endif()
 
 string(REPLACE "\n" ";" _names "${_out}")
 set(_expected
-    ComExampleCalcTypes.hpp
-    CalculatorSkeleton.hpp
-    CalculatorSkeleton.cpp
-    CalculatorProxy.hpp
-    CalculatorProxy.cpp
-    LoggerSkeleton.hpp
-    LoggerSkeleton.cpp
-    LoggerProxy.hpp
-    LoggerProxy.cpp
+    types:ComExampleCalcTypes.hpp
+    server:CalculatorSkeleton.hpp
+    server:CalculatorSkeleton.cpp
+    client:CalculatorProxy.hpp
+    client:CalculatorProxy.cpp
+    server:LoggerSkeleton.hpp
+    server:LoggerSkeleton.cpp
+    client:LoggerProxy.hpp
+    client:LoggerProxy.cpp
 )
 if(NOT _names STREQUAL _expected)
-    message(FATAL_ERROR "names mismatch\n  got:      ${_names}\n  expected: ${_expected}")
+    message(FATAL_ERROR "entries mismatch\n  got:      ${_names}\n  expected: ${_expected}")
 endif()
 
 #! It must not create the output directory either, even when -o is given
