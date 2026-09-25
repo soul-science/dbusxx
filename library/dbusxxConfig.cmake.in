@@ -1,4 +1,16 @@
 @PACKAGE_INIT@  # Insert package initialization code (automatic path processing, etc.)
 
-include("${CMAKE_CURRENT_LIST_DIR}/dbusxxTargets.cmake")  
-# Enable loading of 'dbusxxTargets.cmake' when 'find_mackage(dbusxx)'
+include("${CMAKE_CURRENT_LIST_DIR}/dbusxxTargets.cmake")
+# Enable loading of 'dbusxxTargets.cmake' when 'find_package(dbusxx)'
+
+# Install prefix, computed by configure_package_config_file() from
+# INSTALL_DESTINATION, so it stays right whatever <libdir> resolves to
+# (lib, lib64, lib/<multiarch>, ...).  dxxcppGenerator.cmake uses it to look for
+# the dxxcpp executable installed next to this package; define DBUSXX_PREFIX
+# beforehand to point that lookup somewhere else.
+if(NOT DEFINED DBUSXX_PREFIX)
+    set(DBUSXX_PREFIX "${PACKAGE_PREFIX_DIR}")
+endif()
+
+# dxxcpp_generate_lib(): .dxx -> build + install the service SDK
+include("${CMAKE_CURRENT_LIST_DIR}/dxxcppGenerator.cmake")
