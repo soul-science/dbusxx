@@ -150,6 +150,11 @@ function(dxxcpp_generate_lib)
 
         # Get role(types|server|client):name
         string(REPLACE ":" ";" _PAIR "${_ENTRY}")
+        list(LENGTH _PAIR _PAIR_LEN)
+        if(NOT _PAIR_LEN EQUAL 2)
+            message(FATAL_ERROR
+                "dxxcpp_generate_lib: malformed --list-outputs entry '${_ENTRY}'")
+        endif()
         list(GET _PAIR 0 _ROLE)
         list(GET _PAIR 1 _NAME)
 
@@ -174,6 +179,15 @@ function(dxxcpp_generate_lib)
         endif()
     endforeach()
 
+<<<<<<< HEAD
+=======
+    if(NOT DXX_GENERATED_SERVER_SOURCES OR NOT DXX_GENERATED_CLIENT_SOURCES)
+        message(FATAL_ERROR
+            "dxxcpp_generate_lib: '${DXX_INPUT}' declares no interface; "
+            "a service SDK needs at least one (only types can be consumed directly)")
+    endif()
+
+>>>>>>> 34902d8 ([Feature][dxxcpp] Support use dxxcpp via cmake in other project)
     # Run dxxcpp to generate cpp files
     get_property(_OWNER_IN_DIR GLOBAL PROPERTY
         "DXXCPP_OWNER_${DXX_OUTPUT_DIR}")

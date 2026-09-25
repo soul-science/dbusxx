@@ -46,8 +46,14 @@ void printUsage(std::ostream& aOut) {
         << "  --dbus              backend: D-Bus (dbusxx); the only backend for now (default)\n"
         << "  -o, --output-dir    output directory for generated headers (default: current dir)\n"
         << "                      also accepts --output-dir=<dir> and -o<dir>\n"
+<<<<<<< HEAD
         << "  --list-outputs      print the names of the generated files (one per line)\n"
         << "                      and exit without writing or creating anything\n"
+=======
+        << "  --list-outputs      print each generated file as '<role>:<name>' (one per line),\n"
+        << "                      role being 'types', 'server' or 'client';\n"
+        << "                      exits without writing or creating anything\n"
+>>>>>>> 34902d8 ([Feature][dxxcpp] Support use dxxcpp via cmake in other project)
         << "  -h, --help          show this help\n"
         << "\n"
         << "outputs (one per interface, the types header is shared per package):\n"
