@@ -57,7 +57,7 @@ foreach(gtest_tgt gtest gtest_main gmock gmock_main)
     endif()
 endforeach()
 
-add_executable(sdbusxx_unit_tests
+add_executable(dbusxx_unit_tests
     main.cpp
     TestStatus.cpp
     TestArgs.cpp
@@ -73,12 +73,12 @@ add_executable(sdbusxx_unit_tests
     TestServerClient.cpp
 )
 
-target_include_directories(sdbusxx_unit_tests
+target_include_directories(dbusxx_unit_tests
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}
 )
 
-target_link_libraries(sdbusxx_unit_tests
+target_link_libraries(dbusxx_unit_tests
     PRIVATE
         dbusxx
         dbusxx_opts
@@ -98,8 +98,8 @@ target_link_libraries(sdbusxx_unit_tests
 file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/ci)
 add_test(
     NAME
-        sdbusxx_unit_tests
+        dbusxx_unit_tests
     COMMAND
-        sdbusxx_unit_tests
+        dbusxx_unit_tests
             --gtest_output=xml:${CMAKE_BINARY_DIR}/ci/unit_tests_report.xml
 )

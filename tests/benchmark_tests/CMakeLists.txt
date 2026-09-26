@@ -42,7 +42,7 @@ else()
     endif()
 endif()
 
-add_executable(sdbusxx_benchmarks
+add_executable(dbusxx_benchmarks
     BenchmarkMain.cpp
     BenchmarkStatus.cpp
     BenchmarkMessage.cpp
@@ -50,12 +50,12 @@ add_executable(sdbusxx_benchmarks
     BenchmarkE2E.cpp
 )
 
-target_include_directories(sdbusxx_benchmarks
+target_include_directories(dbusxx_benchmarks
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}
 )
 
-target_link_libraries(sdbusxx_benchmarks
+target_link_libraries(dbusxx_benchmarks
     PRIVATE
         dbusxx
         dbusxx_opts
@@ -70,20 +70,20 @@ target_link_libraries(sdbusxx_benchmarks
 # Every run (ctest or direct) writes a human-readable console report via
 # --benchmark_out to ${CMAKE_BINARY_DIR}/ci/. To iterate on a subset during
 # development instead of the full run:
-#   ./build_release/tests/benchmark_tests/sdbusxx_benchmarks \
+#   ./build_release/tests/benchmark_tests/dbusxx_benchmarks \
 #       --benchmark_filter='E2EBench/*' --benchmark_min_time=0.1
 option(DBUSXX_CTEST_BENCHMARKS "Run benchmarks via ctest (default OFF)" OFF)
 file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/ci)
 add_test(
     NAME
-        sdbusxx_benchmarks
+        dbusxx_benchmarks
     COMMAND
-        sdbusxx_benchmarks
+        dbusxx_benchmarks
             --benchmark_min_time=0.2
             --benchmark_out=${CMAKE_BINARY_DIR}/ci/benchmark_tests_report.txt
             --benchmark_out_format=console
 )
 
 if(NOT DBUSXX_CTEST_BENCHMARKS)
-    set_tests_properties(sdbusxx_benchmarks PROPERTIES DISABLED TRUE)
+    set_tests_properties(dbusxx_benchmarks PROPERTIES DISABLED TRUE)
 endif()
