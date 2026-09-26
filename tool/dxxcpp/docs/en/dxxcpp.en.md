@@ -62,7 +62,11 @@ gen/CalculatorSkeleton.hpp/.cpp   # server: <Iface>Interface pure virtual base +
 gen/CalculatorProxy.hpp/.cpp      # client: <Iface>Proxy
 ```
 
+<<<<<<< HEAD
 Generated code always includes `<dbusxx/...>` (installed layout), and the service name is injected by the build system through `DBUSXX_SERVICE_NAME` — the generated headers carry an `#error` guard, so forgetting it fails the build instead of silently connecting to the wrong bus.
+=======
+Generated code always includes `<dbusxx/...>` (installed layout), and the service name is injected by the build system through `DBUSXX_SERVICE_NAME`. The two files that actually use that macro (`<Interface>Proxy.hpp` and `<Interface>Skeleton.cpp`) carry an `#error` guard, so forgetting it fails the build instead of silently connecting to the wrong bus.
+>>>>>>> 2fa84fb ([Doc] Add dxxcpp guidance and supplement README)
 
 The least-effort wiring is to let CMake do it: see [CMake integration](#5-cmake-integration).
 
@@ -284,6 +288,10 @@ The convention here is **`//!` for documentation comments** and `//` for ordinar
 - Header names come from the `.dxx` itself (package / interface names), not from the `LIB_PREFIX` of `dxxcpp_generate_lib(LIB_PREFIX ...)`
 - Headers include each other by bare name (`#include "ThisFile.hpp"`, same directory), so consumers include them by bare name too
 - Output is **split into declarations and definitions**: the call bodies of Proxy/Skeleton live in `.cpp`, so they compile into static/shared libraries without header-only duplicate-definition trouble
+<<<<<<< HEAD
+=======
+- The `#error` guard for `DBUSXX_SERVICE_NAME` only appears in **the two files that actually use the macro** — `<Interface>Proxy.hpp` and `<Interface>Skeleton.cpp`; `<Package>Types.hpp` and `<Interface>Skeleton.hpp` never mention it (the latter only holds registration macros like `DBUSXX_PATH` / `DBUSXX_METHOD`, which do not reference the service name), so they carry no guard
+>>>>>>> 2fa84fb ([Doc] Add dxxcpp guidance and supplement README)
 
 ### 3.2 Types header
 

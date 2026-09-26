@@ -62,7 +62,11 @@ gen/CalculatorSkeleton.hpp/.cpp   # 服务端：<Iface>Interface 纯虚基类 + 
 gen/CalculatorProxy.hpp/.cpp      # 客户端：<Iface>Proxy
 ```
 
+<<<<<<< HEAD
 生成的源码一律 `#include <dbusxx/...>`（按安装态布局），服务名由构建系统通过 `DBUSXX_SERVICE_NAME` 注入 —— 生成的头里带 `#error` 守卫，忘了定义会直接编译失败而不是静默连错总线。
+=======
+生成的源码一律 `#include <dbusxx/...>`（按安装态布局），服务名由构建系统通过 `DBUSXX_SERVICE_NAME` 注入。真正用到该宏的两个文件（`<Interface>Proxy.hpp` 与 `<Interface>Skeleton.cpp`）带 `#error` 守卫，忘了定义会直接编译失败而不是静默连错总线。
+>>>>>>> 2fa84fb ([Doc] Add dxxcpp guidance and supplement README)
 
 最省事的接法是让 CMake 帮忙：见 [CMake 集成](#5-cmake-集成)。
 
@@ -284,6 +288,10 @@ property untouched -> int32;                // 不写初值
 - 头文件名来自 `.dxx` 自身（package / 接口名），与 `dxxcpp_generate_lib(LIB_PREFIX ...)` 的 `LIB_PREFIX` 无关
 - 头文件之间用 `#include "本文件名"`（同目录相对包含），消费者按裸文件名 include 即可
 - 产物是**声明与定义分离**的：Proxy/Skeleton 的调用体在 `.cpp` 里，因此可以编进静态库/共享库，不会被 header-only 的重复定义绊住
+<<<<<<< HEAD
+=======
+- `DBUSXX_SERVICE_NAME` 的 `#error` 守卫只出现在**真正用到该宏的两个文件**里 —— `<Interface>Proxy.hpp` 与 `<Interface>Skeleton.cpp`；`<Package>Types.hpp` 和 `<Interface>Skeleton.hpp` 根本不提这个宏（后者只放 `DBUSXX_PATH`/`DBUSXX_METHOD` 这类注册宏，它们不引用服务名），因此也没有守卫
+>>>>>>> 2fa84fb ([Doc] Add dxxcpp guidance and supplement README)
 
 ### 3.2 类型头
 
