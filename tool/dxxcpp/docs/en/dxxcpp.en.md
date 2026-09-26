@@ -63,7 +63,6 @@ gen/CalculatorProxy.hpp/.cpp      # client: <Iface>Proxy
 ```
 
 Generated code always includes `<dbusxx/...>` (installed layout), and the service name is injected by the build system through `DBUSXX_SERVICE_NAME`. The two files that actually use that macro (`<Interface>Proxy.hpp` and `<Interface>Skeleton.cpp`) carry an `#error` guard, so forgetting it fails the build instead of silently connecting to the wrong bus.
->>>>>>> 2fa84fb ([Doc] Add dxxcpp guidance and supplement README)
 
 The least-effort wiring is to let CMake do it: see [CMake integration](#5-cmake-integration).
 
