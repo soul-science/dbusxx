@@ -135,15 +135,28 @@ int main() {
         "struct Point {\n    std::int32_t x;");
     expectContains("types: using", aTypes, "using ConfigMap = std::map<std::string, std::string>;");
     expectContains("types: static_assert", aTypes, "static_assert(std::is_aggregate_v<Point>");
+    //! The path/interface constants the registration macros consume
+    expectContains("types: path constant", aTypes,
+        "inline constexpr const char* COM_EXAMPLE_CALC_PATH { \"/com/example/calc\" };");
+    expectContains("types: iface constant", aTypes,
+        "inline constexpr const char* COM_EXAMPLE_CALC_CALCULATOR_IFACE "
+        "{ \"com.example.calc.Calculator\" };");
     // ---- Skeleton ----
     expectContains("skel: class", aSkeletonHeader,
         "class CalculatorServer final : public Dbusxx::Server<CalculatorServer>");
-    expectContains("skel: path", aSkeletonHeader, "DBUSXX_PATH(\"/com/example/calc\")");
-    expectContains("skel: iface", aSkeletonHeader, "DBUSXX_IFACE(\"com.example.calc.Calculator\")");
+    expectContains("skel: path", aSkeletonHeader, "DBUSXX_PATH(COM_EXAMPLE_CALC_PATH)");
+    expectContains("skel: iface", aSkeletonHeader,
+        "DBUSXX_IFACE(COM_EXAMPLE_CALC_CALCULATOR_IFACE)");
     expectContains("skel: method", aSkeletonHeader, "DBUSXX_METHOD(add)");
     expectContains("skel: void", aSkeletonHeader, "DBUSXX_METHOD(notify)");
     expectContains("skel: signal", aSkeletonHeader,
                    "DBUSXX_SIGNAL(valueChanged, std::int32_t, std::int32_t)");
+    //! Every signal also gets an emit wrapper, declared next to its registration
+    expectContains("skel: signal emit wrapper", aSkeletonHeader,
+        "    [[nodiscard]] Dbusxx::Status emitValueChanged(std::int32_t old, "
+        "std::int32_t new_);");
+    expectContains("skel: deprecated signal emit wrapper", aSkeletonHeader,
+        "    [[nodiscard]] Dbusxx::Status emitLegacyEvent(std::int32_t code);");
     expectContains("skel: prop RO", aSkeletonHeader,
         "DBUSXX_PROPERTY_RO(version, std::string, {\"1.0.0\"})");
     expectContains("skel: prop RW", aSkeletonHeader,
@@ -181,6 +194,12 @@ int main() {
     expectContains("skel src: method body (void)", aSkeletonSrc,
         "void CalculatorServer::notify(const std::string& msg) {\n"
         "    mIface->notify(msg);\n}");
+    //! Bind the emit body to the signal's path/interface/name triple
+    expectContains("skel src: emit wrapper body", aSkeletonSrc,
+        "Dbusxx::Status CalculatorServer::emitValueChanged(std::int32_t old, "
+        "std::int32_t new_) {\n"
+        "    return this->emit(COM_EXAMPLE_CALC_PATH, COM_EXAMPLE_CALC_CALCULATOR_IFACE, "
+        "\"valueChanged\", old, new_);\n}");
     //! Registration stays in the header (DBUSXX_METHOD refers to &Self::method)
     expectNotContains("skel src: no registration macros", aSkeletonSrc, "DBUSXX_METHOD");
     expectNotContains("skel src: no registration macros (signal)", aSkeletonSrc, "DBUSXX_SIGNAL");

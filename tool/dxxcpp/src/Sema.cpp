@@ -730,13 +730,14 @@ std::vector<Error> validateAst(const Ast::Root& aAstRoot) {
             appendErrors(errs, checkType(aAstRoot, pr.type));
         }
 
-        //! Every name the Proxy declares must be unique: a method becomes
-        //! <name> (unless @async) plus <name>Async (unless @sync), a signal
-        //! becomes its listener name (properties are not part of the Proxy)
-        std::unordered_map<std::string, std::string> generated;
-        auto addGenerated = [&](const std::string& aName, const std::string& aOwner,
-          const Ast::Loc& aLoc) {
-            const auto [aIt, aInserted] = generated.emplace(aName, aOwner);
+        //! The Proxy and the Skeleton are separate classes, so the names they
+        //! declare are collected separately: the Proxy adds <name>Async and the
+        //! signal listeners, the Skeleton the signal emit wrappers
+        std::unordered_map<std::string, std::string> proxyNames;
+        std::unordered_map<std::string, std::string> serverNames;
+        auto addGenerated = [&](std::unordered_map<std::string, std::string>& aNames,
+          const std::string& aOwner, const std::string& aName, const Ast::Loc& aLoc) {
+            const auto [aIt, aInserted] = aNames.emplace(aName, aOwner);
             if (!aInserted) {
                 report(
                     errs,
@@ -750,16 +751,24 @@ std::vector<Error> validateAst(const Ast::Root& aAstRoot) {
         for (const auto& m : ifce.methods) {
             const std::string owner = "method '" + m.name + "'";
             if (!hasAnnotation(m.annotations, ANNS_ASYNC_STR.data())) {
-                addGenerated(m.name, owner, m.loc);
+                addGenerated(proxyNames, owner, m.name, m.loc);
             }
 
             if (!hasAnnotation(m.annotations, ANNS_SYNC_STR.data())) {
-                addGenerated(m.name + std::string(Ir::ASYNC_SUFFIX), owner, m.loc);
+                addGenerated(proxyNames, owner, m.name + std::string(Ir::ASYNC_SUFFIX),
+                    m.loc);
             }
+
+            //! The Skeleton declares the method as well; a duplicated method
+            //! name is already reported as a duplicate member, so only the emit
+            //! wrappers are reported here
+            serverNames.emplace(m.name, owner);
         }
 
         for (const auto& s : ifce.signals) {
-            addGenerated(Ir::signalListenerName(s.name), "signal '" + s.name + "'", s.loc);
+            const std::string owner = "signal '" + s.name + "'";
+            addGenerated(proxyNames, owner, Ir::signalListenerName(s.name), s.loc);
+            addGenerated(serverNames, owner, Ir::signalEmitName(s.name), s.loc);
         }
     }
 

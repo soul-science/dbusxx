@@ -35,14 +35,6 @@ std::string guardPrefix(const std::string& aPackage) {
     return upper(g);
 }
 
-inline std::string capital(std::string aStr) {
-    if (!aStr.empty() && std::isalpha(aStr[0])) {
-        aStr[0] = std::toupper(aStr[0]);
-    }
-
-    return aStr;
-}
-
 //! com.example.calc -> ComExampleCalc
 std::string camelPackage(const std::string& aPackage, const std::string& aSeparator = "") {
     std::string joined;
@@ -53,7 +45,7 @@ std::string camelPackage(const std::string& aPackage, const std::string& aSepara
             joined += aSeparator;
         }
 
-        joined += capital(aPackage.substr(start,
+        joined += Ir::capitalizeFirst(aPackage.substr(start,
             end == std::string::npos ? std::string::npos : end - start));
         if (end == std::string::npos) {
             break;
@@ -463,6 +455,18 @@ std::string genTypesHeader(const Ir::Root& aIr) {
     //! Definition of namespace
     out += line(0, "namespace %s {", space);
 
+    //! Definition of path name
+    out += line(0, "inline constexpr const char* %s_PATH { \"%s\" };",
+        hppGuardPrefix, dbusPath(aIr.package));
+
+    //! Definition of interface name
+    for (const auto& iface : aIr.interfaces) {
+        out += line(0, "inline constexpr const char* %s_%s_IFACE { \"%s\" };",
+            hppGuardPrefix, upper(iface.name), aIr.package + "." + iface.name);
+    }
+
+    out += "\n";
+
     //! Definition of structs
     for (const auto& st : aIr.structs) {
         out += line(0, "struct %s {", st.name);
@@ -518,8 +522,8 @@ std::string genSkeletonHeader(const Ir::Root& aIr, const Ir::Interface& aIfce) {
     const std::string hppGuardPrefix = guardPrefix(aIr.package);
     const std::string hppGuardName = upper(aIfce.name);
     const std::string space = cppNamespace(aIr.package);
-    const std::string ifceName = aIr.package + "." + aIfce.name;
-    const std::string pathName = dbusPath(aIr.package);
+    const std::string pathName = hppGuardPrefix + "_PATH";
+    const std::string ifceName = hppGuardPrefix + "_" + upper(aIfce.name) + "_IFACE";
 
     //! Definition of .hpp guard
     output += line(0, "#ifndef %s_%s_SKELETON_HPP", hppGuardPrefix, hppGuardName);
@@ -558,8 +562,8 @@ std::string genSkeletonHeader(const Ir::Root& aIr, const Ir::Interface& aIfce) {
     output += line(INDENT_SIZE, "explicit %sServer(std::unique_ptr<%sInterface> aIface);",
               aIfce.name, aIfce.name);
     output += '\n';
-    output += line(INDENT_SIZE, "DBUSXX_PATH(\"%s\")", pathName);
-    output += line(INDENT_SIZE, "DBUSXX_IFACE(\"%s\")", ifceName);
+    output += line(INDENT_SIZE, "DBUSXX_PATH(%s)", pathName);
+    output += line(INDENT_SIZE, "DBUSXX_IFACE(%s)", ifceName);
 
     //! Declaration of methods
     for (const auto& method : aIfce.methods) {
@@ -583,6 +587,7 @@ std::string genSkeletonHeader(const Ir::Root& aIr, const Ir::Interface& aIfce) {
             if (i) { types += ", "; }
             types += cppType(aIr, signal.params[i].type);
         }
+
         output += '\n';
         if (signal.deprecated) {
             //! Using comments instead of [[deprecated]]:
@@ -592,6 +597,9 @@ std::string genSkeletonHeader(const Ir::Root& aIr, const Ir::Interface& aIfce) {
 
         output += line(INDENT_SIZE, "DBUSXX_SIGNAL(%s%s)", signal.name,
                   (types.empty() ? "" : ", " + types));
+
+        output += line(INDENT_SIZE, "[[nodiscard]] Dbusxx::Status %s(%s);",
+            Ir::signalEmitName(signal.name), paramDeclList(aIr, signal.params));
     }
 
     //! Declaration of properties
@@ -652,6 +660,19 @@ std::string genSkeletonSource(const Ir::Root& aIr, const Ir::Interface& aIfce) {
         output += line(0, "%s %sServer::%s(%s) {", ret, aIfce.name, method.name,
             paramDeclList(aIr, method.params));
         output += line(INDENT_SIZE, "%s;", (method.ret ? "return " + call : call));
+        output += line(0, "}");
+        output += '\n';
+    }
+
+    //! Definition of signals
+    const std::string hppGuardPrefix = guardPrefix(aIr.package);
+    const std::string pathName = hppGuardPrefix + "_PATH";
+    const std::string ifceName = hppGuardPrefix + "_" + upper(aIfce.name) + "_IFACE";
+    for (const auto& signal : aIfce.signals) {
+        output += line(0, "Dbusxx::Status %sServer::%s(%s) {",
+            aIfce.name, Ir::signalEmitName(signal.name), paramDeclList(aIr, signal.params));
+        output += line(INDENT_SIZE, "return this->emit(%s, %s, \"%s\", %s);",
+            pathName, ifceName, signal.name, callArgs(signal.params));
         output += line(0, "}");
         output += '\n';
     }
@@ -754,8 +775,9 @@ std::string genProxyHeader(const Ir::Root& aIr, const Ir::Interface& aIfce) {
 std::string genProxySource(const Ir::Root& aIr, const Ir::Interface& aIfce) {
     const std::string ns = cppNamespace(aIr.package);
     const std::string cls = aIfce.name + "Proxy";
-    const std::string fullIface = aIr.package + "." + aIfce.name;
-    const std::string path = dbusPath(aIr.package);
+    const std::string hppGuardPrefix = guardPrefix(aIr.package);
+    const std::string pathName = hppGuardPrefix + "_PATH";
+    const std::string ifceName = hppGuardPrefix + "_" + upper(aIfce.name) + "_IFACE";
 
     std::string output;
     output += line(0, "#include \"%s\"", proxyHeaderName(aIfce));
@@ -767,7 +789,7 @@ std::string genProxySource(const Ir::Root& aIr, const Ir::Interface& aIfce) {
     //! Constructor
     output += line(0, "%sProxy::%sProxy()", aIfce.name, aIfce.name);
     output += line(INDENT_SIZE, ": mClient(Dbusxx::SessionType::USER, DBUSXX_SERVICE_NAME,");
-    output += line(INDENT_SIZE, "    \"%s\", \"%s\") {}", path, fullIface);
+    output += line(INDENT_SIZE * 2, "%s, %s) {}", pathName, ifceName);
     output += '\n';
 
     //! Definition of methods

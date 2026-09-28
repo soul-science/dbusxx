@@ -24,16 +24,28 @@ using NameIdx = std::uint32_t;
 inline constexpr std::string_view ASYNC_SUFFIX { "Async" };
 inline constexpr std::string_view CALLBACK_PARAM { "aCallback" };
 
+//! Capitalize the first letter of a name
+inline std::string capitalizeFirst(const std::string& aName) {
+    std::string name = aName;
+    if (!name.empty() && std::isalpha(static_cast<unsigned char>(name[0]))) {
+        name[0] = static_cast<char>(
+            std::toupper(static_cast<unsigned char>(name[0])));
+    }
+
+    return name;
+}
+
 //! Listener the Proxy declares for a signal: "on" + the signal name with its
 //! first letter capitalized. Sema rejects declarations that would collide.
 inline std::string signalListenerName(const std::string& aSignalName) {
-    std::string listener = aSignalName;
-    if (!listener.empty() && std::isalpha(static_cast<unsigned char>(listener[0]))) {
-        listener[0] = static_cast<char>(
-            std::toupper(static_cast<unsigned char>(listener[0])));
-    }
+    return "on" + capitalizeFirst(aSignalName);
+}
 
-    return "on" + listener;
+//! Emit wrapper the Skeleton declares for a signal: "emit" + the signal name
+//! with its first letter capitalized. Sema rejects declarations that would
+//! collide.
+inline std::string signalEmitName(const std::string& aSignalName) {
+    return "emit" + capitalizeFirst(aSignalName);
 }
 
 struct TypeBase {
