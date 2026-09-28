@@ -242,6 +242,20 @@ Ast::Root listenerNameFolded() {
     return aRoot;
 }
 
+// signal valueChanged + method emitValueChanged: both declare emitValueChanged
+// on the generated Server
+Ast::Root emitNameCollision() {
+    using namespace tb;
+    auto aRoot = pkg();
+    Ast::Interface aInterface;
+    aInterface.name = "I";
+    aInterface.methods.push_back(method("emitValueChanged",
+        { field(base("int32"), "v") }));
+    aInterface.signals.push_back(signal("valueChanged", { field(base("int32"), "v") }));
+    aRoot.interfaces.push_back(std::move(aInterface));
+    return aRoot;
+}
+
 // a struct and an alias share a name
 Ast::Root dupType() {
     using namespace tb;
@@ -540,9 +554,14 @@ int main() {
         { "signal listener vs method",
           { "'onValueChanged' is generated twice in I", "by method 'onValueChanged'" },
           listenerNameCollision },
-        { "signal listener folding",
-          { "'onValue' is generated twice in I", "by signal 'value' and signal 'Value'" },
+        { "signal name folding (listener + emit)",
+          { "'onValue' is generated twice in I", "'emitValue' is generated twice in I",
+            "by signal 'value' and signal 'Value'" },
           listenerNameFolded },
+        { "signal emit wrapper vs method",
+          { "'emitValueChanged' is generated twice in I",
+            "by method 'emitValueChanged' and signal 'valueChanged'" },
+          emitNameCollision },
         { "callback param collision", { "collides with the generated async callback" },
           callbackParamCollision },
         { "dup struct field",       { "duplicate field" }, dupField },

@@ -80,5 +80,10 @@ int main() {
         [] (const std::string& aMessage) { (void)aMessage; });
     (void)aLogAddedSt;
 
+    //! Server side: every signal also gets an emit wrapper; a parameterless one
+    //! has to stay callable with no arguments
+    auto aNoArgSt = aCalc.emitNoArgEvent();
+    (void)aNoArgSt;
+
     return 0;
 }

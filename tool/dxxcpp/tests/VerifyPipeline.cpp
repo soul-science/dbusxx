@@ -173,6 +173,37 @@ void caseAsyncOnlyNamesAreFree() {
         "Dbusxx::Status onValueChanged(std::function<void(std::int32_t oldVal)> aCallback)");
 }
 
+//! A property is no Skeleton member, so it may carry a signal's emit wrapper name
+void caseEmitNameOnProperty() {
+    section("a property named like a signal's emit wrapper is not a collision");
+    const std::string aSrc =
+        "package com.example.a;\n"
+        "interface I {\n"
+        "    signal valueChanged(int32 newVal);\n"
+        "    property emitValueChanged -> int32{0};\n"
+        "};\n";
+
+    const Parser::Result aParserResult = Parser::parse(aSrc);
+    if (!aParserResult.root) {
+        fail("parse", aParserResult.errors.empty() ? "no root" : aParserResult.errors[0].msg);
+        return;
+    }
+
+    const Sema::Result aSemaResult = Sema::analyze(*aParserResult.root);
+    if (!aSemaResult.ir) {
+        fail("sema", aSemaResult.errors.empty() ? "no ir" : aSemaResult.errors[0].msg);
+        return;
+    }
+
+    ok("signal valueChanged + property emitValueChanged accepted");
+    const Ir::Interface& aInterface = aSemaResult.ir->interfaces[0];
+    const std::string aSkeleton = Codegen::genSkeletonHeader(*aSemaResult.ir, aInterface);
+    expectContains("skel: emit wrapper declared", aSkeleton,
+        "[[nodiscard]] Dbusxx::Status emitValueChanged(std::int32_t newVal);");
+    expectContains("skel: property kept", aSkeleton,
+        "DBUSXX_PROPERTY_RW(emitValueChanged, std::int32_t, {0})");
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -261,14 +292,17 @@ int main(int argc, char** argv) {
         "        return x == aOther.x\n"
         "            && y == aOther.y;");
     expectContains("types: guard", aTypes, "#ifndef COM_EXAMPLE_CALC_TYPES_HPP");
+    expectContains("types: path constant", aTypes,
+        "COM_EXAMPLE_CALC_PATH { \"/com/example/calc\" };");
 
     section("codegen: CalculatorSkeleton.hpp");
     const std::string aSkeleton = Codegen::genSkeletonHeader(*aSemaResult.ir,
         aSemaResult.ir->interfaces[0]);
     expectContains("skel: class", aSkeleton,
         "class CalculatorServer final : public Dbusxx::Server<CalculatorServer>");
-    expectContains("skel: path", aSkeleton, "DBUSXX_PATH(\"/com/example/calc\")");
-    expectContains("skel: iface", aSkeleton, "DBUSXX_IFACE(\"com.example.calc.Calculator\")");
+    expectContains("skel: path", aSkeleton, "DBUSXX_PATH(COM_EXAMPLE_CALC_PATH)");
+    expectContains("skel: iface", aSkeleton,
+        "DBUSXX_IFACE(COM_EXAMPLE_CALC_CALCULATOR_IFACE)");
     expectContains("skel: types include", aSkeleton,
         "#include \"ComExampleCalcTypes.hpp\"");
     expectContains("skel: method", aSkeleton, "DBUSXX_METHOD(add)");
@@ -277,6 +311,12 @@ int main(int argc, char** argv) {
         "Point translate(const Point& p, std::int32_t dx);");
     expectContains("skel: signal", aSkeleton,
         "DBUSXX_SIGNAL(valueChanged, std::int32_t, std::int32_t)");
+    expectContains("skel: signal emit wrapper", aSkeleton,
+        "[[nodiscard]] Dbusxx::Status emitValueChanged(std::int32_t oldVal, "
+        "std::int32_t newVal);");
+    //! A signal without parameters: no trailing comma after the signal name
+    expectContains("skel: no-arg signal emit wrapper", aSkeleton,
+        "[[nodiscard]] Dbusxx::Status emitNoArgEvent();");
     expectContains("skel: deprecated signal is a comment", aSkeleton,
         "//! @deprecated\n    DBUSXX_SIGNAL(legacyEvent, std::int32_t)");
     expectContains("skel: prop RO", aSkeleton,
@@ -310,6 +350,11 @@ int main(int argc, char** argv) {
     expectContains("skel src: method body (void)", aSkeletonSrc,
         "void CalculatorServer::notify(const std::string& msg) {\n"
         "    mIface->notify(msg);\n}");
+    //! No parameters: the emit body must not gain a trailing comma
+    expectContains("skel src: no-arg signal emit body", aSkeletonSrc,
+        "Dbusxx::Status CalculatorServer::emitNoArgEvent() {\n"
+        "    return this->emit(COM_EXAMPLE_CALC_PATH, COM_EXAMPLE_CALC_CALCULATOR_IFACE, "
+        "\"noArgEvent\");\n}");
 
     section("codegen: CalculatorProxy.hpp / .cpp");
     const std::string aProxy = Codegen::genProxyHeader(*aSemaResult.ir,
@@ -371,13 +416,17 @@ int main(int argc, char** argv) {
         aSemaResult.ir->interfaces[1]);
     expectContains("logger: class", aLogger,
         "class LoggerServer final : public Dbusxx::Server<LoggerServer>");
-    expectContains("logger: iface", aLogger, "DBUSXX_IFACE(\"com.example.calc.Logger\")");
+    expectContains("logger: iface", aLogger,
+        "DBUSXX_IFACE(COM_EXAMPLE_CALC_LOGGER_IFACE)");
     expectContains("logger: signal", aLogger, "DBUSXX_SIGNAL(logAdded, std::string)");
+    expectContains("logger: signal emit wrapper", aLogger,
+        "[[nodiscard]] Dbusxx::Status emitLogAdded(const std::string& message);");
 
     caseKeywordParamName();
     caseAsyncSuffixOnProperty();
     caseSyncOnlyCallbackParam();
     caseAsyncOnlyNamesAreFree();
+    caseEmitNameOnProperty();
 
     if (gFail != 0) {
         std::cout << "\n[RESULT] " << gFail << " check(s) FAILED\n";

@@ -39,6 +39,8 @@ foreach(NEEDLE
     "struct Point {\n    std::int32_t x;"
     "bool operator==(const Point& aOther) const {\n        return x == aOther.x"
     "static_assert(std::is_aggregate_v<Point>"
+    "inline constexpr const char* COM_EXAMPLE_CALC_PATH { \"/com/example/calc\" };"
+    "inline constexpr const char* COM_EXAMPLE_CALC_CALCULATOR_IFACE"
 )
     string(FIND "${TYPES_HPP}" "${NEEDLE}" FOUND_AT)
     if(FOUND_AT EQUAL -1)
@@ -48,18 +50,30 @@ endforeach()
 
 # Generated code must use the installed library layout; the service name is
 # injected by the consumer (DBUSXX_SERVICE_NAME)
+string(CONCAT EMIT_VALUE_CHANGED
+    "[[nodiscard]] Dbusxx::Status emitValueChanged(std::int32_t oldVal, "
+    "std::int32_t newVal);")
+#! A signal without parameters: the declaration has an empty parameter list
+string(CONCAT EMIT_NO_ARG_EVENT
+    "[[nodiscard]] Dbusxx::Status emitNoArgEvent();")
+
 file(READ "${OUT_DIR}/CalculatorSkeleton.hpp" SKELETON)
 foreach(NEEDLE
     "#include <dbusxx/Server.hpp>"
     "#include \"${TYPES_HEADER}\""
     "explicit CalculatorServer(std::unique_ptr<CalculatorInterface> aIface);"
+    "DBUSXX_PATH(COM_EXAMPLE_CALC_PATH)"
+    "DBUSXX_IFACE(COM_EXAMPLE_CALC_CALCULATOR_IFACE)"
     "DBUSXX_METHOD(notify)"
     "DBUSXX_PROPERTY_RW(samples, std::vector<std::int32_t>, {1, 2, 3})"
     "DBUSXX_PROPERTY_RW(history, std::vector<Point>, {{1, 2}, {3, 4}})"
     "DBUSXX_PROPERTY_RW(untouched, std::int32_t, std::int32_t{})"
     "DBUSXX_PROPERTY_RW(tags, decltype(std::map<std::string, std::string>{}), {})"
     "DBUSXX_SIGNAL(valueChanged, std::int32_t, std::int32_t)"
+    "DBUSXX_SIGNAL(noArgEvent)"
     "//! @deprecated\n    DBUSXX_SIGNAL(legacyEvent, std::int32_t)"
+    "${EMIT_VALUE_CHANGED}"
+    "${EMIT_NO_ARG_EVENT}"
     "class CalculatorServer final : public Dbusxx::Server<CalculatorServer>"
 )
     string(FIND "${SKELETON}" "${NEEDLE}" FOUND_AT)
@@ -126,6 +140,17 @@ string(CONCAT BODY_ADD
 string(CONCAT BODY_NOTIFY
     "void CalculatorServer::notify(const std::string& msg) {\n"
     "    mIface->notify(msg);\n}")
+#! The emit body carries the signal's path/interface/name triple
+string(CONCAT BODY_SIGNAL
+    "Dbusxx::Status CalculatorServer::emitValueChanged(std::int32_t oldVal, "
+    "std::int32_t newVal) {\n"
+    "    return this->emit(COM_EXAMPLE_CALC_PATH, COM_EXAMPLE_CALC_CALCULATOR_IFACE, "
+    "\"valueChanged\", oldVal, newVal);\n}")
+#! A parameterless signal: the call must end right after the signal name
+string(CONCAT BODY_SIGNAL_NO_ARG
+    "Dbusxx::Status CalculatorServer::emitNoArgEvent() {\n"
+    "    return this->emit(COM_EXAMPLE_CALC_PATH, COM_EXAMPLE_CALC_CALCULATOR_IFACE, "
+    "\"noArgEvent\");\n}")
 
 file(READ "${OUT_DIR}/CalculatorSkeleton.cpp" SKELETON_SRC)
 foreach(NEEDLE
@@ -135,6 +160,8 @@ foreach(NEEDLE
     ": Dbusxx::Server<CalculatorServer>(DBUSXX_SERVICE_NAME)"
     "${BODY_ADD}"
     "${BODY_NOTIFY}"
+    "${BODY_SIGNAL}"
+    "${BODY_SIGNAL_NO_ARG}"
 )
     string(FIND "${SKELETON_SRC}" "${NEEDLE}" FOUND_AT)
     if(FOUND_AT EQUAL -1)
