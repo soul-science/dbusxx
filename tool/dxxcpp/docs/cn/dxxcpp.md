@@ -215,7 +215,7 @@ signal valueChanged(int32 oldVal, int32 newVal);
 signal itemAdded(Point item);
 ```
 
-- Skeleton 侧**只注册**信号（发出 `DBUSXX_SIGNAL(...)`），**不生成发送包装**：要发信号就在业务代码里自己调 `Server::emit(path, iface, signal, args...)`（线程安全，可跨线程）（**TODO**：计划生成按信号的类型化发送包装）
+- Skeleton 侧既注册信号（`DBUSXX_SIGNAL(...)`），也生成**类型化发送包装** `emit<首字母大写的信号名>(...)`（声明在 `Skeleton.hpp`、定义在 `Skeleton.cpp`）：发信号直接 `server.emitValueChanged(1, 2)`，包装内部转调 `Server::emit(path, iface, signal, args...)`（线程安全，可跨线程），所以原来的调用方式也仍然可用
 - Proxy 侧为每个信号生成一个监听方法 `on<首字母大写的信号名>`（见 [3.4 客户端代理](#34-客户端代理)）
 
 #### 属性
@@ -275,8 +275,8 @@ property untouched -> int32;                // 不写初值
 | 产物 | `--list-outputs` 角色 | 内容 |
 |---|---|---|
 | `<Package>Types.hpp` | `types` | 命名空间、结构体（含逐字段 `operator==`）、别名、聚合体静态断言 |
-| `<Interface>Skeleton.hpp` | `server` | `<Iface>Interface`（纯虚基类）+ `<Iface>Server`（CRTP + 反射宏）声明 |
-| `<Interface>Skeleton.cpp` | `server` | `<Iface>Server` 的构造函数与方法转发定义 |
+| `<Interface>Skeleton.hpp` | `server` | `<Iface>Interface`（纯虚基类）+ `<Iface>Server`（CRTP + 反射宏 + 信号 emit 包装）声明 |
+| `<Interface>Skeleton.cpp` | `server` | `<Iface>Server` 的构造函数、方法转发与信号 emit 包装定义 |
 | `<Interface>Proxy.hpp` | `client` | `<Iface>Proxy` 声明 |
 | `<Interface>Proxy.cpp` | `client` | `<Iface>Proxy` 构造函数与方法/监听定义 |
 
@@ -302,6 +302,9 @@ property untouched -> int32;                // 不写初值
 #include <vector>
 
 namespace Com::Example::Calc {
+inline constexpr const char* COM_EXAMPLE_CALC_PATH { "/com/example/calc" };
+inline constexpr const char* COM_EXAMPLE_CALC_CALCULATOR_IFACE { "com.example.calc.Calculator" };
+
 struct Point {
     std::int32_t x;
     std::int32_t y;
@@ -319,7 +322,8 @@ static_assert(std::is_aggregate_v<Point>, "Point must be an aggregate");
 #endif
 ```
 
-- 结构体顺序 = `.dxx` 里的声明顺序（这也正是"必须先声明"的原因）
+- 路径与接口名抽成两个常量（`<包前缀>_PATH`、`<包前缀>_<接口名>_IFACE`）：注册宏、信号包装体、Proxy 构造函数引用的都是它们 —— 名字只写一处
+- 结构体顺序 = `.dxx` 里的声明顺序（这也正是“必须先声明”的原因）
 - `operator==` 写成**成员函数**，不破坏聚合体性质（`static_assert` 会验证这一点）
 - 别名统一排在结构体之后
 
@@ -352,8 +356,8 @@ class CalculatorServer final : public Dbusxx::Server<CalculatorServer> {
 public:
     explicit CalculatorServer(std::unique_ptr<CalculatorInterface> aIface);
 
-    DBUSXX_PATH("/com/example/calc")
-    DBUSXX_IFACE("com.example.calc.Calculator")
+    DBUSXX_PATH(COM_EXAMPLE_CALC_PATH)
+    DBUSXX_IFACE(COM_EXAMPLE_CALC_CALCULATOR_IFACE)
 
     std::int32_t add(std::int32_t a, std::int32_t b);
     DBUSXX_METHOD(add)
@@ -372,6 +376,7 @@ public:
     DBUSXX_METHOD(syncOnly)
 
     DBUSXX_SIGNAL(valueChanged, std::int32_t, std::int32_t)
+    [[nodiscard]] Dbusxx::Status emitValueChanged(std::int32_t oldVal, std::int32_t newVal);
 
     DBUSXX_PROPERTY_RO(version, std::string, {"1.0.0"})
 
@@ -390,7 +395,7 @@ private:
 - 你只需要实现 `<Iface>Interface` 的**全部**纯虚函数（漏一个该类就是抽象类，`make_unique` 会编不过），`<Iface>Server` 负责把调用转发给 `mIface`
 - 参数/返回值的传递方式按类型自动选：标量按值、`string`/容器/结构体按 `const&`
 - `@sync` 与 `@async` **不影响服务端**：服务端一律是普通同步成员函数
-- 信号只有 `DBUSXX_SIGNAL` 注册，**没有** `emitXxx` 包装 → 自己调 `Server::emit(path, iface, signal, args...)`（**TODO**：计划生成发送包装）
+- 信号既注册（`DBUSXX_SIGNAL`）也生成发送包装 `emit<首字母大写的信号名>(...)`，发信号调 `server.emitValueChanged(1, 2)` 即可；包装内部转调 `Server::emit(path, iface, signal, args...)`
 - 属性直接在 Skeleton 类上注册（`DBUSXX_PROPERTY_RO/RW`），服务端可以 `getLocalProperty` / `setLocalProperty` 读写
 
 `.cpp` 里是构造函数与方法定义（节选）：
@@ -413,10 +418,14 @@ CalculatorServer::CalculatorServer(std::unique_ptr<CalculatorInterface> aIface)
 std::int32_t CalculatorServer::add(std::int32_t a, std::int32_t b) {
     return mIface->add(a, b);
 }
+
+Dbusxx::Status CalculatorServer::emitValueChanged(std::int32_t oldVal, std::int32_t newVal) {
+    return this->emit(COM_EXAMPLE_CALC_PATH, COM_EXAMPLE_CALC_CALCULATOR_IFACE, "valueChanged", oldVal, newVal);
+}
 }
 ```
 
-> ⚠️ `DBUSXX_IFACE` 用的是 `package + 接口名`（`com.example.calc.Calculator`），而 `DBUSXX_PATH` 用的是 package 展开的路径（`/com/example/calc`）—— 一个 interface 类型对应一个路径，**没有**按接口再分一层子路径。
+> ⚠️ `..._IFACE` 的值是 `package + 接口名`（`com.example.calc.Calculator`），`..._PATH` 是 package 展开的路径（`/com/example/calc`）—— 一个 interface 类型对应一个路径，**没有**按接口再分一层子路径；两个常量都定义在 `<Package>Types.hpp` 里。
 
 ### 3.4 客户端代理
 
@@ -480,12 +489,12 @@ auto ver = c.getProperty<std::string>("version");
 (void)c.setProperty<std::int32_t>("counter", 10);
 ```
 
-`.cpp` 里的构造定义写死了服务名、路径与接口名：
+`.cpp` 里的构造定义用的是服务名宏与类型头里的两个常量：
 
 ```cpp
 CalculatorProxy::CalculatorProxy()
     : mClient(Dbusxx::SessionType::USER, DBUSXX_SERVICE_NAME,
-        "/com/example/calc", "com.example.calc.Calculator") {}
+        COM_EXAMPLE_CALC_PATH, COM_EXAMPLE_CALC_CALCULATOR_IFACE) {}
 ```
 
 - 服务名取自 `DBUSXX_SERVICE_NAME`，**不是** Proxy 的构造参数：一个 Proxy 库只服务一个服务名，与服务端对称；客户端侧不需要自己写宏（由构建系统注入）
@@ -527,10 +536,16 @@ int main() {
 }
 ```
 
-发信号（自己调，没有生成的包装；**TODO**：计划生成发送包装）：
+发信号 —— 用生成的包装（推荐）：
 
 ```cpp
-(void)server.emit("/com/example/calc", "com.example.calc.Calculator",
+(void)server.emitValueChanged(1, 2);
+```
+
+底层的 `Server::emit` 依然可用（线程安全，可跨线程）：
+
+```cpp
+(void)server.emit(COM_EXAMPLE_CALC_PATH, COM_EXAMPLE_CALC_CALCULATOR_IFACE,
                   "valueChanged", 1, 2);
 ```
 
@@ -700,11 +715,10 @@ interface I {
 };
 ```
 
-此外 Proxy 会为每个成员生成名字，撞名会让 Proxy 编不过，所以工具提前拦截：
+此外，生成器还会为成员派生新名字，撞名会让产物编不过，所以工具提前拦截。Proxy 与 Skeleton 是**两个类**，各自算一套名字：
 
-- 方法 `X` → 生成 `X`（除非 `@async`）与 `XAsync`（除非 `@sync`）
-- 信号 `S` → 生成 `onS`（首字母大写）
-- **属性不参与**（Proxy 里没有属性的名字）
+- Proxy：方法 `X` → `X`（除非 `@async`）与 `XAsync`（除非 `@sync`）；信号 `S` → `onS`（首字母大写）；**属性不参与**（Proxy 里没有属性的名字）
+- Skeleton：信号 `S` → `emitS`（首字母大写，发送包装）；方法名就是它自己的名字
 
 会报 `'<name>' is generated twice in <I>: by <ownerA> and <ownerB>` 的情形：
 
@@ -720,17 +734,27 @@ interface I {
 };
 
 interface I {
+    method emitValueChanged(int32 v) -> int32;
+    signal valueChanged(int32 v);        // 'emitValueChanged' is generated twice
+};
+
+interface I {
     signal value(int32 v);
-    signal Value(int32 v);               // 首字母大写后同为 'onValue' → generated twice
+    signal Value(int32 v);               // 首字母大写后同为 'onValue' / 'emitValue' → generated twice
 };
 ```
 
-下面这两个是**合法的**（工具做过精度处理）：
+下面这三个是**合法的**（工具做过精度处理）：
 
 ```dxx
 interface I {
     method f(int32 v) -> int32;
     property fAsync -> int32;            // 属性不进 Proxy，不冲突
+};
+
+interface I {
+    signal valueChanged(int32 v);
+    property emitValueChanged -> int32;  // 属性不是 Skeleton 成员，不冲突
 };
 
 interface I {

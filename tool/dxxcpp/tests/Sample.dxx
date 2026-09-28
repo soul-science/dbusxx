@@ -43,6 +43,9 @@ interface Calculator {
     //! on<Name> listener (capture only objects outliving the Proxy).
     signal valueChanged(int32 oldVal, int32 newVal);
 
+    //! No arg signal
+    signal noArgEvent();
+
     //! @deprecated signal: the listener is still generated, but carries
     //! [[deprecated]] on the Proxy side, so calling it in a
     //! -Werror=deprecated-declarations build fails on purpose

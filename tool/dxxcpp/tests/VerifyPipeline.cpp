@@ -314,6 +314,9 @@ int main(int argc, char** argv) {
     expectContains("skel: signal emit wrapper", aSkeleton,
         "[[nodiscard]] Dbusxx::Status emitValueChanged(std::int32_t oldVal, "
         "std::int32_t newVal);");
+    //! A signal without parameters: no trailing comma after the signal name
+    expectContains("skel: no-arg signal emit wrapper", aSkeleton,
+        "[[nodiscard]] Dbusxx::Status emitNoArgEvent();");
     expectContains("skel: deprecated signal is a comment", aSkeleton,
         "//! @deprecated\n    DBUSXX_SIGNAL(legacyEvent, std::int32_t)");
     expectContains("skel: prop RO", aSkeleton,
@@ -347,6 +350,11 @@ int main(int argc, char** argv) {
     expectContains("skel src: method body (void)", aSkeletonSrc,
         "void CalculatorServer::notify(const std::string& msg) {\n"
         "    mIface->notify(msg);\n}");
+    //! No parameters: the emit body must not gain a trailing comma
+    expectContains("skel src: no-arg signal emit body", aSkeletonSrc,
+        "Dbusxx::Status CalculatorServer::emitNoArgEvent() {\n"
+        "    return this->emit(COM_EXAMPLE_CALC_PATH, COM_EXAMPLE_CALC_CALCULATOR_IFACE, "
+        "\"noArgEvent\");\n}");
 
     section("codegen: CalculatorProxy.hpp / .cpp");
     const std::string aProxy = Codegen::genProxyHeader(*aSemaResult.ir,

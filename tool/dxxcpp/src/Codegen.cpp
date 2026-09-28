@@ -669,10 +669,12 @@ std::string genSkeletonSource(const Ir::Root& aIr, const Ir::Interface& aIfce) {
     const std::string pathName = hppGuardPrefix + "_PATH";
     const std::string ifceName = hppGuardPrefix + "_" + upper(aIfce.name) + "_IFACE";
     for (const auto& signal : aIfce.signals) {
+        const std::string args = callArgs(signal.params);
         output += line(0, "Dbusxx::Status %sServer::%s(%s) {",
             aIfce.name, Ir::signalEmitName(signal.name), paramDeclList(aIr, signal.params));
-        output += line(INDENT_SIZE, "return this->emit(%s, %s, \"%s\", %s);",
-            pathName, ifceName, signal.name, callArgs(signal.params));
+        output += line(INDENT_SIZE, "return this->emit(%s, %s, \"%s\"%s);",
+            pathName, ifceName, signal.name, (args.empty() ? "" : ", " + args));
+
         output += line(0, "}");
         output += '\n';
     }

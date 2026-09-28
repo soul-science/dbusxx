@@ -52,6 +52,8 @@ static Root makeCodegenRoot() {
         aInterface.methods.push_back(method("asyncOnly", { field(base("int32"), "val") },
             base("bool"), { ann("async") }));
 
+        //! no parameters: its emit wrapper must not gain a trailing comma
+        aInterface.signals.push_back(signal("noArgEvent", {}));
         aInterface.signals.push_back(signal("valueChanged",
             { field(base("int32"), "old"), field(base("int32"), "new") }));
         aInterface.signals.push_back(signal("legacyEvent",
@@ -157,6 +159,9 @@ int main() {
         "std::int32_t new_);");
     expectContains("skel: deprecated signal emit wrapper", aSkeletonHeader,
         "    [[nodiscard]] Dbusxx::Status emitLegacyEvent(std::int32_t code);");
+    //! A signal without parameters: no trailing comma after the signal name
+    expectContains("skel: no-arg signal emit wrapper", aSkeletonHeader,
+        "    [[nodiscard]] Dbusxx::Status emitNoArgEvent();");
     expectContains("skel: prop RO", aSkeletonHeader,
         "DBUSXX_PROPERTY_RO(version, std::string, {\"1.0.0\"})");
     expectContains("skel: prop RW", aSkeletonHeader,
@@ -200,6 +205,11 @@ int main() {
         "std::int32_t new_) {\n"
         "    return this->emit(COM_EXAMPLE_CALC_PATH, COM_EXAMPLE_CALC_CALCULATOR_IFACE, "
         "\"valueChanged\", old, new_);\n}");
+    //! No parameters: the argument list must not gain a trailing comma
+    expectContains("skel src: no-arg signal emit body", aSkeletonSrc,
+        "Dbusxx::Status CalculatorServer::emitNoArgEvent() {\n"
+        "    return this->emit(COM_EXAMPLE_CALC_PATH, COM_EXAMPLE_CALC_CALCULATOR_IFACE, "
+        "\"noArgEvent\");\n}");
     //! Registration stays in the header (DBUSXX_METHOD refers to &Self::method)
     expectNotContains("skel src: no registration macros", aSkeletonSrc, "DBUSXX_METHOD");
     expectNotContains("skel src: no registration macros (signal)", aSkeletonSrc, "DBUSXX_SIGNAL");
@@ -235,6 +245,11 @@ int main() {
         "mClient.listenSignal(\"valueChanged\", std::move(aCallback))");
     expectContains("proxy: deprecated signal listener", aProxyHeader,
         "[[deprecated]]\n    [[nodiscard]] Dbusxx::Status onLegacyEvent(");
+    //! A signal without parameters: std::function<void()> and no trailing comma
+    expectContains("proxy: no-arg signal listener", aProxyHeader,
+        "[[nodiscard]] Dbusxx::Status onNoArgEvent(std::function<void()> aCallback);");
+    expectContains("proxy: no-arg signal listener call", aProxySrc,
+        "mClient.listenSignal(\"noArgEvent\", std::move(aCallback))");
 
     // ---- Proxy: a void method keeps the explicit <void, TimeoutUsec> ----
     expectContains("proxy: void + timeout", aProxySrc,

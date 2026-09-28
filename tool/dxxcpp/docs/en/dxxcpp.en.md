@@ -215,7 +215,7 @@ signal valueChanged(int32 oldVal, int32 newVal);
 signal itemAdded(Point item);
 ```
 
-- The Skeleton side **only registers** signals (emitting `DBUSXX_SIGNAL(...)`) and generates **no send wrapper**: to emit, call `Server::emit(path, iface, signal, args...)` yourself (thread-safe, callable across threads) (**TODO**: a typed send wrapper per signal is planned)
+- The Skeleton side both **registers** signals (`DBUSXX_SIGNAL(...)`) and generates a **typed send wrapper** `emit<Capitalized signal name>(...)` (declared in `Skeleton.hpp`, defined in `Skeleton.cpp`): emit with `server.emitValueChanged(1, 2)`. The wrapper forwards to `Server::emit(path, iface, signal, args...)` (thread-safe, callable across threads), so the raw call still works too
 - The Proxy side generates one listener per signal, `on<Capitalized signal name>` (see [3.4 Client proxy](#34-client-proxy))
 
 #### Properties
@@ -275,8 +275,8 @@ The convention here is **`//!` for documentation comments** and `//` for ordinar
 | File | `--list-outputs` role | Contents |
 |---|---|---|
 | `<Package>Types.hpp` | `types` | Namespace, structs (with field-by-field `operator==`), aliases, aggregate static assertions |
-| `<Interface>Skeleton.hpp` | `server` | `<Iface>Interface` (pure virtual base) + `<Iface>Server` (CRTP + reflection macros), declarations |
-| `<Interface>Skeleton.cpp` | `server` | `<Iface>Server` constructor and method forwarding definitions |
+| `<Interface>Skeleton.hpp` | `server` | `<Iface>Interface` (pure virtual base) + `<Iface>Server` (CRTP + reflection macros + signal emit wrappers), declarations |
+| `<Interface>Skeleton.cpp` | `server` | `<Iface>Server` constructor, method forwarding and signal emit wrapper definitions |
 | `<Interface>Proxy.hpp` | `client` | `<Iface>Proxy` declarations |
 | `<Interface>Proxy.cpp` | `client` | `<Iface>Proxy` constructor plus method/listener definitions |
 
@@ -302,6 +302,9 @@ The convention here is **`//!` for documentation comments** and `//` for ordinar
 #include <vector>
 
 namespace Com::Example::Calc {
+inline constexpr const char* COM_EXAMPLE_CALC_PATH { "/com/example/calc" };
+inline constexpr const char* COM_EXAMPLE_CALC_CALCULATOR_IFACE { "com.example.calc.Calculator" };
+
 struct Point {
     std::int32_t x;
     std::int32_t y;
@@ -319,6 +322,7 @@ static_assert(std::is_aggregate_v<Point>, "Point must be an aggregate");
 #endif
 ```
 
+- The path and interface names are hoisted into two constants (`<PACKAGE>_PATH`, `<PACKAGE>_<IFACE>_IFACE`) referenced by the registration macros, the signal wrappers and the Proxy constructor — each name lives in exactly one place
 - Struct order follows the `.dxx` declaration order (which is exactly why "declare before use" is required)
 - `operator==` is a **member function** so the aggregate property is preserved (the `static_assert` proves it)
 - Aliases are always emitted after the structs
@@ -352,8 +356,8 @@ class CalculatorServer final : public Dbusxx::Server<CalculatorServer> {
 public:
     explicit CalculatorServer(std::unique_ptr<CalculatorInterface> aIface);
 
-    DBUSXX_PATH("/com/example/calc")
-    DBUSXX_IFACE("com.example.calc.Calculator")
+    DBUSXX_PATH(COM_EXAMPLE_CALC_PATH)
+    DBUSXX_IFACE(COM_EXAMPLE_CALC_CALCULATOR_IFACE)
 
     std::int32_t add(std::int32_t a, std::int32_t b);
     DBUSXX_METHOD(add)
@@ -372,6 +376,7 @@ public:
     DBUSXX_METHOD(syncOnly)
 
     DBUSXX_SIGNAL(valueChanged, std::int32_t, std::int32_t)
+    [[nodiscard]] Dbusxx::Status emitValueChanged(std::int32_t oldVal, std::int32_t newVal);
 
     DBUSXX_PROPERTY_RO(version, std::string, {"1.0.0"})
 
@@ -390,7 +395,7 @@ Key points:
 - You implement **all** pure virtuals of `<Iface>Interface` (miss one and the class stays abstract, so `make_unique` will not compile); `<Iface>Server` forwards calls to `mIface`
 - Parameter and return passing is chosen automatically: scalars by value, `string`/containers/structs by `const&`
 - `@sync` and `@async` **do not affect the server**: server members are always plain synchronous functions
-- Signals are only registered via `DBUSXX_SIGNAL`; there is **no** `emitXxx` wrapper → call `Server::emit(path, iface, signal, args...)` yourself (**TODO**: a send wrapper is planned)
+- Signals are both registered (`DBUSXX_SIGNAL`) and given a send wrapper `emit<Capitalized signal name>(...)`: emit with `server.emitValueChanged(1, 2)`, which forwards to `Server::emit(path, iface, signal, args...)`
 - Properties are registered directly on the Skeleton class (`DBUSXX_PROPERTY_RO/RW`), and the server can read/write them with `getLocalProperty` / `setLocalProperty`
 
 The `.cpp` holds the constructor and the method definitions (excerpt):
@@ -413,10 +418,14 @@ CalculatorServer::CalculatorServer(std::unique_ptr<CalculatorInterface> aIface)
 std::int32_t CalculatorServer::add(std::int32_t a, std::int32_t b) {
     return mIface->add(a, b);
 }
+
+Dbusxx::Status CalculatorServer::emitValueChanged(std::int32_t oldVal, std::int32_t newVal) {
+    return this->emit(COM_EXAMPLE_CALC_PATH, COM_EXAMPLE_CALC_CALCULATOR_IFACE, "valueChanged", oldVal, newVal);
+}
 }
 ```
 
-> ⚠️ `DBUSXX_IFACE` uses `package + interface name` (`com.example.calc.Calculator`) while `DBUSXX_PATH` uses the package expanded into a path (`/com/example/calc`) — one interface type maps to one path, with **no** extra sub-path per interface.
+> ⚠️ The `..._IFACE` constant holds `package + interface name` (`com.example.calc.Calculator`) while `..._PATH` holds the package expanded into a path (`/com/example/calc`) — one interface type maps to one path, with **no** extra sub-path per interface. Both constants live in `<Package>Types.hpp`.
 
 ### 3.4 Client proxy
 
@@ -480,12 +489,12 @@ auto ver = c.getProperty<std::string>("version");
 (void)c.setProperty<std::int32_t>("counter", 10);
 ```
 
-The `.cpp` hard-codes the service name, path and interface name in the constructor:
+The `.cpp` constructor uses the service-name macro plus the two constants from the types header:
 
 ```cpp
 CalculatorProxy::CalculatorProxy()
     : mClient(Dbusxx::SessionType::USER, DBUSXX_SERVICE_NAME,
-        "/com/example/calc", "com.example.calc.Calculator") {}
+        COM_EXAMPLE_CALC_PATH, COM_EXAMPLE_CALC_CALCULATOR_IFACE) {}
 ```
 
 - The service name comes from `DBUSXX_SERVICE_NAME`, **not** from a Proxy constructor argument: one Proxy library serves exactly one service name, symmetric with the server, and the client never writes the macro itself (the build system injects it)
@@ -527,10 +536,16 @@ int main() {
 }
 ```
 
-Emitting a signal (your own call, there is no generated wrapper; **TODO**: a generated wrapper is planned):
+Emitting a signal — via the generated wrapper (recommended):
 
 ```cpp
-(void)server.emit("/com/example/calc", "com.example.calc.Calculator",
+(void)server.emitValueChanged(1, 2);
+```
+
+The raw `Server::emit` is still available (thread-safe, callable across threads):
+
+```cpp
+(void)server.emit(COM_EXAMPLE_CALC_PATH, COM_EXAMPLE_CALC_CALCULATOR_IFACE,
                   "valueChanged", 1, 2);
 ```
 
@@ -700,11 +715,10 @@ interface I {
 };
 ```
 
-On top of that the Proxy declares names for each member, and a collision would make the Proxy fail to compile, so the tool rejects it up front:
+On top of that the generator derives new names from the members, and a collision would make the output fail to compile, so the tool rejects it up front. The Proxy and the Skeleton are **two classes**, so each one gets its own namespace:
 
-- method `X` → `X` (unless `@async`) and `XAsync` (unless `@sync`)
-- signal `S` → `onS` (first letter capitalized)
-- **properties do not take part** (the Proxy has no property names)
+- Proxy: method `X` → `X` (unless `@async`) and `XAsync` (unless `@sync`); signal `S` → `onS` (first letter capitalized); **properties do not take part** (the Proxy has no property names)
+- Skeleton: signal `S` → `emitS` (first letter capitalized, the send wrapper); a method keeps its own name
 
 Cases that report `'<name>' is generated twice in <I>: by <ownerA> and <ownerB>`:
 
@@ -720,17 +734,27 @@ interface I {
 };
 
 interface I {
+    method emitValueChanged(int32 v) -> int32;
+    signal valueChanged(int32 v);        // 'emitValueChanged' is generated twice
+};
+
+interface I {
     signal value(int32 v);
-    signal Value(int32 v);               // both capitalize to 'onValue' → generated twice
+    signal Value(int32 v);               // both capitalize to 'onValue' / 'emitValue' → generated twice
 };
 ```
 
-These two are **legal** (the tool is precise about it):
+These three are **legal** (the tool is precise about it):
 
 ```dxx
 interface I {
     method f(int32 v) -> int32;
     property fAsync -> int32;            // properties are not in the Proxy, no clash
+};
+
+interface I {
+    signal valueChanged(int32 v);
+    property emitValueChanged -> int32;  // properties are not Skeleton members, no clash
 };
 
 interface I {
