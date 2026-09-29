@@ -72,8 +72,8 @@ There is no public construction path yet: `Message` instances are currently prod
 | Method | Description |
 | --- | --- |
 | `getSender()` | Unique name of the message sender (empty string if unknown) |
-| `isError()` | Whether the message is an error reply |
-| `status()` | Transport/parse status of the message |
+| `isError()` | Whether the message is an error reply (true when there is no underlying implementation) |
+| `status()` | Transport/parse status of the message (`UNKNOWN_ERROR` when there is no underlying implementation) |
 | `errorMessage()` | Error description when the message is an error |
 
 ## Per-API Examples

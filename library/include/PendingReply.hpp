@@ -8,6 +8,7 @@
 #include <memory>
 #include <mutex>
 #include <string>
+#include <type_traits>
 #include <utility>
 
 #include "private/message/MessagePrivate.hpp"

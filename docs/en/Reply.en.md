@@ -31,9 +31,9 @@ public:
     [[nodiscard]] std::string errorMessage() const;
 
 private:
-    Message mMessage;   // used only to parse the payload
+    Message mMessage {};   // used only to parse the payload
     Ret mValue {};
-    Status mStatus { StatusCode::SUCCESS };
+    Status mStatus { StatusCode::UNKNOWN_ERROR };
 };
 ```
 
@@ -68,7 +68,6 @@ template<>
 class Reply<void> : private Message {
 public:
     using Message::Message;
-
     using Message::status;
     using Message::isError;
     using Message::errorMessage;

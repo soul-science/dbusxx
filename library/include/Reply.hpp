@@ -1,6 +1,7 @@
 #ifndef DBUSXX_DBUS_REPLY_HPP
 #define DBUSXX_DBUS_REPLY_HPP
 
+#include <memory>
 #include <string>
 #include <utility>
 
@@ -60,7 +61,7 @@ public:
         return mMessage.isError() ? mMessage.errorMessage() : mStatus.message();
     }
 
-    //! @brief Return the sender
+    //! @brief Return the unique name of the sender, empty if unknown
     [[nodiscard]] std::string getSender() const {
         return mMessage.getSender();
     }
