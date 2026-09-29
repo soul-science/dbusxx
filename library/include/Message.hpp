@@ -14,8 +14,7 @@ namespace Dbusxx {
  *
  * `Message` is a type-safe, stream-like wrapper around a raw D-Bus
  * message. Use `operator<<`/`write()` to append arguments and
- * `operator>>`/`read()` to extract them. It is also the base class
- * of #Reply.
+ * `operator>>`/`read()` to extract them.
  */
 class Message {
 public:
@@ -79,6 +78,10 @@ public:
      */
     template<typename T>
     [[nodiscard]] Status read(T& aVal) {
+        if (!mPrivate) {
+            return status();
+        }
+
         return mPrivate->read(aVal);
     }
 
@@ -91,6 +94,10 @@ public:
      */
     template<typename First, typename... Rests>
     [[nodiscard]] Status read(First& aFirst, Rests&... aRests) {
+        if (!mPrivate) {
+            return status();
+        }
+
         return mPrivate->read(aFirst, aRests...);
     }
 
@@ -103,6 +110,10 @@ public:
      */
     template<typename... Args>
     [[nodiscard]] Status read(std::tuple<Args...>& aVals) {
+        if (!mPrivate) {
+            return status();
+        }
+
         return mPrivate->read(aVals);
     }
 
@@ -115,6 +126,10 @@ public:
      */
     template<typename T>
     [[nodiscard]] Status write(const T& aVal) {
+        if (!mPrivate) {
+            return status();
+        }
+
         return mPrivate->write(aVal);
     }
 
@@ -127,6 +142,10 @@ public:
      */
     template<typename First, typename... Rests>
     [[nodiscard]] Status write(const First& aFirst, const Rests&... aRests) {
+        if (!mPrivate) {
+            return status();
+        }
+
         return mPrivate->write(aFirst, aRests...);
     }
 
@@ -137,7 +156,7 @@ public:
 
     //! @brief Return true if the message represents an error reply.
     [[nodiscard]] inline bool isError() const {
-        return mPrivate && mPrivate->getStatus().isError();
+        return !mPrivate || mPrivate->getStatus().isError();
     }
 
     //! @brief Return the transport/parse status of the message.
@@ -148,7 +167,8 @@ public:
 
     //! @brief Return the error description if the message is an error.
     [[nodiscard]] inline std::string errorMessage() const {
-        return mPrivate ? mPrivate->getStatus().message() : std::string();
+        return mPrivate ? mPrivate->getStatus().message()
+                        : status().message();
     }
 
 private:

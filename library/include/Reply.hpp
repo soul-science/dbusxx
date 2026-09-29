@@ -1,6 +1,7 @@
 #ifndef DBUSXX_DBUS_REPLY_HPP
 #define DBUSXX_DBUS_REPLY_HPP
 
+#include <memory>
 #include <string>
 #include <utility>
 
@@ -16,7 +17,7 @@ namespace Dbusxx {
  * `value()`; on failure the value is a default-constructed `Ret`.
  */
 template<typename Ret>
-class Reply : public Message {
+class Reply {
     static_assert(isValidArg<Ret>(), "Unsupported value type");
 public:
     //! @brief Construct an empty reply.
@@ -28,8 +29,8 @@ public:
      * @param aImpl shared implementation to wrap
      */
     explicit Reply(std::shared_ptr<Private::MessagePrivate> aImpl)
-        : Message(std::move(aImpl)) {
-            mStatus = read(mValue);
+        : mMessage(std::move(aImpl)) {
+        mStatus = mMessage.read(mValue);
     }
 
     /**
@@ -38,48 +39,49 @@ public:
      * @param aImpl implementation to move from
      */
     explicit Reply(Private::MessagePrivate&& aImpl)
-        : Message(std::make_shared<Private::MessagePrivate>(std::move(aImpl))) {
-            mStatus = read(mValue);
-    }
-
-    Reply(const Reply& aOther) = default;
-
-    Reply(Reply&& aOther) noexcept = default;
-
-    Reply& operator=(const Reply&) = default;
-
-    Reply& operator=(Reply&&) = default;
+        : Reply(std::make_shared<Private::MessagePrivate>(std::move(aImpl))) {}
 
     //! @brief Return the parsed return value (only valid when `isError()` is false).
-    [[nodiscard]] inline const Ret& value() const {
+    [[nodiscard]] const Ret& value() const {
         return mValue;
     }
 
     //! @brief Return the overall status of the call/reply.
-    [[nodiscard]] inline Status status() const {
-        return Message::isError() ? Message::status() : mStatus;
+    [[nodiscard]] Status status() const {
+        return mMessage.isError() ? mMessage.status() : mStatus;
     }
 
     //! @brief Return true if the reply indicates an error.
-    [[nodiscard]] inline bool isError() const {
-        return mStatus.isError() || Message::isError();
+    [[nodiscard]] bool isError() const {
+        return mStatus.isError() || mMessage.isError();
     }
 
     //! @brief Return the error description when `isError()` is true.
-    [[nodiscard]] inline std::string errorMessage() const {
-        return Message::isError() ? Message::errorMessage() : mStatus.message();
+    [[nodiscard]] std::string errorMessage() const {
+        return mMessage.isError() ? mMessage.errorMessage() : mStatus.message();
+    }
+
+    //! @brief Return the unique name of the sender, empty if unknown
+    [[nodiscard]] std::string getSender() const {
+        return mMessage.getSender();
     }
 
 private:
+    Message mMessage {};
     Ret mValue {};
-    Status mStatus { StatusCode::SUCCESS };
+    Status mStatus { StatusCode::UNKNOWN_ERROR };
 };
 
-//! @brief Specialization for void-returning calls (no payload value).
+//! @brief Specialization for void-returning calls: no payload to parse, so
+//! the base status/error accessors are reused as-is.
 template<>
-class Reply<void> : public Message {
+class Reply<void> : private Message {
 public:
     using Message::Message;
+    using Message::status;
+    using Message::isError;
+    using Message::errorMessage;
+    using Message::getSender;
 };
 
 }

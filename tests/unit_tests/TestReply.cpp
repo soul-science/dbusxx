@@ -37,10 +37,12 @@ Private::MessagePrivate makePayloadMessage(const T& aValue) {
 } //! namespace
 
 TEST(ReplyTest, EmptyReply) {
+    //! An empty reply has no message to parse and must report an error.
     Reply<int32_t> r;
-    EXPECT_FALSE(r.isError());
-    EXPECT_TRUE(r.status().isSuccess());
+    EXPECT_EQ(r.status().code(), StatusCode::UNKNOWN_ERROR);
+    EXPECT_TRUE(r.isError());
     EXPECT_EQ(r.value(), 0);
+    EXPECT_FALSE(r.errorMessage().empty());
 }
 
 TEST(ReplyTest, ParsesScalarPayload) {
@@ -100,5 +102,5 @@ TEST(ReplyTest, EmptyImplementationIsError) {
 
 TEST(ReplyTest, VoidReply) {
     Reply<void> r;
-    EXPECT_FALSE(r.isError());
+    EXPECT_TRUE(r.isError());
 }

@@ -17,7 +17,7 @@ dbusxx 是一个基于 systemd sd-bus 的 C++17 D-Bus 库，支持方法、信�
 | [Client.md](Client.md) | `Client.hpp` | **核心**：远端服务代理（自管 / 外部事件循环两种模式） |
 | [Looper.md](Looper.md) | `Looper.hpp` | 事件循环（sd-event），派发消息、跨线程投递任务 |
 | [MetaObject.md](MetaObject.md) | `MetaObject.hpp` | 反射元对象与 `DBUSXX_*` 注解宏 |
-| [Message.md](Message.md) | `Message.hpp` | 类型安全的 D-Bus 消息（流式读写） |
+| [Message.md](Message.md) | `Message.hpp` | 类型安全的 D-Bus 消息（被 `Reply` 内部持有以解析载荷；预留的精细操作入口） |
 | [Reply.md](Reply.md) | `Reply.hpp` | 类型化回复（方法返回值） |
 | [PendingReply.md](PendingReply.md) | `PendingReply.hpp` | 异步调用句柄 |
 | [UnixFd.md](UnixFd.md) | `UnixFd.hpp` | 消息中传递的 Unix 文件描述符（RAII） |

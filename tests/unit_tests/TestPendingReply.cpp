@@ -30,9 +30,13 @@ std::shared_ptr<Private::ReplyAsyncHandler> makeFailedHandler() {
 
 TEST(PendingReplyTest, EmptyHandleIsInvalid) {
     PendingReply<int32_t> p;
-    EXPECT_TRUE(p.getStatus().isError());   //! INVALID_ARG
-    EXPECT_FALSE(p.isError());              //! no handler attached
-    EXPECT_EQ(p.errorMessage(), std::string());
+    EXPECT_EQ(p.getStatus().code(), StatusCode::UNKNOWN_ERROR);
+    EXPECT_TRUE(p.isError());               //! an empty handle counts as an error
+    EXPECT_EQ(p.errorMessage(), p.getStatus().message());
+
+    //! wait()/waitFor() must not touch the future of an empty handle.
+    EXPECT_FALSE(p.waitFor(0));
+    p.wait();
 }
 
 TEST(PendingReplyTest, SynchronousErrorDelivery) {
