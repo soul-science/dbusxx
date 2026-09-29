@@ -31,9 +31,9 @@ public:
     [[nodiscard]] std::string errorMessage() const;
 
 private:
-    Message mMessage {};   // 仅用于解析载荷
+    Message mMessage;   // 仅用于解析载荷
     Ret mValue {};
-    Status mStatus { StatusCode::UNKNOWN_ERROR };
+    Status mStatus { StatusCode::SUCCESS };
 };
 ```
 
@@ -68,14 +68,6 @@ template<>
 class Reply<void> : private Message {
 public:
     using Message::Message;
-<<<<<<< HEAD
-
-=======
-<<<<<<< HEAD
-
-=======
->>>>>>> 8400048 ([Enhancement] Improve Reply and PendingReply)
->>>>>>> cc0fd85 ([Enhancement] Improve Reply and PendingReply)
     using Message::status;
     using Message::isError;
     using Message::errorMessage;
