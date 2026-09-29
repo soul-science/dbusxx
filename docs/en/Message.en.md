@@ -4,7 +4,7 @@
 
 ## Overview
 
-`Message` is a type-safe, stream-like wrapper around a raw D-Bus message. Append arguments with `operator<<` / `write()`, and extract them with `operator>>` / `read()`. It is also the base class of `Reply<Ret>`.
+`Message` is a type-safe, stream-like wrapper around a raw D-Bus message: append arguments with `operator<<` / `write()`, extract them with `operator>>` / `read()`. It is also the **entry point reserved for fine-grained use** — building a message by hand or reading/writing the payload field by field. That construction path is not public yet; instances currently come from inside the library.
 
 Internally `Message` holds the underlying `sd-bus` message handle via `Private::MessagePrivate` (PIMPL) and supports automatic (de)serialization of basic types, `std::string`, containers, `UnixFd` file descriptors, structs, etc.
 
@@ -48,7 +48,7 @@ public:
 | `Message(std::shared_ptr<Private::MessagePrivate>)` | Wraps an existing shared implementation |
 | `Message(Private::MessagePrivate&&)` | Move-constructs from an implementation |
 
-Ordinary users usually don't construct `Message` directly; it is used internally by `Reply<Ret>` or returned by sessions/clients.
+There is no public construction path yet: `Message` instances are currently produced only inside the library. The type is reserved for fine-grained use — once that path opens, you can build a message by hand and read/write the payload field by field. `Reply<Ret>` holds one internally and `Reply<void>` privately inherits it, but neither exposes a read/write surface.
 
 ### Writing arguments
 
@@ -78,25 +78,21 @@ Ordinary users usually don't construct `Message` directly; it is used internally
 
 ## Per-API Examples
 
-> `Message` is usually constructed internally by the library (building requests / parsing replies); ordinary code generally reaches it indirectly through `Reply<Ret>` (its base class). The example below uses a `Reply` returned by a remote call.
+> `Message` has no public construction path yet: instances come only from inside the library
+> (`Method` / `PropertyHandler` / `SignalHandler`, etc.). The public API returns `Reply<Ret>` /
+> `PendingReply<Ret>`. The snippet below only illustrates the shape and return types of each
+> member.
 
 ```cpp
 #include <dbusxx/Message.hpp>
-#include <dbusxx/Reply.hpp>
-#include <dbusxx/Session.hpp>
+#include <tuple>
 
 using namespace Dbusxx;
 
-Session sess = Session::userSession();   // establish a session first
-
-// (1) Message() — construct an empty message; it has no backing
-//     implementation. Real instances come from the library or Reply.
-Message empty;
-
-// Get a real message from a synchronous call (Reply derives from Message)
-auto reply = sess.callSync<int32_t>(
-    "com.example.Svc", "/com/example", "com.example.Iface", "method", 1);
-Message& msg = reply;                    // base-class reference
+// (1) Message() — construct an empty message; it has no backing implementation,
+//     so every read/write below returns StatusCode::UNKNOWN_ERROR.
+//     Once the fine-grained entry point opens, drop a real message in here.
+Message msg;
 
 // (2) operator>> — stream-style read of a single value
 int32_t n = 0;

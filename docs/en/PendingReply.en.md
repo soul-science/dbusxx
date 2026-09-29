@@ -16,7 +16,7 @@ Internally it uses `std::shared_future` + `std::promise` to deliver the result u
 ```cpp
 template<typename Ret>
 class PendingReply {
-    static_assert(isValidArg<Ret>(), "Unsupported value type");
+    static_assert(std::is_same_v<Ret, void> || isValidArg<Ret>(), "Unsupported value type");
 public:
     PendingReply() = default;
     explicit PendingReply(std::shared_ptr<Private::ReplyAsyncHandler> aHandler);
@@ -37,7 +37,7 @@ public:
 
 | Parameter | Description |
 | --- | --- |
-| `Ret` | The return-value type; it must satisfy `isValidArg<Ret>()`. `void` has a dedicated specialization |
+| `Ret` | The return-value type; it must satisfy `isValidArg<Ret>()`, or be `void` (a call with no return value) |
 
 ### Constructors
 
@@ -58,29 +58,7 @@ Ordinary users usually don't construct `PendingReply` directly; it is the return
 | `reply()` | Returns the reply obtained by `wait()` / `waitFor()`; only valid after `waitFor()` returns `true` |
 | `isError()` | Whether the call failed |
 | `errorMessage()` | Error description when the call failed |
-| `getStatus()` | Current call status (`INVALID_ARG` for an empty handle) |
-
-## Specialization: `PendingReply<void>`
-
-```cpp
-template<>
-class PendingReply<void> {
-public:
-    PendingReply() = default;
-    explicit PendingReply(std::shared_ptr<Private::ReplyAsyncHandler> aHandler);
-
-    [[nodiscard]] bool isError() const;
-    [[nodiscard]] std::string errorMessage() const;
-    [[nodiscard]] Status getStatus() const;
-
-    void setCallback(std::function<void(Reply<void>)> aCallback);
-    void wait();
-    [[nodiscard]] bool waitFor(std::size_t aTimeoutMs);
-    [[nodiscard]] Reply<void> reply() const;
-};
-```
-
-This specialization is used for void-returning calls; the callback signature is `void(Reply<void>)`.
+| `getStatus()` | Current call status (`UNKNOWN_ERROR` for an empty handle) |
 
 ## Per-API Examples
 
@@ -93,7 +71,7 @@ using namespace Dbusxx;
 
 Session sess = Session::userSession();
 
-// (1) PendingReply() — construct an empty handle (invalid; getStatus() returns INVALID_ARG)
+// (1) PendingReply() — construct an empty handle (invalid; getStatus() returns UNKNOWN_ERROR)
 PendingReply<int32_t> empty;
 
 // An async call returns a real handle (constructed internally by the library)
@@ -136,4 +114,4 @@ if (pend.isError()) {
 - `setCallback`, `wait()` and `waitFor(ms)` are alternatives: `wait()` blocks indefinitely; `waitFor(aTimeoutMs)` performs a bounded wait, where `aTimeoutMs` of `0` means an immediate (non-blocking) check.
 - Only call `reply()` after `waitFor()` returns `true`; on timeout (`false`) `reply()` holds no valid reply (a default-constructed `Reply`).
 - When the callback fires, the same `Reply<Ret>` is also written into the internal `promise`, so `wait()` / `waitFor()` and the callback are equivalent delivery channels.
-- The `getStatus()` of an empty (default-constructed) handle returns `INVALID_ARG`.
+- An empty (default-constructed) handle: `getStatus()` returns `UNKNOWN_ERROR` and `isError()` is true; `wait()` returns immediately and `waitFor()` returns `false`.

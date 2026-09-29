@@ -16,7 +16,7 @@
 ```cpp
 template<typename Ret>
 class PendingReply {
-    static_assert(isValidArg<Ret>(), "Unsupported value type");
+    static_assert(std::is_same_v<Ret, void> || isValidArg<Ret>(), "Unsupported value type");
 public:
     PendingReply() = default;
     explicit PendingReply(std::shared_ptr<Private::ReplyAsyncHandler> aHandler);
@@ -37,7 +37,7 @@ public:
 
 | 参数 | 说明 |
 | --- | --- |
-| `Ret` | 返回值的类型，必须满足 `isValidArg<Ret>()`。`void` 有专门特化 |
+| `Ret` | 返回值的类型，必须满足 `isValidArg<Ret>()`，或为 `void`（无返回值调用） |
 
 ### 构造函数
 
@@ -58,29 +58,7 @@ public:
 | `reply()` | 返回 `wait()` / `waitFor()` 获取到的回复；仅在 `waitFor()` 返回 `true` 后读取才有效 |
 | `isError()` | 调用是否失败 |
 | `errorMessage()` | 失败时的错误描述 |
-| `getStatus()` | 当前调用状态（空句柄返回 `INVALID_ARG`） |
-
-## 特化：`PendingReply<void>`
-
-```cpp
-template<>
-class PendingReply<void> {
-public:
-    PendingReply() = default;
-    explicit PendingReply(std::shared_ptr<Private::ReplyAsyncHandler> aHandler);
-
-    [[nodiscard]] bool isError() const;
-    [[nodiscard]] std::string errorMessage() const;
-    [[nodiscard]] Status getStatus() const;
-
-    void setCallback(std::function<void(Reply<void>)> aCallback);
-    void wait();
-    [[nodiscard]] bool waitFor(std::size_t aTimeoutMs);
-    [[nodiscard]] Reply<void> reply() const;
-};
-```
-
-无返回值调用使用该特化，回调签名为 `void(Reply<void>)`。
+| `getStatus()` | 当前调用状态（空句柄返回 `UNKNOWN_ERROR`） |
 
 ## API 示例（逐项）
 
@@ -93,7 +71,7 @@ using namespace Dbusxx;
 
 Session sess = Session::userSession();
 
-// (1) PendingReply() —— 构造空句柄（非法；getStatus() 返回 INVALID_ARG）
+// (1) PendingReply() —— 构造空句柄（非法；getStatus() 返回 UNKNOWN_ERROR）
 PendingReply<int32_t> empty;
 
 // 异步调用返回真实句柄（构造函数由库内部调用）
@@ -136,4 +114,4 @@ if (pend.isError()) {
 - `setCallback`、`wait()`、`waitFor(ms)` 可任选其一：`wait()` 无限阻塞；`waitFor(aTimeoutMs)` 限时等待，`aTimeoutMs` 传 `0` 表示立即（非阻塞）检查。
 - `waitFor()` 仅在返回 `true` 时才能安全调用 `reply()`；超时（返回 `false`）后 `reply()` 不含有效回复（为默认构造的 `Reply`）。
 - 回调被调用时，同一个 `Reply<Ret>` 也会写入内部 `promise`，因此 `wait()` / `waitFor()` 与回调是等价的交付通道。
-- 空句柄（默认构造）的 `getStatus()` 返回 `INVALID_ARG`。
+- 空句柄（默认构造）：`getStatus()` 返回 `UNKNOWN_ERROR`、`isError()` 为 true；`wait()` 立即返回，`waitFor()` 返回 `false`。

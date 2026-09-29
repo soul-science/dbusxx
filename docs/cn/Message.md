@@ -4,7 +4,7 @@
 
 ## 简介
 
-`Message` 是对一条原始 D-Bus 消息的类型安全、流式（stream-like）包装。你可以用 `operator<<` / `write()` 追加参数，用 `operator>>` / `read()` 提取参数。它也是 `Reply<Ret>` 的基类。
+`Message` 是对一条原始 D-Bus 消息的类型安全、流式（stream-like）包装：用 `operator<<` / `write()` 追加参数，用 `operator>>` / `read()` 提取参数。它同时也是**为精细操作预留的入口**——需要手工构造消息或逐项读写载荷时用它；构造路径尚未开放，实例目前只由库内部产生。
 
 `Message` 内部通过 `Private::MessagePrivate`（PIMPL）持有底层 `sd-bus` 消息句柄，支持基本类型、`std::string`、容器、`UnixFd` 文件描述符、结构体等的自动编解码。
 
@@ -48,7 +48,7 @@ public:
 | `Message(std::shared_ptr<Private::MessagePrivate>)` | 包装已有的共享实现 |
 | `Message(Private::MessagePrivate&&)` | 移动构造实现 |
 
-普通用户通常不需要直接构造 `Message`，它一般由 `Reply<Ret>` 内部使用或由会话/客户端返回。
+`Message` 还没有公开的构造路径，实例目前只由库内部产生；它的定位是为精细操作预留：将来开放后即可手工构造消息、逐项读写载荷。`Reply<Ret>` 内部持有它、`Reply<void>` 私有继承它，但都不暴露读写接口。
 
 ### 写入参数
 
@@ -78,26 +78,20 @@ public:
 
 ## API 示例（逐项）
 
-> `Message` 通常由库内部构造（构造请求/解析回复），普通代码一般通过
-> `Reply<Ret>`（其基类）间接使用它。下面用一次远端调用返回的 `Reply` 演示。
+> `Message` 的构造路径尚未开放，实例目前只由库内部产生（`Method` / `PropertyHandler` /
+> `SignalHandler` 等）；公开 API 返回的是 `Reply<Ret>` / `PendingReply<Ret>`。下面的片段
+> 只用于说明各接口的形态与返回类型。
 
 ```cpp
 #include <dbusxx/Message.hpp>
-#include <dbusxx/Reply.hpp>
-#include <dbusxx/Session.hpp>
+#include <tuple>
 
 using namespace Dbusxx;
 
-Session sess = Session::userSession();   // 先建立会话
-
-// (1) Message() —— 构造空消息；空消息没有底层实现，
-//     实际使用时由库内部或 Reply 提供带实现的实例
-Message empty;
-
-// 从一次同步调用获得一个真实消息（Reply 继承自 Message）
-auto reply = sess.callSync<int32_t>(
-    "com.example.Svc", "/com/example", "com.example.Iface", "method", 1);
-Message& msg = reply;                    // 基类引用
+// (1) Message() —— 构造空消息：没有底层实现，因此下面每个 read/write 都会
+//     返回 StatusCode::UNKNOWN_ERROR。精细操作入口开放后，把真实消息实例
+//     换到这里即可。
+Message msg;
 
 // (2) operator>> —— 流式读取单个值
 int32_t n = 0;

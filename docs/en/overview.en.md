@@ -17,7 +17,7 @@ Organized by "core → supporting":
 | [Client.en.md](Client.en.md) | `Client.hpp` | **Core**: remote-service proxy (self-managed / external-loop modes) |
 | [Looper.en.md](Looper.en.md) | `Looper.hpp` | Event loop (sd-event), dispatching messages, cross-thread task posting |
 | [MetaObject.en.md](MetaObject.en.md) | `MetaObject.hpp` | Reflection meta object and the `DBUSXX_*` annotation macros |
-| [Message.en.md](Message.en.md) | `Message.hpp` | Type-safe D-Bus message (stream-style read/write) |
+| [Message.en.md](Message.en.md) | `Message.hpp` | Type-safe D-Bus message (held internally by `Reply` to parse the payload; reserved for fine-grained use) |
 | [Reply.en.md](Reply.en.md) | `Reply.hpp` | Typed reply (method return value) |
 | [PendingReply.en.md](PendingReply.en.md) | `PendingReply.hpp` | Async-call handle |
 | [UnixFd.en.md](UnixFd.en.md) | `UnixFd.hpp` | Unix file descriptors passed in messages (RAII) |
