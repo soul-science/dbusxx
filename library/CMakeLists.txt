@@ -116,7 +116,7 @@ include(CMakePackageConfigHelpers)
 # Generate dbusxxConfig.cmake, 'find_package' will use it
 configure_package_config_file(
     # Template file
-    "${CMAKE_CURRENT_SOURCE_DIR}/dbusxxConfig.cmake.in"
+    "${CMAKE_CURRENT_SOURCE_DIR}/cmake/dbusxxConfig.cmake.in"
     # Output file
     "${CMAKE_CURRENT_BINARY_DIR}/dbusxxConfig.cmake"
     # Installation path
