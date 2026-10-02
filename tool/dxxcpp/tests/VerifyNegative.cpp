@@ -182,6 +182,30 @@ Ast::Root dupMemberMethodProp() {
     return aRoot;
 }
 
+// method getConfig + property config: the property's generated getter is getConfig
+Ast::Root propertyGetterCollision() {
+    using namespace tb;
+    auto aRoot = pkg();
+    Ast::Interface aInterface;
+    aInterface.name = "I";
+    aInterface.methods.push_back(method("getConfig", {}));
+    aInterface.properties.push_back(property("config", base("int32"), "{0}"));
+    aRoot.interfaces.push_back(std::move(aInterface));
+    return aRoot;
+}
+
+// method setConfig + writable property config: the generated setter is setConfig
+Ast::Root propertySetterCollision() {
+    using namespace tb;
+    auto aRoot = pkg();
+    Ast::Interface aInterface;
+    aInterface.name = "I";
+    aInterface.methods.push_back(method("setConfig", {}));
+    aInterface.properties.push_back(property("config", base("int32"), "{0}"));
+    aRoot.interfaces.push_back(std::move(aInterface));
+    return aRoot;
+}
+
 // duplicate field x in struct A
 Ast::Root dupField() {
     using namespace tb;
@@ -548,6 +572,14 @@ int main() {
         { "map arity",              { "map<K, V>: only need 2 template args" }, mapArity },
         { "dup member (method/method)",  { "duplicate member" }, dupMember },
         { "dup member (method/property)",{ "duplicate member" }, dupMemberMethodProp },
+        { "property getter vs method",
+          { "'getConfig' is generated twice in I",
+            "by method 'getConfig' and property 'config'" },
+          propertyGetterCollision },
+        { "property setter vs method",
+          { "'setConfig' is generated twice in I",
+            "by method 'setConfig' and property 'config'" },
+          propertySetterCollision },
         { "Async suffix collision",
           { "'fAsync' is generated twice in I", "by method 'f' and method 'fAsync'" },
           asyncSuffixCollision },

@@ -39,6 +39,17 @@ bool expectContains(const std::string& aWhat,
     return false;
 }
 
+bool expectNotContains(const std::string& aWhat,
+  const std::string& aHay, const std::string& aNeedle) {
+    if (aHay.find(aNeedle) == std::string::npos) {
+        ok(aWhat + ": absent \"" + aNeedle + "\"");
+        return true;
+    }
+
+    fail(aWhat, "unexpectedly found \"" + aNeedle + "\"");
+    return false;
+}
+
 bool readFile(const std::string& aPath, std::string* aOut) {
     std::ifstream aStream(aPath);
     if (!aStream) {
@@ -202,6 +213,40 @@ void caseEmitNameOnProperty() {
         "[[nodiscard]] Dbusxx::Status emitValueChanged(std::int32_t newVal);");
     expectContains("skel: property kept", aSkeleton,
         "DBUSXX_PROPERTY_RW(emitValueChanged, std::int32_t, {0})");
+}
+
+//! A @readonly property generates no setter, so "set<Name>" stays free for a
+//! method: the readonly rule has to match in Sema, the Skeleton and the Proxy
+void caseReadonlyPropertyLeavesSetterFree() {
+    section("@readonly: the set<Name> name stays free for a method");
+    const std::string aSrc =
+        "package com.example.a;\n"
+        "interface I {\n"
+        "    method setVersion(int32 v) -> int32;\n"
+        "    @readonly property version -> int32{0};\n"
+        "};\n";
+
+    const Parser::Result aParserResult = Parser::parse(aSrc);
+    if (!aParserResult.root) {
+        fail("parse", aParserResult.errors.empty() ? "no root" : aParserResult.errors[0].msg);
+        return;
+    }
+
+    const Sema::Result aSemaResult = Sema::analyze(*aParserResult.root);
+    if (!aSemaResult.ir) {
+        fail("sema", aSemaResult.errors.empty() ? "no ir" : aSemaResult.errors[0].msg);
+        return;
+    }
+
+    ok("method setVersion + @readonly property version accepted");
+    const std::string aSkeleton = Codegen::genSkeletonHeader(*aSemaResult.ir,
+        aSemaResult.ir->interfaces[0]);
+    expectContains("skel: the method is kept", aSkeleton,
+        "std::int32_t setVersion(std::int32_t v);");
+    expectContains("skel: the property keeps its getter", aSkeleton,
+        "[[nodiscard]] std::int32_t getVersion();");
+    expectNotContains("skel: no setter for the readonly property", aSkeleton,
+        "void setVersion(const std::int32_t& version);");
 }
 
 } // namespace
@@ -427,6 +472,7 @@ int main(int argc, char** argv) {
     caseSyncOnlyCallbackParam();
     caseAsyncOnlyNamesAreFree();
     caseEmitNameOnProperty();
+    caseReadonlyPropertyLeavesSetterFree();
 
     if (gFail != 0) {
         std::cout << "\n[RESULT] " << gFail << " check(s) FAILED\n";

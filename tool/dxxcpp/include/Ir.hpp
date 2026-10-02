@@ -48,6 +48,18 @@ inline std::string signalEmitName(const std::string& aSignalName) {
     return "emit" + capitalizeFirst(aSignalName);
 }
 
+//! Getter the Proxy and the Skeleton declare: "get" + the property name, first
+//! letter capitalized. Sema rejects declarations that would collide.
+inline std::string propertyGetName(const std::string& aPropName) {
+    return "get" + capitalizeFirst(aPropName);
+}
+
+//! Setter both declare when the property is writable: "set" + the property
+//! name, first letter capitalized. Sema rejects declarations that would collide.
+inline std::string propertySetName(const std::string& aPropName) {
+    return "set" + capitalizeFirst(aPropName);
+}
+
 struct TypeBase {
     NameIdx name;
 };
@@ -122,6 +134,7 @@ struct Property {
     TypeId type;
     std::string defaultValue;
     bool readonly { false };
+    bool deprecated { false };
 };
 
 struct Interface {

@@ -23,6 +23,10 @@ constexpr std::string_view ANNS_SYNC_STR { "sync" };
 constexpr std::string_view ANNS_ASYNC_STR { "async" };
 constexpr std::string_view ANNS_DEPRECATED_STR { "deprecated" };
 
+//! Generated class labels, used to say which class a derived name belongs to
+constexpr std::string_view PROXY_CLASS_STR { "Proxy" };
+constexpr std::string_view SKELETON_CLASS_STR { "Skeleton" };
+
 enum class AnnTarget {
     METHOD,
     PROPERTY,
@@ -731,18 +735,23 @@ std::vector<Error> validateAst(const Ast::Root& aAstRoot) {
         }
 
         //! The Proxy and the Skeleton are separate classes, so the names they
-        //! declare are collected separately: the Proxy adds <name>Async and the
-        //! signal listeners, the Skeleton the signal emit wrappers
+        //! declare are collected separately: the Proxy adds <name>Async, the
+        //! signal listeners and the property accessors, the Skeleton the signal
+        //! emit wrappers and the property accessors
         std::unordered_map<std::string, std::string> proxyNames;
         std::unordered_map<std::string, std::string> serverNames;
+        //! The class label is appended so a name both classes declare (a
+        //! property accessor) says which class the collision is in
         auto addGenerated = [&](std::unordered_map<std::string, std::string>& aNames,
-          const std::string& aOwner, const std::string& aName, const Ast::Loc& aLoc) {
+          std::string_view aClass, const std::string& aOwner,
+          const std::string& aName, const Ast::Loc& aLoc) {
             const auto [aIt, aInserted] = aNames.emplace(aName, aOwner);
             if (!aInserted) {
                 report(
                     errs,
                     "'" + aName + "' is generated twice in " + ifce.name +
-                        ": by " + aIt->second + " and " + aOwner,
+                        ": by " + aIt->second + " and " + aOwner +
+                        " (" + std::string(aClass) + ")",
                     aLoc
                 );
             }
@@ -751,12 +760,12 @@ std::vector<Error> validateAst(const Ast::Root& aAstRoot) {
         for (const auto& m : ifce.methods) {
             const std::string owner = "method '" + m.name + "'";
             if (!hasAnnotation(m.annotations, ANNS_ASYNC_STR.data())) {
-                addGenerated(proxyNames, owner, m.name, m.loc);
+                addGenerated(proxyNames, PROXY_CLASS_STR, owner, m.name, m.loc);
             }
 
             if (!hasAnnotation(m.annotations, ANNS_SYNC_STR.data())) {
-                addGenerated(proxyNames, owner, m.name + std::string(Ir::ASYNC_SUFFIX),
-                    m.loc);
+                addGenerated(proxyNames, PROXY_CLASS_STR, owner,
+                    m.name + std::string(Ir::ASYNC_SUFFIX), m.loc);
             }
 
             //! The Skeleton declares the method as well; a duplicated method
@@ -767,8 +776,24 @@ std::vector<Error> validateAst(const Ast::Root& aAstRoot) {
 
         for (const auto& s : ifce.signals) {
             const std::string owner = "signal '" + s.name + "'";
-            addGenerated(proxyNames, owner, Ir::signalListenerName(s.name), s.loc);
-            addGenerated(serverNames, owner, Ir::signalEmitName(s.name), s.loc);
+            addGenerated(proxyNames, PROXY_CLASS_STR, owner,
+                Ir::signalListenerName(s.name), s.loc);
+            addGenerated(serverNames, SKELETON_CLASS_STR, owner,
+                Ir::signalEmitName(s.name), s.loc);
+        }
+
+        for (const auto& p : ifce.properties) {
+            const std::string owner = "property '" + p.name + "'";
+            addGenerated(proxyNames, PROXY_CLASS_STR, owner,
+                Ir::propertyGetName(p.name), p.loc);
+            addGenerated(serverNames, SKELETON_CLASS_STR, owner,
+                Ir::propertyGetName(p.name), p.loc);
+            if (!hasAnnotation(p.annotations, ANNS_READONLY_STR.data())) {
+                addGenerated(proxyNames, PROXY_CLASS_STR, owner,
+                    Ir::propertySetName(p.name), p.loc);
+                addGenerated(serverNames, SKELETON_CLASS_STR, owner,
+                    Ir::propertySetName(p.name), p.loc);
+            }
         }
     }
 
@@ -938,6 +963,7 @@ Result generateIr(const Ast::Root& aAstRoot) {
         for (const auto& ap : ai.properties) {
             Ir::Property ip;
             ip.name = ap.name;
+            ip.deprecated = hasAnnotation(ap.annotations, ANNS_DEPRECATED_STR.data());
             ip.readonly = hasAnnotation(ap.annotations, "readonly");
             ip.type = lowerType(ap.type);
             ip.defaultValue = ap.defaultValue;

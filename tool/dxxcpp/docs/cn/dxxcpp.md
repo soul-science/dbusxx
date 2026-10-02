@@ -236,6 +236,7 @@ property untouched -> int32;                // 不写初值
 - 不写初值 → 生成值初始化表达式（`std::int32_t{}`）
 - 初值花括号嵌套上限 **64 层**
 - 属性类型含 `,`（如 `map<string, string>`）时，生成器会自动用 `decltype(T{})` 包一层掩码 —— 这是用户手写该宏时必须自己注意的坑，生成器替你处理了
+- 每个属性还会在 **Proxy 与 Skeleton 两侧**都生成访问器 `get<Name>()`，可写属性再加 `set<Name>(const T&)`；`@readonly` 只有 getter（两侧返回值不同，见 §3.3 / §3.4）
 
 ### 2.6 注解
 
@@ -244,14 +245,14 @@ property untouched -> int32;                // 不写初值
 | 注解 | 可用位置 | 说明 |
 |---|---|---|
 | `@readonly` | property | 只读属性 |
-| `@deprecated` | method / signal | 标记废弃；Proxy 侧带 `[[deprecated]]`（Skeleton 侧只留注释，见下） |
+| `@deprecated` | method / signal / property | 标记废弃；Proxy 侧带 `[[deprecated]]`（属性访问器的 getter/setter 也带） |
 | `@sync` | method | 只生成同步形态 |
 | `@async` | method | 只生成两个异步形态 |
 | `@timeout(毫秒)` | method | 调用超时，**正整数**、单位毫秒；生成时换算成微秒（`@timeout(3000)` → `callSync<T, 3000000>`） |
 
 - `@sync` 与 `@async` **互斥**
 - 放错位置（如给属性写 `@timeout`）、重复写、多写了值（如 `@deprecated(true)`）、写了不存在的注解，都会被拒绝
-- Skeleton 侧的 `@deprecated` 只生成 `//! @deprecated` **注释**而不是 `[[deprecated]]` 属性 —— 因为 `DBUSXX_METHOD(&Self::f)` 要取成员地址，标了属性会让生成的头文件自身在 `-Wdeprecated-declarations` 下报警告。Proxy 侧是真属性，调用点才会收到警告
+- Skeleton 侧的 `@deprecated` 只生成 `//! @deprecated` **注释**而不是 `[[deprecated]]` 属性 —— 因为 `DBUSXX_METHOD(&Self::f)` 要取成员地址，标了属性会让生成的头文件自身在 `-Wdeprecated-declarations` 下报警告。Proxy 侧是真属性（属性访问器也带 `[[deprecated]]`），调用点才会收到警告。**Skeleton 侧目前只有方法与信号带该注释，属性访问器不带标记**
 
 ### 2.7 注释
 
@@ -272,13 +273,13 @@ property untouched -> int32;                // 不写初值
 
 ### 3.1 产物清单
 
-| 产物 | `--list-outputs` 角色 | 内容 |
+| 产物 | 角色 | 内容 |
 |---|---|---|
 | `<Package>Types.hpp` | `types` | 命名空间、结构体（含逐字段 `operator==`）、别名、聚合体静态断言 |
-| `<Interface>Skeleton.hpp` | `server` | `<Iface>Interface`（纯虚基类）+ `<Iface>Server`（CRTP + 反射宏 + 信号 emit 包装）声明 |
-| `<Interface>Skeleton.cpp` | `server` | `<Iface>Server` 的构造函数、方法转发与信号 emit 包装定义 |
-| `<Interface>Proxy.hpp` | `client` | `<Iface>Proxy` 声明 |
-| `<Interface>Proxy.cpp` | `client` | `<Iface>Proxy` 构造函数与方法/监听定义 |
+| `<Interface>Skeleton.hpp` | `server` | `<Iface>Interface`（纯虚基类）+ `<Iface>Server`（CRTP + 反射宏 + 信号 emit 包装 + 属性访问器）声明 |
+| `<Interface>Skeleton.cpp` | `server` | `<Iface>Server` 的构造函数、方法转发、信号 emit 包装与属性访问器定义 |
+| `<Interface>Proxy.hpp` | `client` | `<Iface>Proxy` 声明（方法、信号监听与属性访问器） |
+| `<Interface>Proxy.cpp` | `client` | `<Iface>Proxy` 构造函数与方法/监听/属性访问器定义 |
 
 - **每个 interface 一份头 + 一份源**；类型头**按 package 共享一份**
 - 头文件名来自 `.dxx` 自身（package / 接口名），与 `dxxcpp_generate_lib(LIB_PREFIX ...)` 的 `LIB_PREFIX` 无关
@@ -379,8 +380,14 @@ public:
     [[nodiscard]] Dbusxx::Status emitValueChanged(std::int32_t oldVal, std::int32_t newVal);
 
     DBUSXX_PROPERTY_RO(version, std::string, {"1.0.0"})
+    //! Local read: the Status is dropped (value-initialized on failure)
+    [[nodiscard]] std::string getVersion();
 
     DBUSXX_PROPERTY_RW(counter, std::int32_t, {0})
+    //! Local read: the Status is dropped (value-initialized on failure)
+    [[nodiscard]] std::int32_t getCounter();
+    //! Local write: the Status is dropped
+    void setCounter(const std::int32_t& counter);
 
 private:
     std::unique_ptr<CalculatorInterface> mIface;
@@ -396,7 +403,7 @@ private:
 - 参数/返回值的传递方式按类型自动选：标量按值、`string`/容器/结构体按 `const&`
 - `@sync` 与 `@async` **不影响服务端**：服务端一律是普通同步成员函数
 - 信号既注册（`DBUSXX_SIGNAL`）也生成发送包装 `emit<首字母大写的信号名>(...)`，发信号调 `server.emitValueChanged(1, 2)` 即可；包装内部转调 `Server::emit(path, iface, signal, args...)`
-- 属性直接在 Skeleton 类上注册（`DBUSXX_PROPERTY_RO/RW`），服务端可以 `getLocalProperty` / `setLocalProperty` 读写
+- 属性在 Skeleton 类上注册（`DBUSXX_PROPERTY_RO/RW`），并生成访问器 `get<Name>()` / `set<Name>(const T&)`（`@readonly` 只有 getter）；服务端也可以直接用 `getLocalProperty` / `setLocalProperty`
 
 `.cpp` 里是构造函数与方法定义（节选）：
 
@@ -421,6 +428,16 @@ std::int32_t CalculatorServer::add(std::int32_t a, std::int32_t b) {
 
 Dbusxx::Status CalculatorServer::emitValueChanged(std::int32_t oldVal, std::int32_t newVal) {
     return this->emit(COM_EXAMPLE_CALC_PATH, COM_EXAMPLE_CALC_CALCULATOR_IFACE, "valueChanged", oldVal, newVal);
+}
+
+std::int32_t CalculatorServer::getCounter() {
+    std::int32_t value {};
+    (void) this->getProperty(COM_EXAMPLE_CALC_PATH, COM_EXAMPLE_CALC_CALCULATOR_IFACE, "counter", value);
+    return value;
+}
+
+void CalculatorServer::setCounter(const std::int32_t& counter) {
+    (void) this->setProperty(COM_EXAMPLE_CALC_PATH, COM_EXAMPLE_CALC_CALCULATOR_IFACE, "counter", counter);
 }
 }
 ```
@@ -450,6 +467,10 @@ public:
 
     [[nodiscard]] Dbusxx::Status onValueChanged(
         std::function<void(std::int32_t oldVal, std::int32_t newVal)> aCallback);
+
+    [[nodiscard]] Dbusxx::Reply<std::string> getVersion();
+    [[nodiscard]] Dbusxx::Reply<std::int32_t> getCounter();
+    [[nodiscard]] Dbusxx::Status setCounter(const std::int32_t& counter);
 };
 ```
 
@@ -478,16 +499,27 @@ Dbusxx::Status onValueChanged(std::function<void(std::int32_t, std::int32_t)> aC
 
 > ⚠️ **监听是永久的，没有取消接口**（**TODO**：计划提供可取消句柄）：注册后一直生效到 Proxy 析构。回调在**事件循环线程**上、注册之后的任意时刻被调用，因此闭包只能捕获**生命周期覆盖 Proxy 的对象**（文件级 static、顶层对象，或声明在 Proxy 之前的局部变量）。按引用捕获块内局部变量，出块后回调再触发就是 *stack-use-after-scope*。
 
-**属性没有生成访问器**（**TODO**：计划生成 get/set 访问器）
+**两侧都会生成属性访问器**
 
-`.dxx` 里的 `property` 只在 Skeleton 侧注册；Proxy 侧**不生成** `getVersion()` / `setCounter()` 这类访问器，也没有暴露内部的 `Client`。客户端要读写属性，请直接用库的 `Client`：
+每个 `property` 在 Proxy 和 Skeleton 上都会生成 `get<Name>()`；可写属性还会生成 `set<Name>(const T&)`。`@readonly` 属性只有 getter：
+
+| 生成的成员 | Proxy（客户端） | Skeleton（服务端） |
+|---|---|---|
+| `get<Name>()` | `Dbusxx::Reply<T>` | `T` |
+| `set<Name>(const T&)`（仅可写） | `Dbusxx::Status` | `void` |
+
+Proxy 侧转发到 `Client::getProperty` / `Client::setProperty`；Skeleton 侧读写本地属性。本地读写没有远端失败可报，因此丢弃 `Status`：getter 在属性不可用时返回值初始化的 `T`，setter 返回 `void`。
 
 ```cpp
-Dbusxx::Client c(Dbusxx::SessionType::USER, DBUSXX_SERVICE_NAME,
-                 "/com/example/calc", "com.example.calc.Calculator");
-auto ver = c.getProperty<std::string>("version");
-(void)c.setProperty<std::int32_t>("counter", 10);
+// Proxy
+auto ver = aCalcProxy.getVersion();   // Dbusxx::Reply<std::string>
+auto st  = aCalcProxy.setCounter(10); // Dbusxx::Status
+// Skeleton
+std::int32_t n = aCalc.getCounter();  // std::int32_t
+aCalc.setCounter(11);                 // void
 ```
+
+`@deprecated` 属性会给 Proxy 侧访问器加上 `[[deprecated]]`。
 
 `.cpp` 里的构造定义用的是服务名宏与类型头里的两个常量：
 
@@ -531,6 +563,11 @@ public:
 
 int main() {
     CalculatorServer server(std::make_unique<CalcImpl>());
+
+    // 属性：Skeleton 侧直接读写本地属性（要在 run() 之前）
+    std::int32_t counter = server.getCounter();   // std::int32_t
+    server.setCounter(counter + 1);               // void
+
     server.run();          // 注册接口 + 进入事件循环（阻塞）
     return 0;
 }
@@ -570,6 +607,11 @@ int main() {
     (void)proxy.addAsync([](Dbusxx::Reply<std::int32_t> aRep) {
         std::cout << "async " << aRep.value() << "\n";
     }, 1, 2);
+
+    // 属性：@readonly 的 version 只有 getter，counter 可读写
+    auto ver = proxy.getVersion();     // Dbusxx::Reply<std::string>
+    (void)proxy.setCounter(10);        // Dbusxx::Status
+    (void)ver;
 
     // 信号监听：捕获的对象必须活过 proxy
     (void)proxy.onValueChanged([](std::int32_t aOld, std::int32_t aNew) {
@@ -717,44 +759,61 @@ interface I {
 
 此外，生成器还会为成员派生新名字，撞名会让产物编不过，所以工具提前拦截。Proxy 与 Skeleton 是**两个类**，各自算一套名字：
 
-- Proxy：方法 `X` → `X`（除非 `@async`）与 `XAsync`（除非 `@sync`）；信号 `S` → `onS`（首字母大写）；**属性不参与**（Proxy 里没有属性的名字）
-- Skeleton：信号 `S` → `emitS`（首字母大写，发送包装）；方法名就是它自己的名字
+- Proxy：方法 `X` → `X`（除非 `@async`）与 `XAsync`（除非 `@sync`）；信号 `S` → `onS`（首字母大写）；属性 `P` → `get<P>`（首字母大写），可写时再加 `set<P>`
+- Skeleton：方法名就是它自己的名字；信号 `S` → `emitS`（首字母大写，发送包装）；属性 `P` → `get<P>`（首字母大写），可写时再加 `set<P>`
 
-会报 `'<name>' is generated twice in <I>: by <ownerA> and <ownerB>` 的情形：
+> 属性访问器在**两个类里都生成**，因此属性派生名可能同时与 Proxy 或 Skeleton 的派生名相撞。
+
+会报 `'<name>' is generated twice in <I>: by <ownerA> and <ownerB> (<Proxy|Skeleton>)` 的情形（末尾标明撞在哪个类里）：
 
 ```dxx
 interface I {
     method f(int32 v) -> int32;
-    method fAsync(int32 v) -> int32;     // 'fAsync' is generated twice
+    method fAsync(int32 v) -> int32;     // 'fAsync' is generated twice ... (Proxy)
 };
 
 interface I {
     method onValueChanged(int32 v) -> int32;
-    signal valueChanged(int32 v);        // 'onValueChanged' is generated twice
+    signal valueChanged(int32 v);        // 'onValueChanged' ... (Proxy)
 };
 
 interface I {
     method emitValueChanged(int32 v) -> int32;
-    signal valueChanged(int32 v);        // 'emitValueChanged' is generated twice
+    signal valueChanged(int32 v);        // 'emitValueChanged' ... (Skeleton)
 };
 
 interface I {
     signal value(int32 v);
     signal Value(int32 v);               // 首字母大写后同为 'onValue' / 'emitValue' → generated twice
 };
+
+interface I {
+    method getConfig() -> int32;
+    property config -> int32;            // 'getConfig' ... (Proxy) 与 (Skeleton)
+};
+
+interface I {
+    method setConfig(int32 v) -> int32;
+    property config -> int32;            // 'setConfig' ... (Proxy) 与 (Skeleton)
+};
 ```
 
-下面这三个是**合法的**（工具做过精度处理）：
+下面这些是**合法的**（工具做过精度处理）：
 
 ```dxx
 interface I {
     method f(int32 v) -> int32;
-    property fAsync -> int32;            // 属性不进 Proxy，不冲突
+    property fAsync -> int32;            // 属性派生 getFAsync/setFAsync，不撞 'fAsync'
 };
 
 interface I {
     signal valueChanged(int32 v);
-    property emitValueChanged -> int32;  // 属性不是 Skeleton 成员，不冲突
+    property emitValueChanged -> int32;  // 属性派生 getEmitValueChanged/...，不撞 'emitValueChanged'
+};
+
+interface I {
+    method setVersion(int32 v) -> int32;
+    @readonly property version -> int32; // @readonly 不生成 setter，'setVersion' 不撞
 };
 
 interface I {
