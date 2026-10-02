@@ -697,7 +697,7 @@ private:
         if (p->type != typeid(T).name()) {
             return nullptr;
         }
-        
+
         return p;
     }
 

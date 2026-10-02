@@ -375,6 +375,30 @@ ProxyFunc listenerFunc(const Ir::Root& aIr, const Ir::Signal& aSignal) {
     };
 }
 
+ProxyFunc propertyGetFunc(const Ir::Root& aIr, const Ir::Property& aProp) {
+    const std::string ty = cppType(aIr, aProp.type);
+    return ProxyFunc {
+        Ir::propertyGetName(aProp.name),
+        "",
+        "Dbusxx::Reply<" + ty + ">",
+        "",
+        callExpr("getProperty", ty, "", aProp.name, ""),
+        aProp.deprecated
+    };
+}
+
+ProxyFunc propertySetFunc(const Ir::Root& aIr, const Ir::Property& aProp) {
+    const std::string ty = cppType(aIr, aProp.type);
+    return ProxyFunc {
+        Ir::propertySetName(aProp.name),
+        "const " + ty + "& " + aProp.name,
+        "Dbusxx::Status",
+        "",
+        callExpr("setProperty", ty, "", aProp.name, aProp.name),
+        aProp.deprecated
+    };
+}
+
 //! Generate one Proxy member: declaration for <Interface>Proxy.hpp
 //! (aDefine=false) or definition for <Interface>Proxy.cpp (aDefine=true)
 std::string genProxyFunc(const std::string& aClassName, const ProxyFunc& aFunc,
@@ -603,6 +627,7 @@ std::string genSkeletonHeader(const Ir::Root& aIr, const Ir::Interface& aIfce) {
     }
 
     //! Declaration of properties
+    output += '\n';
     for (const auto& prop : aIfce.properties) {
         const std::string ty = cppType(aIr, prop.type);
         //! DBUSXX_PROPERTY_*, if type contains ",", using decltype(...)
@@ -611,9 +636,32 @@ std::string genSkeletonHeader(const Ir::Root& aIr, const Ir::Interface& aIfce) {
             ("decltype(" + ty + "{})") : ty;
         const std::string init = prop.defaultValue.empty() ?
             (needDecltype ? "{}" : (ty + "{}")) : prop.defaultValue;
-        output += '\n';
+
+        if (prop.deprecated) {
+            //! Using comments instead of [[deprecated]]:
+            output += line(INDENT_SIZE, "//! @deprecated");
+        }
+
         output += line(INDENT_SIZE, "DBUSXX_PROPERTY_%s(%s, %s, %s)",
             (prop.readonly ? "RO" : "RW"), prop.name, tyUse, init);
+
+        //! getProp
+        output += line(INDENT_SIZE,
+            "//! Local read: the Status is dropped (value-initialized on failure)");
+        output += line(INDENT_SIZE,
+            "[[nodiscard]] %s %s();",
+            ty, Ir::propertyGetName(prop.name));
+
+        //! setProp
+        if (!prop.readonly) {
+            output += line(INDENT_SIZE,
+                "//! Local write: the Status is dropped");
+            output += line(INDENT_SIZE,
+                "void %s(const %s& %s);",
+                Ir::propertySetName(prop.name), ty, prop.name);
+        }
+
+        output += '\n';
     }
 
     output += '\n';
@@ -677,6 +725,31 @@ std::string genSkeletonSource(const Ir::Root& aIr, const Ir::Interface& aIfce) {
 
         output += line(0, "}");
         output += '\n';
+    }
+
+    for (const auto& prop : aIfce.properties) {
+        const std::string ty = cppType(aIr, prop.type);
+        //! getProp
+        output += line(0, "%s %sServer::%s() {",
+            ty, aIfce.name, Ir::propertyGetName(prop.name));
+        output += line(INDENT_SIZE, "%s value {};", ty);
+        output += line(INDENT_SIZE,
+            "(void) this->getProperty(%s, %s, \"%s\", value);",
+            pathName, ifceName, prop.name);
+        output += line(INDENT_SIZE, "return value;");
+        output += line(0, "}");
+        output += '\n';
+
+        //! setProp
+        if (!prop.readonly) {
+            output += line(0, "void %sServer::%s(const %s& %s) {",
+                aIfce.name, Ir::propertySetName(prop.name), ty, prop.name);
+            output += line(INDENT_SIZE,
+                "(void) this->setProperty(%s, %s, \"%s\", %s);",
+                pathName, ifceName, prop.name, prop.name);
+            output += line(0, "}");
+            output += '\n';
+        }
     }
 
     output += line(0, "} // namespace %s", space);
@@ -762,6 +835,16 @@ std::string genProxyHeader(const Ir::Root& aIr, const Ir::Interface& aIfce) {
         output += genProxyFunc(aIfce.name, listenerFunc(aIr, signal), false);
     }
 
+    for (const auto& prop : aIfce.properties) {
+        //! getProp
+        output += genProxyFunc(aIfce.name, propertyGetFunc(aIr, prop), false);
+
+        //! setProp
+        if (!prop.readonly) {
+            output += genProxyFunc(aIfce.name, propertySetFunc(aIr, prop), false);
+        }
+    }
+
     //! Definition of private variable
     output += line(0, "private:");
     output += line(INDENT_SIZE, "Dbusxx::Client mClient;");
@@ -812,6 +895,17 @@ std::string genProxySource(const Ir::Root& aIr, const Ir::Interface& aIfce) {
     //! Definition of signals
     for (const auto& signal : aIfce.signals) {
         output += genProxyFunc(cls, listenerFunc(aIr, signal), true);
+    }
+
+    //! Definition of properties
+    for (const auto& prop : aIfce.properties) {
+        //! getProp
+        output += genProxyFunc(cls, propertyGetFunc(aIr, prop), true);
+
+        //! setProp
+        if (!prop.readonly) {
+            output += genProxyFunc(cls, propertySetFunc(aIr, prop), true);
+        }
     }
 
     output += line(0, "} // namespace %s", ns);

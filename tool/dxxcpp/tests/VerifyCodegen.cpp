@@ -66,7 +66,7 @@ static Root makeCodegenRoot() {
             mp(base("string"), base("string")), "{}"));
         aInterface.properties.push_back(property("samples", vect(base("int32")), "{1, 2, 3}"));
         aInterface.properties.push_back(property("plain", base("int32"), ""));
-        aInterface.properties.push_back(property("config",
+        aInterface.properties.push_back(property("tags",
             mp(base("string"), base("string")), ""));
 
         aRoot.interfaces.push_back(std::move(aInterface));
@@ -173,7 +173,7 @@ int main() {
     expectContains("skel: prop no init (scalar)", aSkeletonHeader,
         "DBUSXX_PROPERTY_RW(plain, std::int32_t, std::int32_t{})");
     expectContains("skel: prop no init (map)", aSkeletonHeader,
-        "DBUSXX_PROPERTY_RW(config, decltype(std::map<std::string, std::string>{}), {})");
+        "DBUSXX_PROPERTY_RW(tags, decltype(std::map<std::string, std::string>{}), {})");
     //! Each comment must sit on the member it marks, not float around
     expectContains("skel: deprecated method is comment only", aSkeletonHeader,
         "//! @deprecated\n    void legacy(std::int32_t code);");
