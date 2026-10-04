@@ -74,6 +74,10 @@ foreach(NEEDLE
     "//! @deprecated\n    DBUSXX_SIGNAL(legacyEvent, std::int32_t)"
     "${EMIT_VALUE_CHANGED}"
     "${EMIT_NO_ARG_EVENT}"
+    "[[nodiscard]] std::int32_t getCounter();"
+    "void setCounter(const std::int32_t& counter);"
+    "void onVersionChanged(std::function<void(const std::string&)> aCallback);"
+    "void onCounterChanged(std::function<void(const std::int32_t&)> aCallback);"
     "class CalculatorServer final : public Dbusxx::Server<CalculatorServer>"
 )
     string(FIND "${SKELETON}" "${NEEDLE}" FOUND_AT)
@@ -87,6 +91,14 @@ endforeach()
 string(CONCAT LISTENER_VALUE_CHANGED
     "Dbusxx::Status onValueChanged("
     "std::function<void(std::int32_t oldVal, std::int32_t newVal)> aCallback")
+
+#! The property change listeners are long too: bind the name to its signature
+string(CONCAT CHANGED_VERSION
+    "[[nodiscard]] Dbusxx::Status onVersionChanged("
+    "std::function<void(const std::string&)> aCallback);")
+string(CONCAT CHANGED_COUNTER
+    "[[nodiscard]] Dbusxx::Status onCounterChanged("
+    "std::function<void(const std::int32_t&)> aCallback);")
 
 file(READ "${OUT_DIR}/CalculatorProxy.hpp" PROXY)
 foreach(NEEDLE
@@ -103,6 +115,10 @@ foreach(NEEDLE
     "Dbusxx::Status addAsync(std::function<void(Dbusxx::Reply<std::int32_t>)> aCallback"
     "Dbusxx::Status asyncOnlyAsync(std::function<void(Dbusxx::Reply<bool>)> aCallback"
     "${LISTENER_VALUE_CHANGED}"
+    "[[nodiscard]] Dbusxx::Reply<std::int32_t> getCounter();"
+    "[[nodiscard]] Dbusxx::Status setCounter(const std::int32_t& counter);"
+    "${CHANGED_VERSION}"
+    "${CHANGED_COUNTER}"
 )
     string(FIND "${PROXY}" "${NEEDLE}" FOUND_AT)
     if(FOUND_AT EQUAL -1)
@@ -124,6 +140,9 @@ foreach(NEEDLE
     "mClient.listenSignal(\"valueChanged\", std::move(aCallback))"
     "mClient.listenSignal(\"legacyEvent\", std::move(aCallback))"
     "mClient.callAsync<bool>(\"asyncOnly\", std::move(aCallback), val)"
+    "mClient.getProperty<std::string>(\"version\")"
+    "mClient.setProperty<std::int32_t>(\"counter\", counter)"
+    "mClient.onPropertyChanged(\"counter\", std::move(aCallback))"
 )
     string(FIND "${PROXY_SRC}" "${NEEDLE}" FOUND_AT)
     if(FOUND_AT EQUAL -1)
@@ -151,6 +170,17 @@ string(CONCAT BODY_SIGNAL_NO_ARG
     "Dbusxx::Status CalculatorServer::emitNoArgEvent() {\n"
     "    return this->emit(COM_EXAMPLE_CALC_PATH, COM_EXAMPLE_CALC_CALCULATOR_IFACE, "
     "\"noArgEvent\");\n}")
+#! Property accessors drop the Status on purpose (a local read/write cannot fail
+#! the way a remote one does), so bind the (void) cast to the member
+string(CONCAT BODY_SET_COUNTER
+    "void CalculatorServer::setCounter(const std::int32_t& counter) {\n"
+    "    (void) this->setProperty(COM_EXAMPLE_CALC_PATH, COM_EXAMPLE_CALC_CALCULATOR_IFACE, "
+    "\"counter\", counter);\n}")
+string(CONCAT BODY_ON_COUNTER_CHANGED
+    "void CalculatorServer::onCounterChanged("
+    "std::function<void(const std::int32_t&)> aCallback) {\n"
+    "    (void) this->onPropertyChanged(COM_EXAMPLE_CALC_PATH, "
+    "COM_EXAMPLE_CALC_CALCULATOR_IFACE, \"counter\", std::move(aCallback));\n}")
 
 file(READ "${OUT_DIR}/CalculatorSkeleton.cpp" SKELETON_SRC)
 foreach(NEEDLE
@@ -162,6 +192,8 @@ foreach(NEEDLE
     "${BODY_NOTIFY}"
     "${BODY_SIGNAL}"
     "${BODY_SIGNAL_NO_ARG}"
+    "${BODY_SET_COUNTER}"
+    "${BODY_ON_COUNTER_CHANGED}"
 )
     string(FIND "${SKELETON_SRC}" "${NEEDLE}" FOUND_AT)
     if(FOUND_AT EQUAL -1)

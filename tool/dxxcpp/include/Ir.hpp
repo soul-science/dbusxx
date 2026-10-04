@@ -60,6 +60,12 @@ inline std::string propertySetName(const std::string& aPropName) {
     return "set" + capitalizeFirst(aPropName);
 }
 
+//! Change listener the Proxy and the Skeleton declare: "on" + the property
+//! name (first letter capitalized) + "Changed". Sema rejects collisions.
+inline std::string propertyChangedName(const std::string& aPropName) {
+    return "on" + capitalizeFirst(aPropName) + "Changed";
+}
+
 struct TypeBase {
     NameIdx name;
 };

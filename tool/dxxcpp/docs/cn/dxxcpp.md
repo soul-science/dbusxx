@@ -236,7 +236,7 @@ property untouched -> int32;                // 不写初值
 - 不写初值 → 生成值初始化表达式（`std::int32_t{}`）
 - 初值花括号嵌套上限 **64 层**
 - 属性类型含 `,`（如 `map<string, string>`）时，生成器会自动用 `decltype(T{})` 包一层掩码 —— 这是用户手写该宏时必须自己注意的坑，生成器替你处理了
-- 每个属性还会在 **Proxy 与 Skeleton 两侧**都生成访问器 `get<Name>()`，可写属性再加 `set<Name>(const T&)`；`@readonly` 只有 getter（两侧返回值不同，见 §3.3 / §3.4）
+- 每个属性还会在 **Proxy 与 Skeleton 两侧**都生成访问器 `get<Name>()`，可写属性再加 `set<Name>(const T&)`，以及变化监听 `on<Name>Changed(std::function<void(const T&)>)`；`@readonly` 只有 getter 和变化监听（两侧返回值不同，见 §3.3 / §3.4）
 
 ### 2.6 注解
 
@@ -252,7 +252,7 @@ property untouched -> int32;                // 不写初值
 
 - `@sync` 与 `@async` **互斥**
 - 放错位置（如给属性写 `@timeout`）、重复写、多写了值（如 `@deprecated(true)`）、写了不存在的注解，都会被拒绝
-- Skeleton 侧的 `@deprecated` 只生成 `//! @deprecated` **注释**而不是 `[[deprecated]]` 属性 —— 因为 `DBUSXX_METHOD(&Self::f)` 要取成员地址，标了属性会让生成的头文件自身在 `-Wdeprecated-declarations` 下报警告。Proxy 侧是真属性（属性访问器也带 `[[deprecated]]`），调用点才会收到警告。**Skeleton 侧目前只有方法与信号带该注释，属性访问器不带标记**
+- Skeleton 侧的 `@deprecated` 只生成 `//! @deprecated` **注释**而不是 `[[deprecated]]` 属性 —— 因为 `DBUSXX_METHOD(&Self::f)` 要取成员地址，标了属性会让生成的头文件自身在 `-Wdeprecated-declarations` 下报警告。Proxy 侧是真属性（属性访问器也带 `[[deprecated]]`），调用点才会收到警告
 
 ### 2.7 注释
 
@@ -338,6 +338,7 @@ static_assert(std::is_aggregate_v<Point>, "Point must be an aggregate");
 
 #include <dbusxx/Server.hpp>
 #include <dbusxx/Session.hpp>
+#include <functional>
 #include <memory>
 
 #include "ComExampleCalcTypes.hpp"
@@ -382,12 +383,14 @@ public:
     DBUSXX_PROPERTY_RO(version, std::string, {"1.0.0"})
     //! Local read: the Status is dropped (value-initialized on failure)
     [[nodiscard]] std::string getVersion();
+    void onVersionChanged(std::function<void(const std::string&)> aCallback);
 
     DBUSXX_PROPERTY_RW(counter, std::int32_t, {0})
     //! Local read: the Status is dropped (value-initialized on failure)
     [[nodiscard]] std::int32_t getCounter();
     //! Local write: the Status is dropped
     void setCounter(const std::int32_t& counter);
+    void onCounterChanged(std::function<void(const std::int32_t&)> aCallback);
 
 private:
     std::unique_ptr<CalculatorInterface> mIface;
@@ -403,7 +406,7 @@ private:
 - 参数/返回值的传递方式按类型自动选：标量按值、`string`/容器/结构体按 `const&`
 - `@sync` 与 `@async` **不影响服务端**：服务端一律是普通同步成员函数
 - 信号既注册（`DBUSXX_SIGNAL`）也生成发送包装 `emit<首字母大写的信号名>(...)`，发信号调 `server.emitValueChanged(1, 2)` 即可；包装内部转调 `Server::emit(path, iface, signal, args...)`
-- 属性在 Skeleton 类上注册（`DBUSXX_PROPERTY_RO/RW`），并生成访问器 `get<Name>()` / `set<Name>(const T&)`（`@readonly` 只有 getter）；服务端也可以直接用 `getLocalProperty` / `setLocalProperty`
+- 属性在 Skeleton 类上注册（`DBUSXX_PROPERTY_RO/RW`），并生成访问器 `get<Name>()` / `set<Name>(const T&)` 与变化监听 `on<Name>Changed`（`@readonly` 只有 getter 与变化监听）；服务端也可以直接用 `getLocalProperty` / `setLocalProperty` / `onLocalPropertyChanged`
 
 `.cpp` 里是构造函数与方法定义（节选）：
 
@@ -439,6 +442,10 @@ std::int32_t CalculatorServer::getCounter() {
 void CalculatorServer::setCounter(const std::int32_t& counter) {
     (void) this->setProperty(COM_EXAMPLE_CALC_PATH, COM_EXAMPLE_CALC_CALCULATOR_IFACE, "counter", counter);
 }
+
+void CalculatorServer::onCounterChanged(std::function<void(const std::int32_t&)> aCallback) {
+    (void) this->onPropertyChanged(COM_EXAMPLE_CALC_PATH, COM_EXAMPLE_CALC_CALCULATOR_IFACE, "counter", std::move(aCallback));
+}
 }
 ```
 
@@ -471,6 +478,10 @@ public:
     [[nodiscard]] Dbusxx::Reply<std::string> getVersion();
     [[nodiscard]] Dbusxx::Reply<std::int32_t> getCounter();
     [[nodiscard]] Dbusxx::Status setCounter(const std::int32_t& counter);
+    [[nodiscard]] Dbusxx::Status onVersionChanged(
+        std::function<void(const std::string&)> aCallback);
+    [[nodiscard]] Dbusxx::Status onCounterChanged(
+        std::function<void(const std::int32_t&)> aCallback);
 };
 ```
 
@@ -499,27 +510,30 @@ Dbusxx::Status onValueChanged(std::function<void(std::int32_t, std::int32_t)> aC
 
 > ⚠️ **监听是永久的，没有取消接口**（**TODO**：计划提供可取消句柄）：注册后一直生效到 Proxy 析构。回调在**事件循环线程**上、注册之后的任意时刻被调用，因此闭包只能捕获**生命周期覆盖 Proxy 的对象**（文件级 static、顶层对象，或声明在 Proxy 之前的局部变量）。按引用捕获块内局部变量，出块后回调再触发就是 *stack-use-after-scope*。
 
-**两侧都会生成属性访问器**
+**两侧都会生成属性访问器与变化监听**
 
-每个 `property` 在 Proxy 和 Skeleton 上都会生成 `get<Name>()`；可写属性还会生成 `set<Name>(const T&)`。`@readonly` 属性只有 getter：
+每个 `property` 在 Proxy 和 Skeleton 上都会生成 `get<Name>()` 与变化监听 `on<Name>Changed(...)`；可写属性还会生成 `set<Name>(const T&)`。`@readonly` 属性只有 getter 与变化监听：
 
 | 生成的成员 | Proxy（客户端） | Skeleton（服务端） |
 |---|---|---|
 | `get<Name>()` | `Dbusxx::Reply<T>` | `T` |
 | `set<Name>(const T&)`（仅可写） | `Dbusxx::Status` | `void` |
+| `on<Name>Changed(std::function<void(const T&)>)` | `Dbusxx::Status` | `void` |
 
-Proxy 侧转发到 `Client::getProperty` / `Client::setProperty`；Skeleton 侧读写本地属性。本地读写没有远端失败可报，因此丢弃 `Status`：getter 在属性不可用时返回值初始化的 `T`，setter 返回 `void`。
+Proxy 侧转发到 `Client::getProperty` / `setProperty` / `onPropertyChanged`；Skeleton 侧读写本地属性并订阅本地变化。本地操作没有远端失败可报，因此 Skeleton 侧丢弃 `Status`：getter 在属性不可用时返回值初始化的 `T`，setter 与变化监听返回 `void`。
 
 ```cpp
 // Proxy
 auto ver = aCalcProxy.getVersion();   // Dbusxx::Reply<std::string>
 auto st  = aCalcProxy.setCounter(10); // Dbusxx::Status
+auto sub = aCalcProxy.onCounterChanged([] (const std::int32_t& n) { /* ... */ });
 // Skeleton
 std::int32_t n = aCalc.getCounter();  // std::int32_t
 aCalc.setCounter(11);                 // void
+aCalc.onCounterChanged([] (const std::int32_t& v) { /* ... */ });  // void
 ```
 
-`@deprecated` 属性会给 Proxy 侧访问器加上 `[[deprecated]]`。
+`@deprecated` 属性会给 Proxy 侧访问器（含变化监听）加上 `[[deprecated]]`。
 
 `.cpp` 里的构造定义用的是服务名宏与类型头里的两个常量：
 
@@ -759,8 +773,8 @@ interface I {
 
 此外，生成器还会为成员派生新名字，撞名会让产物编不过，所以工具提前拦截。Proxy 与 Skeleton 是**两个类**，各自算一套名字：
 
-- Proxy：方法 `X` → `X`（除非 `@async`）与 `XAsync`（除非 `@sync`）；信号 `S` → `onS`（首字母大写）；属性 `P` → `get<P>`（首字母大写），可写时再加 `set<P>`
-- Skeleton：方法名就是它自己的名字；信号 `S` → `emitS`（首字母大写，发送包装）；属性 `P` → `get<P>`（首字母大写），可写时再加 `set<P>`
+- Proxy：方法 `X` → `X`（除非 `@async`）与 `XAsync`（除非 `@sync`）；信号 `S` → `onS`（首字母大写）；属性 `P` → `get<P>`、`on<P>Changed`，可写时再加 `set<P>`
+- Skeleton：方法名就是它自己的名字；信号 `S` → `emitS`（首字母大写，发送包装）；属性 `P` → `get<P>`、`on<P>Changed`，可写时再加 `set<P>`
 
 > 属性访问器在**两个类里都生成**，因此属性派生名可能同时与 Proxy 或 Skeleton 的派生名相撞。
 
@@ -795,6 +809,11 @@ interface I {
 interface I {
     method setConfig(int32 v) -> int32;
     property config -> int32;            // 'setConfig' ... (Proxy) 与 (Skeleton)
+};
+
+interface I {
+    signal counterChanged(int32 v);
+    property counter -> int32;           // 'onCounterChanged' ... (Proxy)
 };
 ```
 

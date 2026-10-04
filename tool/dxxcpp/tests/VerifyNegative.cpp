@@ -206,6 +206,43 @@ Ast::Root propertySetterCollision() {
     return aRoot;
 }
 
+// signal counterChanged + property counter: both derive onCounterChanged
+Ast::Root propertyChangedCollision() {
+    using namespace tb;
+    auto aRoot = pkg();
+    Ast::Interface aInterface;
+    aInterface.name = "I";
+    aInterface.signals.push_back(signal("counterChanged",
+        { field(base("int32"), "v") }));
+    aInterface.properties.push_back(property("counter", base("int32"), "{0}"));
+    aRoot.interfaces.push_back(std::move(aInterface));
+    return aRoot;
+}
+
+// method onCounterChanged + property counter: the change listener name collides
+Ast::Root propertyChangedMethodCollision() {
+    using namespace tb;
+    auto aRoot = pkg();
+    Ast::Interface aInterface;
+    aInterface.name = "I";
+    aInterface.methods.push_back(method("onCounterChanged", {}));
+    aInterface.properties.push_back(property("counter", base("int32"), "{0}"));
+    aRoot.interfaces.push_back(std::move(aInterface));
+    return aRoot;
+}
+
+// property x + property X: getX / setX / onXChanged capitalize to one name
+Ast::Root propertyNameFolded() {
+    using namespace tb;
+    auto aRoot = pkg();
+    Ast::Interface aInterface;
+    aInterface.name = "I";
+    aInterface.properties.push_back(property("x", base("int32"), "{0}"));
+    aInterface.properties.push_back(property("X", base("int32"), "{0}"));
+    aRoot.interfaces.push_back(std::move(aInterface));
+    return aRoot;
+}
+
 // duplicate field x in struct A
 Ast::Root dupField() {
     using namespace tb;
@@ -580,6 +617,19 @@ int main() {
           { "'setConfig' is generated twice in I",
             "by method 'setConfig' and property 'config'" },
           propertySetterCollision },
+        { "signal vs property change listener",
+          { "'onCounterChanged' is generated twice in I",
+            "by signal 'counterChanged' and property 'counter'" },
+          propertyChangedCollision },
+        { "method vs property change listener",
+          { "'onCounterChanged' is generated twice in I",
+            "by method 'onCounterChanged' and property 'counter'" },
+          propertyChangedMethodCollision },
+        { "property name folding (get/set/onChanged)",
+          { "'getX' is generated twice in I", "'setX' is generated twice in I",
+            "'onXChanged' is generated twice in I",
+            "by property 'x' and property 'X'" },
+          propertyNameFolded },
         { "Async suffix collision",
           { "'fAsync' is generated twice in I", "by method 'f' and method 'fAsync'" },
           asyncSuffixCollision },
