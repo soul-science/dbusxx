@@ -295,6 +295,55 @@ int main() {
         "Dbusxx::Reply<bool> asyncOnly(");
     expectNotContains("proxy: @async has no sync call", aProxySrc,
         "callSync<bool>(\"asyncOnly\"");
+
+    // ---- Property accessors ----
+    //! Skeleton: get<Name>() -> T; a writable property also gets set<Name>() -> void
+    expectContains("skel: readonly property getter", aSkeletonHeader,
+        "[[nodiscard]] std::string getVersion();");
+    expectNotContains("skel: readonly property has no setter", aSkeletonHeader,
+        "void setVersion(");
+    expectContains("skel: writable property setter", aSkeletonHeader,
+        "void setCounter(const std::int32_t& counter);");
+    expectContains("skel: property getter body", aSkeletonSrc,
+        "std::int32_t CalculatorServer::getCounter() {");
+    expectContains("skel: property setter body", aSkeletonSrc,
+        "void CalculatorServer::setCounter(const std::int32_t& counter) {\n"
+        "    (void) this->setProperty(COM_EXAMPLE_CALC_PATH, "
+        "COM_EXAMPLE_CALC_CALCULATOR_IFACE, \"counter\", counter);\n}");
+
+    //! Proxy: get<Name>() -> Reply<T>; a writable property also gets set<Name>() -> Status
+    expectContains("proxy: readonly property getter", aProxyHeader,
+        "[[nodiscard]] Dbusxx::Reply<std::string> getVersion();");
+    expectNotContains("proxy: readonly property has no setter", aProxyHeader,
+        "setVersion(");
+    expectContains("proxy: writable property setter", aProxyHeader,
+        "[[nodiscard]] Dbusxx::Status setCounter(const std::int32_t& counter);");
+    expectContains("proxy: property getter call", aProxySrc,
+        "return mClient.getProperty<std::string>(\"version\");");
+    expectContains("proxy: property setter call", aProxySrc,
+        "return mClient.setProperty<std::int32_t>(\"counter\", counter);");
+
+    // ---- Property change listeners: on<Name>Changed ----
+    //! Every property gets one, @readonly included: void on the Skeleton (a
+    //! local subscription), Status on the Proxy (a remote PropertiesChanged)
+    expectContains("skel: property change listener", aSkeletonHeader,
+        "void onCounterChanged(std::function<void(const std::int32_t&)> aCallback);");
+    expectContains("skel: readonly property change listener", aSkeletonHeader,
+        "void onVersionChanged(std::function<void(const std::string&)> aCallback);");
+    expectContains("skel: property change body", aSkeletonSrc,
+        "void CalculatorServer::onCounterChanged("
+        "std::function<void(const std::int32_t&)> aCallback) {\n"
+        "    (void) this->onPropertyChanged(COM_EXAMPLE_CALC_PATH, "
+        "COM_EXAMPLE_CALC_CALCULATOR_IFACE, \"counter\", std::move(aCallback));\n}");
+    expectContains("proxy: property change listener", aProxyHeader,
+        "[[nodiscard]] Dbusxx::Status onCounterChanged("
+        "std::function<void(const std::int32_t&)> aCallback);");
+    expectContains("proxy: readonly property change listener", aProxyHeader,
+        "[[nodiscard]] Dbusxx::Status onVersionChanged("
+        "std::function<void(const std::string&)> aCallback);");
+    expectContains("proxy: property change call", aProxySrc,
+        "return mClient.onPropertyChanged(\"counter\", std::move(aCallback));");
+
     if (gFail != 0) {
         std::cout << "[RESULT] " << gFail << " codegen check(s) FAILED\n";
         return 1;

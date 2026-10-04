@@ -247,6 +247,15 @@ void caseReadonlyPropertyLeavesSetterFree() {
         "[[nodiscard]] std::int32_t getVersion();");
     expectNotContains("skel: no setter for the readonly property", aSkeleton,
         "void setVersion(const std::int32_t& version);");
+
+    //! @readonly only removes the setter: the change listener stays on both sides
+    expectContains("skel: the readonly property gets a change listener", aSkeleton,
+        "void onVersionChanged(std::function<void(const std::int32_t&)> aCallback);");
+    const std::string aProxy = Codegen::genProxyHeader(*aSemaResult.ir,
+        aSemaResult.ir->interfaces[0]);
+    expectContains("proxy: the readonly property gets a change listener", aProxy,
+        "[[nodiscard]] Dbusxx::Status onVersionChanged("
+        "std::function<void(const std::int32_t&)> aCallback);");
 }
 
 } // namespace

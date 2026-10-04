@@ -1,5 +1,6 @@
 //! CLI output compile check: the generated headers are used as real code
-//! (-fsyntax-only), instantiating every shape, property accessors included.
+//! (-fsyntax-only), instantiating every shape: methods, signals, property
+//! accessors and property change listeners.
 #include <cstdint>
 #include <map>
 #include <memory>
@@ -133,6 +134,23 @@ int main() {
     (void)aCalc.setOrigin(Point{1, 2});
     (void)aCalc.getHistory();
     (void)aCalc.setHistory(std::vector<Point>{ {1, 2}, {3, 4} });
+
+    //! Change listeners on<Name>Changed: every property gets one (@readonly
+    //! included); Reply-less on the Skeleton (void), a Status on the Proxy
+    (void)aCalcProxy.onVersionChanged([] (const std::string& aValue) { (void)aValue; });
+    (void)aCalcProxy.onCounterChanged([] (const std::int32_t& aValue) { (void)aValue; });
+    (void)aCalcProxy.onMetadataChanged(
+        [] (const std::map<std::string, std::string>& aValue) { (void)aValue; });
+    (void)aCalcProxy.onOriginChanged([] (const Point& aValue) { (void)aValue; });
+    (void)aCalcProxy.onHistoryChanged(
+        [] (const std::vector<Point>& aValue) { (void)aValue; });
+
+    aCalc.onVersionChanged([] (const std::string& aValue) { (void)aValue; });
+    aCalc.onCounterChanged([] (const std::int32_t& aValue) { (void)aValue; });
+    aCalc.onMetadataChanged(
+        [] (const std::map<std::string, std::string>& aValue) { (void)aValue; });
+    aCalc.onOriginChanged([] (const Point& aValue) { (void)aValue; });
+    aCalc.onHistoryChanged([] (const std::vector<Point>& aValue) { (void)aValue; });
 
     return 0;
 }

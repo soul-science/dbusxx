@@ -236,7 +236,7 @@ property untouched -> int32;                // no initializer
 - Without an initializer the generator emits a value-initialized expression (`std::int32_t{}`)
 - Initializer brace nesting is capped at **64 levels**
 - When a property type contains a `,` (e.g. `map<string, string>`), the generator wraps it in `decltype(T{})` automatically — a trap you would have to handle yourself when writing the macro by hand
-- Every property also gets accessors `get<Name>()` on **both the Proxy and the Skeleton**, plus `set<Name>(const T&)` when writable; a `@readonly` property only gets the getter (the return types differ per side, see §3.3 / §3.4)
+- Every property also gets accessors `get<Name>()` on **both the Proxy and the Skeleton**, plus `set<Name>(const T&)` when writable and a change listener `on<Name>Changed(std::function<void(const T&)>)`; a `@readonly` property gets the getter and the change listener only (the return types differ per side, see §3.3 / §3.4)
 
 ### 2.6 Annotations
 
@@ -252,7 +252,7 @@ Annotations precede a declaration and only affect code generation; they change n
 
 - `@sync` and `@async` are **mutually exclusive**
 - Misplaced annotations (e.g. `@timeout` on a property), duplicates, unexpected values (e.g. `@deprecated(true)`) and unknown annotations are all rejected
-- On the Skeleton side `@deprecated` produces a `//! @deprecated` **comment** rather than a `[[deprecated]]` attribute — because `DBUSXX_METHOD(&Self::f)` takes the member's address, and marking it would make the generated header itself warn under `-Wdeprecated-declarations`. On the Proxy side it is a real attribute (property accessors included), so call sites do get the warning. **On the Skeleton side only methods and signals carry that comment; property accessors carry no marker yet**
+- On the Skeleton side `@deprecated` produces a `//! @deprecated` **comment** rather than a `[[deprecated]]` attribute — because `DBUSXX_METHOD(&Self::f)` takes the member's address, and marking it would make the generated header itself warn under `-Wdeprecated-declarations`. On the Proxy side it is a real attribute (property accessors included), so call sites do get the warning
 
 ### 2.7 Comments
 
@@ -338,6 +338,7 @@ static_assert(std::is_aggregate_v<Point>, "Point must be an aggregate");
 
 #include <dbusxx/Server.hpp>
 #include <dbusxx/Session.hpp>
+#include <functional>
 #include <memory>
 
 #include "ComExampleCalcTypes.hpp"
@@ -382,12 +383,14 @@ public:
     DBUSXX_PROPERTY_RO(version, std::string, {"1.0.0"})
     //! Local read: the Status is dropped (value-initialized on failure)
     [[nodiscard]] std::string getVersion();
+    void onVersionChanged(std::function<void(const std::string&)> aCallback);
 
     DBUSXX_PROPERTY_RW(counter, std::int32_t, {0})
     //! Local read: the Status is dropped (value-initialized on failure)
     [[nodiscard]] std::int32_t getCounter();
     //! Local write: the Status is dropped
     void setCounter(const std::int32_t& counter);
+    void onCounterChanged(std::function<void(const std::int32_t&)> aCallback);
 
 private:
     std::unique_ptr<CalculatorInterface> mIface;
@@ -403,7 +406,7 @@ Key points:
 - Parameter and return passing is chosen automatically: scalars by value, `string`/containers/structs by `const&`
 - `@sync` and `@async` **do not affect the server**: server members are always plain synchronous functions
 - Signals are both registered (`DBUSXX_SIGNAL`) and given a send wrapper `emit<Capitalized signal name>(...)`: emit with `server.emitValueChanged(1, 2)`, which forwards to `Server::emit(path, iface, signal, args...)`
-- Properties are registered on the Skeleton class (`DBUSXX_PROPERTY_RO/RW`) and get accessors `get<Name>()` / `set<Name>(const T&)` (`@readonly` gets the getter only); the server can also read/write them directly with `getLocalProperty` / `setLocalProperty`
+- Properties are registered on the Skeleton class (`DBUSXX_PROPERTY_RO/RW`) and get accessors `get<Name>()` / `set<Name>(const T&)` and a change listener `on<Name>Changed` (`@readonly` gets the getter and the change listener only); the server can also use `getLocalProperty` / `setLocalProperty` / `onLocalPropertyChanged` directly
 
 The `.cpp` holds the constructor and the method definitions (excerpt):
 
@@ -439,6 +442,10 @@ std::int32_t CalculatorServer::getCounter() {
 void CalculatorServer::setCounter(const std::int32_t& counter) {
     (void) this->setProperty(COM_EXAMPLE_CALC_PATH, COM_EXAMPLE_CALC_CALCULATOR_IFACE, "counter", counter);
 }
+
+void CalculatorServer::onCounterChanged(std::function<void(const std::int32_t&)> aCallback) {
+    (void) this->onPropertyChanged(COM_EXAMPLE_CALC_PATH, COM_EXAMPLE_CALC_CALCULATOR_IFACE, "counter", std::move(aCallback));
+}
 }
 ```
 
@@ -471,6 +478,10 @@ public:
     [[nodiscard]] Dbusxx::Reply<std::string> getVersion();
     [[nodiscard]] Dbusxx::Reply<std::int32_t> getCounter();
     [[nodiscard]] Dbusxx::Status setCounter(const std::int32_t& counter);
+    [[nodiscard]] Dbusxx::Status onVersionChanged(
+        std::function<void(const std::string&)> aCallback);
+    [[nodiscard]] Dbusxx::Status onCounterChanged(
+        std::function<void(const std::int32_t&)> aCallback);
 };
 ```
 
@@ -499,27 +510,30 @@ A `@deprecated` signal still gets its listener, but with `[[deprecated]]`.
 
 > ⚠️ **Listeners are permanent and cannot be cancelled** (**TODO**: a cancellable handle is planned): once registered they stay active until the Proxy is destroyed. The callback runs on the **event loop thread** at any time after registration, so a closure may only capture objects that **outlive the Proxy** (file-scope statics, top-level objects, or locals declared before the Proxy). Capturing a block-local by reference and firing after that block has exited is *stack-use-after-scope*.
 
-**Property accessors are generated on both sides**
+**Property accessors and change listeners are generated on both sides**
 
-Every `property` gets `get<Name>()` on both the Proxy and the Skeleton; a writable property also gets `set<Name>(const T&)`. A `@readonly` property only gets the getter:
+Every `property` gets `get<Name>()` and a change listener `on<Name>Changed(...)` on both the Proxy and the Skeleton; a writable property also gets `set<Name>(const T&)`. A `@readonly` property gets the getter and the change listener only:
 
 | Generated member | Proxy (client) | Skeleton (server) |
 |---|---|---|
 | `get<Name>()` | `Dbusxx::Reply<T>` | `T` |
 | `set<Name>(const T&)` (writable only) | `Dbusxx::Status` | `void` |
+| `on<Name>Changed(std::function<void(const T&)>)` | `Dbusxx::Status` | `void` |
 
-The Proxy forwards to `Client::getProperty` / `Client::setProperty`. The Skeleton reads and writes its local property; a local read or write has no remote failure to report, so the `Status` is dropped: the getter is value-initialized when the property is unavailable and the setter returns `void`.
+The Proxy forwards to `Client::getProperty` / `setProperty` / `onPropertyChanged`; the Skeleton reads and writes its local property and subscribes to local changes. A local operation has no remote failure to report, so the Skeleton drops the `Status`: the getter is value-initialized when the property is unavailable, and the setter and the change listener return `void`.
 
 ```cpp
 // Proxy
 auto ver = aCalcProxy.getVersion();   // Dbusxx::Reply<std::string>
 auto st  = aCalcProxy.setCounter(10); // Dbusxx::Status
+auto sub = aCalcProxy.onCounterChanged([] (const std::int32_t& n) { /* ... */ });
 // Skeleton
 std::int32_t n = aCalc.getCounter();  // std::int32_t
 aCalc.setCounter(11);                 // void
+aCalc.onCounterChanged([] (const std::int32_t& v) { /* ... */ });  // void
 ```
 
-A `@deprecated` property marks its Proxy accessors `[[deprecated]]`.
+A `@deprecated` property marks its Proxy accessors (the change listener included) `[[deprecated]]`.
 
 The `.cpp` constructor uses the service-name macro plus the two constants from the types header:
 
@@ -759,8 +773,8 @@ interface I {
 
 On top of that the generator derives new names from the members, and a collision would make the output fail to compile, so the tool rejects it up front. The Proxy and the Skeleton are **two classes**, so each one gets its own namespace:
 
-- Proxy: method `X` → `X` (unless `@async`) and `XAsync` (unless `@sync`); signal `S` → `onS` (first letter capitalized); property `P` → `get<P>` (first letter capitalized), plus `set<P>` when writable
-- Skeleton: a method keeps its own name; signal `S` → `emitS` (first letter capitalized, the send wrapper); property `P` → `get<P>`, plus `set<P>` when writable
+- Proxy: method `X` → `X` (unless `@async`) and `XAsync` (unless `@sync`); signal `S` → `onS` (first letter capitalized); property `P` → `get<P>` and `on<P>Changed`, plus `set<P>` when writable
+- Skeleton: a method keeps its own name; signal `S` → `emitS` (first letter capitalized, the send wrapper); property `P` → `get<P>` and `on<P>Changed`, plus `set<P>` when writable
 
 > Property accessors are generated in **both classes**, so a property's derived name can collide with a derived name in either the Proxy or the Skeleton.
 
@@ -795,6 +809,11 @@ interface I {
 interface I {
     method setConfig(int32 v) -> int32;
     property config -> int32;            // 'setConfig' ... (Proxy) and (Skeleton)
+};
+
+interface I {
+    signal counterChanged(int32 v);
+    property counter -> int32;           // 'onCounterChanged' ... (Proxy)
 };
 ```
 

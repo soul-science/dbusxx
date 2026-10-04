@@ -399,6 +399,20 @@ ProxyFunc propertySetFunc(const Ir::Root& aIr, const Ir::Property& aProp) {
     };
 }
 
+ProxyFunc propertyChangedFunc(const Ir::Root& aIr, const Ir::Property& aProp) {
+    const std::string ty = cppType(aIr, aProp.type);
+    const std::string callback(Ir::CALLBACK_PARAM);
+    return ProxyFunc {
+        Ir::propertyChangedName(aProp.name),
+        "std::function<void(const " + ty + "&)> " + callback,
+        "Dbusxx::Status",
+        "",
+        callExpr("onPropertyChanged", "", "", aProp.name, 
+            "std::move(" + callback + ")"),
+        aProp.deprecated
+    };
+}
+
 //! Generate one Proxy member: declaration for <Interface>Proxy.hpp
 //! (aDefine=false) or definition for <Interface>Proxy.cpp (aDefine=true)
 std::string genProxyFunc(const std::string& aClassName, const ProxyFunc& aFunc,
@@ -557,6 +571,7 @@ std::string genSkeletonHeader(const Ir::Root& aIr, const Ir::Interface& aIfce) {
     //! Included header files
     output += line(0, "#include <dbusxx/Server.hpp>");
     output += line(0, "#include <dbusxx/Session.hpp>");
+    output += line(0, "#include <functional>");
     output += line(0, "#include <memory>");
     output += '\n';
 
@@ -661,10 +676,14 @@ std::string genSkeletonHeader(const Ir::Root& aIr, const Ir::Interface& aIfce) {
                 Ir::propertySetName(prop.name), ty, prop.name);
         }
 
+        //! onPropChanged
+        output += line(INDENT_SIZE,
+            "void %s(std::function<void(const %s&)> %s);",
+            Ir::propertyChangedName(prop.name), ty, Ir::CALLBACK_PARAM);
+
         output += '\n';
     }
 
-    output += '\n';
     output += line(0, "private:");
     output += line(INDENT_SIZE, "std::unique_ptr<%sInterface> mIface;", aIfce.name);
     output += line(0, "};");
@@ -750,6 +769,16 @@ std::string genSkeletonSource(const Ir::Root& aIr, const Ir::Interface& aIfce) {
             output += line(0, "}");
             output += '\n';
         }
+
+        //! onPropChanged
+        output += line(0,
+            "void %sServer::%s(std::function<void(const %s&)> %s) {",
+            aIfce.name, Ir::propertyChangedName(prop.name), ty, Ir::CALLBACK_PARAM);
+        output += line(INDENT_SIZE,
+            "(void) this->onPropertyChanged(%s, %s, \"%s\", std::move(%s));",
+            pathName, ifceName, prop.name, Ir::CALLBACK_PARAM);
+        output += line(0, "}");
+        output += '\n';
     }
 
     output += line(0, "} // namespace %s", space);
@@ -843,6 +872,9 @@ std::string genProxyHeader(const Ir::Root& aIr, const Ir::Interface& aIfce) {
         if (!prop.readonly) {
             output += genProxyFunc(aIfce.name, propertySetFunc(aIr, prop), false);
         }
+
+        //! onPropChanged
+        output += genProxyFunc(aIfce.name, propertyChangedFunc(aIr, prop), false);
     }
 
     //! Definition of private variable
@@ -906,6 +938,9 @@ std::string genProxySource(const Ir::Root& aIr, const Ir::Interface& aIfce) {
         if (!prop.readonly) {
             output += genProxyFunc(cls, propertySetFunc(aIr, prop), true);
         }
+
+        //! onPropChanged
+        output += genProxyFunc(cls, propertyChangedFunc(aIr, prop), true);
     }
 
     output += line(0, "} // namespace %s", ns);

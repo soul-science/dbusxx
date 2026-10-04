@@ -794,6 +794,11 @@ std::vector<Error> validateAst(const Ast::Root& aAstRoot) {
                 addGenerated(serverNames, SKELETON_CLASS_STR, owner,
                     Ir::propertySetName(p.name), p.loc);
             }
+
+            addGenerated(proxyNames, PROXY_CLASS_STR, owner,
+                Ir::propertyChangedName(p.name), p.loc);
+            addGenerated(serverNames, SKELETON_CLASS_STR, owner,
+                Ir::propertyChangedName(p.name), p.loc);
         }
     }
 
