@@ -31,6 +31,13 @@ static Root makeCodegenRoot() {
         aStructType.fields = { field(base("string"), "name") };
         aRoot.structs.push_back(std::move(aStructType));
     }
+    {
+        //! a struct carrying a Unix fd member -> signature "(sh)"
+        StructType aStructType;
+        aStructType.name = "Packet";
+        aStructType.fields = { field(base("string"), "tag"), field(base("fd"), "data") };
+        aRoot.structs.push_back(std::move(aStructType));
+    }
 
     {
         Interface aInterface;
@@ -52,12 +59,27 @@ static Root makeCodegenRoot() {
         aInterface.methods.push_back(method("asyncOnly", { field(base("int32"), "val") },
             base("bool"), { ann("async") }));
 
+        //! Unix fd ('h'): returned by value, params borrowed as const&, and
+        //! carried inside a container / a struct member
+        aInterface.methods.push_back(method("echoFd",
+            { field(base("fd"), "handle") }, base("fd")));
+        aInterface.methods.push_back(method("echoFdList",
+            { field(vect(base("fd")), "fds") }, vect(base("fd"))));
+        aInterface.methods.push_back(method("sendPacket",
+            { field(named("Packet"), "pkt") }, named("Packet")));
+
         //! no parameters: its emit wrapper must not gain a trailing comma
         aInterface.signals.push_back(signal("noArgEvent", {}));
         aInterface.signals.push_back(signal("valueChanged",
             { field(base("int32"), "old"), field(base("int32"), "new") }));
         aInterface.signals.push_back(signal("legacyEvent",
             { field(base("int32"), "code") }, { ann("deprecated") }));
+
+        //! Unix fd signal + a container-of-fd signal
+        aInterface.signals.push_back(signal("onReceiveFd",
+            { field(base("fd"), "testFd") }));
+        aInterface.signals.push_back(signal("onReceiveFds",
+            { field(vect(base("fd")), "fds") }));
 
         aInterface.properties.push_back(property("version", base("string"), "{\"1.0.0\"}",
             { ann("readonly") }));
@@ -250,6 +272,52 @@ int main() {
         "[[nodiscard]] Dbusxx::Status onNoArgEvent(std::function<void()> aCallback);");
     expectContains("proxy: no-arg signal listener call", aProxySrc,
         "mClient.listenSignal(\"noArgEvent\", std::move(aCallback))");
+
+    // ---- Unix fd ('h'): borrowed as const&, returned by value ----
+    expectContains("types: fd include", aTypes, "#include <dbusxx/UnixFd.hpp>");
+    expectContains("types: struct fd member", aTypes,
+        "struct Packet {\n    std::string tag;\n    Dbusxx::UnixFd data;");
+    expectContains("skel: fd signal registration", aSkeletonHeader,
+        "DBUSXX_SIGNAL(onReceiveFd, Dbusxx::UnixFd)");
+    //! The emit wrapper borrows the fd as const& (the caller keeps its own fd;
+    //! sd-bus dups it into the message). A container of fd binds the same way.
+    expectContains("skel: fd signal emit wrapper is const&", aSkeletonHeader,
+        "    [[nodiscard]] Dbusxx::Status emitOnReceiveFd("
+        "const Dbusxx::UnixFd& testFd);");
+    expectContains("skel: fd-list signal emit wrapper is const&", aSkeletonHeader,
+        "    [[nodiscard]] Dbusxx::Status emitOnReceiveFds("
+        "const std::vector<Dbusxx::UnixFd>& fds);");
+    expectContains("skel src: fd signal emit body", aSkeletonSrc,
+        "Dbusxx::Status CalculatorServer::emitOnReceiveFd("
+        "const Dbusxx::UnixFd& testFd) {\n"
+        "    return this->emit(COM_EXAMPLE_CALC_PATH, "
+        "COM_EXAMPLE_CALC_CALCULATOR_IFACE, \"onReceiveFd\", testFd);\n}");
+    //! Method: the fd param is borrowed, the returned fd is by value (ownership
+    //! moves to the caller)
+    expectContains("skel: fd method", aSkeletonHeader,
+        "Dbusxx::UnixFd echoFd(const Dbusxx::UnixFd& handle);");
+    expectContains("skel: fd-list method", aSkeletonHeader,
+        "std::vector<Dbusxx::UnixFd> echoFdList("
+        "const std::vector<Dbusxx::UnixFd>& fds);");
+    expectContains("skel: struct-with-fd method", aSkeletonHeader,
+        "Packet sendPacket(const Packet& pkt);");
+    expectContains("skel src: fd method body", aSkeletonSrc,
+        "Dbusxx::UnixFd CalculatorServer::echoFd(const Dbusxx::UnixFd& handle) {\n"
+        "    return mIface->echoFd(handle);\n}");
+    expectContains("proxy: fd method", aProxyHeader,
+        "[[nodiscard]] Dbusxx::Reply<Dbusxx::UnixFd> echoFd("
+        "const Dbusxx::UnixFd& handle);");
+    expectContains("proxy: fd async handle", aProxyHeader,
+        "[[nodiscard]] Dbusxx::PendingReply<Dbusxx::UnixFd> echoFdAsync("
+        "const Dbusxx::UnixFd& handle);");
+    expectContains("proxy src: fd sync call", aProxySrc,
+        "mClient.callSync<Dbusxx::UnixFd>(\"echoFd\", handle)");
+    //! The signal listener mirrors the emit wrapper: const& on both sides
+    expectContains("proxy: fd signal listener is const&", aProxyHeader,
+        "[[nodiscard]] Dbusxx::Status onOnReceiveFd("
+        "std::function<void(const Dbusxx::UnixFd& testFd)> aCallback);");
+    expectContains("proxy src: fd signal listener call", aProxySrc,
+        "mClient.listenSignal(\"onReceiveFd\", std::move(aCallback))");
 
     // ---- Proxy: a void method keeps the explicit <void, TimeoutUsec> ----
     expectContains("proxy: void + timeout", aProxySrc,

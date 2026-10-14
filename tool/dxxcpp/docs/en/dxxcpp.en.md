@@ -155,6 +155,9 @@ interface Logger {
 | `bool` | `bool` | `b` |
 | `string` | `std::string` | `s` |
 | `bytes` | `std::vector<std::uint8_t>` | `ay` |
+| `fd` | `Dbusxx::UnixFd` | `h` |
+
+> `fd` is the library's Unix file descriptor type, `Dbusxx::UnixFd`.
 
 ### 2.3 Containers
 

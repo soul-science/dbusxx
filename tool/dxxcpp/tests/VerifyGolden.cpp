@@ -46,6 +46,13 @@ static Root makeGoldenRoot() {
         aStructType.fields = { field(named("UserId"), "id"), field(base("string"), "name") };
         aRoot.structs.push_back(std::move(aStructType));
     }
+    {
+        //! a struct with a Unix fd member -> struct signature "(sh)"
+        StructType aStructType;
+        aStructType.name = "Packet";
+        aStructType.fields = { field(base("string"), "tag"), field(base("fd"), "data") };
+        aRoot.structs.push_back(std::move(aStructType));
+    }
 
     // interface Calculator
     {
@@ -73,10 +80,25 @@ static Root makeGoldenRoot() {
             { field(base("int32"), "code"), field(base("string"), "msg") },
             std::nullopt, { ann("deprecated") }));
 
+        //! Unix fd ('h'): a plain fd, a container of fd (ah), and an fd-bearing
+        //! struct ((sh))
+        aInterface.methods.push_back(method("echoFd",
+            { field(base("fd"), "handle") }, base("fd")));
+        aInterface.methods.push_back(method("echoFds",
+            { field(vect(base("fd")), "fds") }, vect(base("fd"))));
+        aInterface.methods.push_back(method("loadPacket",
+            { field(named("Packet"), "pkt") }, named("Packet")));
+
         aInterface.signals.push_back(signal("valueChanged",
             { field(base("int32"), "oldVal"), field(base("int32"), "newVal") }));
         aInterface.signals.push_back(signal("pointMoved",
             { field(named("Point"), "oldPos"), field(named("Point"), "newPos") }));
+
+        //! fd signal and container-of-fd signal
+        aInterface.signals.push_back(signal("onReceiveFd",
+            { field(base("fd"), "testFd") }));
+        aInterface.signals.push_back(signal("onReceiveFds",
+            { field(vect(base("fd")), "fds") }));
 
         aInterface.properties.push_back(property("version", base("string"), "{\"1.0.0\"}",
             { ann("readonly") }));
@@ -108,7 +130,7 @@ static const std::unordered_map<std::string, std::string>& baseSigTable() {
         { "int8", "y" }, { "int16", "n" }, { "int32", "i" }, { "int64", "x" },
         { "uint8", "y" }, { "uint16", "q" }, { "uint32", "u" }, { "uint64", "t" },
         { "float", "d" }, { "double", "d" }, { "bool", "b" }, { "string", "s" },
-        { "bytes", "ay" } };
+        { "bytes", "ay" }, { "fd", "h" } };
     return aTable;
 }
 
@@ -286,11 +308,12 @@ void caseGoldenIr(const Ir::Root& aRoot) {
     expectEq("package", aRoot.package, "com.example.calc");
 
     //! structs keep declaration order; a struct signature is its field signature
-    expectEq("struct count", aRoot.structs.size(), 3);
-    if (aRoot.structs.size() == 3) {
+    expectEq("struct count", aRoot.structs.size(), 4);
+    if (aRoot.structs.size() == 4) {
         expectEq("struct[0]", aRoot.structs[0].name, "Point");
         expectEq("struct[1]", aRoot.structs[1].name, "Rectangle");
         expectEq("struct[2]", aRoot.structs[2].name, "User");
+        expectEq("struct[3]", aRoot.structs[3].name, "Packet");
     }
 
     //! aliases are resolved to their target type
@@ -309,8 +332,8 @@ void caseGoldenIr(const Ir::Root& aRoot) {
     //! Calculator: methods / signals / properties
     const Ir::Interface& aCalc = aRoot.interfaces[0];
     expectEq("iface[0]", aCalc.name, "Calculator");
-    expectEq("Calculator.methods", aCalc.methods.size(), 9);
-    expectEq("Calculator.signals", aCalc.signals.size(), 2);
+    expectEq("Calculator.methods", aCalc.methods.size(), 12);
+    expectEq("Calculator.signals", aCalc.signals.size(), 4);
     expectEq("Calculator.properties", aCalc.properties.size(), 4);
 
     expectMethod(aRoot, aCalc, "add", "ii", "i");
@@ -322,6 +345,11 @@ void caseGoldenIr(const Ir::Root& aRoot) {
     expectMethod(aRoot, aCalc, "addUser", "(is)", "(is)");
     expectMethod(aRoot, aCalc, "slowOp", "i", "i");
     expectMethod(aRoot, aCalc, "legacy", "is", "");
+
+    //! Unix fd: 'h', a container of fd 'ah', and an fd-bearing struct '(sh)'
+    expectMethod(aRoot, aCalc, "echoFd", "h", "h");
+    expectMethod(aRoot, aCalc, "echoFds", "ah", "ah");
+    expectMethod(aRoot, aCalc, "loadPacket", "(sh)", "(sh)");
 
     //! method flags: @timeout -> microseconds, @deprecated -> flag
     const Ir::Method* aSlowOp = findMethod(aCalc, "slowOp");
@@ -335,6 +363,8 @@ void caseGoldenIr(const Ir::Root& aRoot) {
     //! signals
     expectEq("signal valueChanged", paramsSig(aRoot, aCalc.signals[0].params), "ii");
     expectEq("signal pointMoved", paramsSig(aRoot, aCalc.signals[1].params), "(ii)(ii)");
+    expectEq("signal onReceiveFd", paramsSig(aRoot, aCalc.signals[2].params), "h");
+    expectEq("signal onReceiveFds", paramsSig(aRoot, aCalc.signals[3].params), "ah");
 
     //! properties: type / raw default text / readonly
     expectProperty(aRoot, aCalc, "version", "s", "{\"1.0.0\"}", true);

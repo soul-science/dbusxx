@@ -10,6 +10,12 @@ struct Point {
     int32 y;
 };
 
+//! a struct carrying a Unix fd member -> generated signature "(sh)"
+struct Packet {
+    string tag;
+    fd data;
+};
+
 //! type alias
 using ConfigMap = map<string, string>;
 
@@ -38,10 +44,22 @@ interface Calculator {
     @sync method syncOnly(int32 val) -> int32;
     @async method asyncOnly(int32 val) -> bool;
 
+    //! Unix fd ('h'): params are borrowed (const&), returned fds are owned;
+    //! also inside a container (ah) and as a struct member (sh)
+    method echoFd(fd handle) -> fd;
+    method echoFds(vector<fd> fds) -> vector<fd>;
+    method sendPacket(Packet pkt) -> Packet;
+
     //! signals
     //! Skeleton side: registration only (DBUSXX_SIGNAL); Proxy side: a permanent
     //! on<Name> listener (capture only objects outliving the Proxy).
     signal valueChanged(int32 oldVal, int32 newVal);
+
+    //! a Unix fd signal (signature "h")
+    signal onReceiveFd(fd testFd);
+
+    //! a container of fd (signature "ah")
+    signal onReceiveFds(vector<fd> fds);
 
     //! No arg signal
     signal noArgEvent();

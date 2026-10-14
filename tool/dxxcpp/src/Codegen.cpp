@@ -89,7 +89,8 @@ std::string cppType(const Ir::Root& aIr, Ir::TypeId aId) {
         {"double", "double"},
         {"bool", "bool"},
         {"string", "std::string"},
-        {"bytes", "std::vector<std::uint8_t>"}
+        {"bytes", "std::vector<std::uint8_t>"},
+        {"fd", "Dbusxx::UnixFd"}
     };
 
     const Ir::TypeNode& node = aIr.type(aId);
@@ -488,6 +489,8 @@ std::string genTypesHeader(const Ir::Root& aIr) {
     out += line(0, "#include <string>");
     out += line(0, "#include <type_traits>");
     out += line(0, "#include <vector>");
+    out += '\n';
+    out += line(0, "#include <dbusxx/UnixFd.hpp>");
     out += '\n';
 
     //! Definition of namespace

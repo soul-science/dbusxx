@@ -465,6 +465,39 @@ int main(int argc, char** argv) {
     expectContains("proxy: deprecated listener call", aProxySrc,
         "mClient.listenSignal(\"legacyEvent\", std::move(aCallback))");
 
+    section("codegen: Unix fd ('h') end to end");
+    //! Types: the struct member is a UnixFd and the fd header is pulled in
+    expectContains("types: fd include", aTypes, "#include <dbusxx/UnixFd.hpp>");
+    expectContains("types: struct fd member", aTypes,
+        "struct Packet {\n    std::string tag;\n    Dbusxx::UnixFd data;");
+    //! Signal: the emit wrapper borrows the fd as const& (the caller keeps its
+    //! own fd; sd-bus dups it into the message), the listener mirrors that
+    expectContains("skel: fd signal registration", aSkeleton,
+        "DBUSXX_SIGNAL(onReceiveFd, Dbusxx::UnixFd)");
+    expectContains("skel: fd signal emit wrapper is const&", aSkeleton,
+        "[[nodiscard]] Dbusxx::Status emitOnReceiveFd("
+        "const Dbusxx::UnixFd& testFd);");
+    expectContains("proxy: fd signal listener is const&", aProxy,
+        "[[nodiscard]] Dbusxx::Status onOnReceiveFd("
+        "std::function<void(const Dbusxx::UnixFd& testFd)> aCallback);");
+    expectContains("proxy src: fd signal listener call", aProxySrc,
+        "mClient.listenSignal(\"onReceiveFd\", std::move(aCallback))");
+    //! Method: a borrowed fd param, an owned fd return, and a container of fd
+    expectContains("skel: fd method", aSkeleton,
+        "Dbusxx::UnixFd echoFd(const Dbusxx::UnixFd& handle);");
+    expectContains("skel: fd-list method", aSkeleton,
+        "std::vector<Dbusxx::UnixFd> echoFds("
+        "const std::vector<Dbusxx::UnixFd>& fds);");
+    expectContains("skel: struct-with-fd method", aSkeleton,
+        "Packet sendPacket(const Packet& pkt);");
+    expectContains("proxy: fd method", aProxy,
+        "[[nodiscard]] Dbusxx::Reply<Dbusxx::UnixFd> echoFd("
+        "const Dbusxx::UnixFd& handle);");
+    expectContains("proxy src: fd sync call", aProxySrc,
+        "mClient.callSync<Dbusxx::UnixFd>(\"echoFd\", handle)");
+    expectContains("proxy src: fd-list sync call", aProxySrc,
+        "mClient.callSync<std::vector<Dbusxx::UnixFd>>(\"echoFds\", fds)");
+
     section("codegen: LoggerSkeleton.hpp");
     const std::string aLogger = Codegen::genSkeletonHeader(*aSemaResult.ir,
         aSemaResult.ir->interfaces[1]);
