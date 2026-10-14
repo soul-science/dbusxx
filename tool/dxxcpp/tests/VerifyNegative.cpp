@@ -342,6 +342,25 @@ Ast::Root reservedName() {
     return aRoot;
 }
 
+// struct fd { int32 x; }  -- 'fd' is a basic type name, hence reserved
+Ast::Root reservedFdStructName() {
+    using namespace tb;
+    auto aRoot = pkg();
+    Ast::StructType aStructType;
+    aStructType.name = "fd";
+    aStructType.fields = { field(base("int32"), "x") };
+    aRoot.structs.push_back(std::move(aStructType));
+    return aRoot;
+}
+
+// using fd = int32;        -- the alias path checks the same reserved set
+Ast::Root reservedFdAliasName() {
+    using namespace tb;
+    auto aRoot = pkg();
+    aRoot.alias.push_back(AliasType{ "fd", base("int32"), {} });
+    return aRoot;
+}
+
 // @timeout used on a property
 Ast::Root timeoutOnProperty() {
     using namespace tb;
@@ -509,6 +528,17 @@ Ast::Root basicTemplateArg() {
     return aRoot;
 }
 
+// fd<string> -> the 'fd' basic type takes no template argument
+Ast::Root fdBasicTemplateArg() {
+    using namespace tb;
+    auto aRoot = pkg();
+    Ast::StructType aStructType;
+    aStructType.name = "A";
+    aStructType.fields = { field(Ast::Type{ "fd", { base("string") }, {} }, "x") };
+    aRoot.structs.push_back(std::move(aStructType));
+    return aRoot;
+}
+
 // P<int32> where P is a struct -> structs take no template parameters
 Ast::Root structTemplateArg() {
     using namespace tb;
@@ -649,6 +679,10 @@ int main() {
         { "dup struct field",       { "duplicate field" }, dupField },
         { "dup type (struct/alias)",{ "duplicate type name" }, dupType },
         { "reserved type name",     { "is reserved" }, reservedName },
+        { "reserved type name 'fd' (struct)", { "type name 'fd' is reserved" },
+          reservedFdStructName },
+        { "reserved type name 'fd' (alias)",  { "type name 'fd' is reserved" },
+          reservedFdAliasName },
         { "empty struct",           { "must have at least one field" }, emptyStruct },
         { "@timeout on property",   { "@timeout is only for method" }, timeoutOnProperty },
         { "unknown annotation",     { "unknown annotation" }, unknownAnnotation },
@@ -665,6 +699,8 @@ int main() {
         { "vector<T> arity",        { "vector<T> only need 1 template arg" }, vectorArity },
         { "array<T, N> arity",      { "array<T, N>: only need 2 template args" }, arrayArity },
         { "basic type with template arg", { "cannot have template arg" }, basicTemplateArg },
+        { "fd with template arg",         { "The basic type 'fd' cannot have template arg" },
+          fdBasicTemplateArg },
         { "struct with template arg",     { "does not accept template parameters" }, structTemplateArg },
         { "dup interface name",     { "duplicate interface" }, dupInterface },
         { "package segment is C++ keyword", { "package segment 'new' is a C++ keyword" },

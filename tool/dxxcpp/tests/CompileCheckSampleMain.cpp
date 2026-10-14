@@ -9,6 +9,8 @@
 #include <utility>
 #include <vector>
 
+#include <dbusxx/UnixFd.hpp>
+
 #include "CalculatorSkeleton.hpp"
 #include "CalculatorProxy.hpp"
 #include "LoggerSkeleton.hpp"
@@ -27,6 +29,14 @@ struct CalcImpl : CalculatorInterface {
     std::int32_t syncOnly(std::int32_t val) override { return val; }
     bool asyncOnly(std::int32_t val) override { return val != 0; }
     void ping() override {}
+
+    //! Unix fd ('h'): borrowed param, owned return, container and struct member
+    Dbusxx::UnixFd echoFd(const Dbusxx::UnixFd& handle) override {
+        return Dbusxx::UnixFd{};
+    }
+    std::vector<Dbusxx::UnixFd> echoFds(
+        const std::vector<Dbusxx::UnixFd>& fds) override { return {}; }
+    Packet sendPacket(const Packet& pkt) override { return {}; }
 };
 
 struct LoggerImpl : LoggerInterface {
@@ -80,6 +90,17 @@ int main() {
     (void)aPingReply;
     (void)aPingPending;
     (void)aPingStatus;
+
+    //! Unix fd ('h'): params bind to the generated const&, returns are owned;
+    //! the signal listeners mirror the emit wrappers
+    (void)aCalcProxy.echoFd(Dbusxx::UnixFd{});
+    (void)aCalcProxy.echoFds(std::vector<Dbusxx::UnixFd>{});
+    (void)aCalcProxy.sendPacket(Packet{ "t", Dbusxx::UnixFd{} });
+    (void)aCalcProxy.onOnReceiveFd([] (const Dbusxx::UnixFd& aFd) { (void)aFd; });
+    (void)aCalcProxy.onOnReceiveFds(
+        [] (const std::vector<Dbusxx::UnixFd>& aFds) { (void)aFds; });
+    (void)aCalc.emitOnReceiveFd(Dbusxx::UnixFd{});
+    (void)aCalc.emitOnReceiveFds(std::vector<Dbusxx::UnixFd>{});
 
     //! Each signal gets an onXxx listener (Session::listenSignal + its isValidArgs
     //! guard). Listeners are permanent: capture only objects outliving the Proxy.

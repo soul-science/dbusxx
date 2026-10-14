@@ -37,7 +37,7 @@ bool isBasicName(const std::string& aName) {
     static const std::unordered_set<std::string> basic = {
         "int8", "int16", "int32", "int64",
         "uint8", "uint16", "uint32", "uint64",
-        "float", "double", "bool", "string", "bytes"};
+        "float", "double", "bool", "string", "bytes", "fd"};
     return basic.count(aName) > 0;
 }
 

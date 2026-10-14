@@ -155,6 +155,9 @@ interface Logger {
 | `bool` | `bool` | `b` |
 | `string` | `std::string` | `s` |
 | `bytes` | `std::vector<std::uint8_t>` | `ay` |
+| `fd` | `Dbusxx::UnixFd` | `h` |
+
+> `fd` 是库中的 Unix 文件描述符类型 `Dbusxx::UnixFd`。
 
 ### 2.3 容器
 

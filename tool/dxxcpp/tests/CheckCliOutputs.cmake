@@ -41,6 +41,8 @@ foreach(NEEDLE
     "static_assert(std::is_aggregate_v<Point>"
     "inline constexpr const char* COM_EXAMPLE_CALC_PATH { \"/com/example/calc\" };"
     "inline constexpr const char* COM_EXAMPLE_CALC_CALCULATOR_IFACE"
+    "#include <dbusxx/UnixFd.hpp>"
+    "struct Packet {\n    std::string tag;\n    Dbusxx::UnixFd data;"
 )
     string(FIND "${TYPES_HPP}" "${NEEDLE}" FOUND_AT)
     if(FOUND_AT EQUAL -1)
@@ -74,6 +76,11 @@ foreach(NEEDLE
     "//! @deprecated\n    DBUSXX_SIGNAL(legacyEvent, std::int32_t)"
     "${EMIT_VALUE_CHANGED}"
     "${EMIT_NO_ARG_EVENT}"
+    "DBUSXX_SIGNAL(onReceiveFd, Dbusxx::UnixFd)"
+    "[[nodiscard]] Dbusxx::Status emitOnReceiveFd(const Dbusxx::UnixFd& testFd);"
+    "Dbusxx::UnixFd echoFd(const Dbusxx::UnixFd& handle);"
+    "std::vector<Dbusxx::UnixFd> echoFds(const std::vector<Dbusxx::UnixFd>& fds);"
+    "Packet sendPacket(const Packet& pkt);"
     "[[nodiscard]] std::int32_t getCounter();"
     "void setCounter(const std::int32_t& counter);"
     "void onVersionChanged(std::function<void(const std::string&)> aCallback);"
@@ -91,6 +98,11 @@ endforeach()
 string(CONCAT LISTENER_VALUE_CHANGED
     "Dbusxx::Status onValueChanged("
     "std::function<void(std::int32_t oldVal, std::int32_t newVal)> aCallback")
+
+#! The fd signal listener is long too: bind the name to its signature
+string(CONCAT LISTENER_ON_RECEIVE_FD
+    "Dbusxx::Status onOnReceiveFd("
+    "std::function<void(const Dbusxx::UnixFd& testFd)> aCallback);")
 
 #! The property change listeners are long too: bind the name to its signature
 string(CONCAT CHANGED_VERSION
@@ -115,6 +127,8 @@ foreach(NEEDLE
     "Dbusxx::Status addAsync(std::function<void(Dbusxx::Reply<std::int32_t>)> aCallback"
     "Dbusxx::Status asyncOnlyAsync(std::function<void(Dbusxx::Reply<bool>)> aCallback"
     "${LISTENER_VALUE_CHANGED}"
+    "[[nodiscard]] Dbusxx::Reply<Dbusxx::UnixFd> echoFd(const Dbusxx::UnixFd& handle);"
+    "${LISTENER_ON_RECEIVE_FD}"
     "[[nodiscard]] Dbusxx::Reply<std::int32_t> getCounter();"
     "[[nodiscard]] Dbusxx::Status setCounter(const std::int32_t& counter);"
     "${CHANGED_VERSION}"
@@ -140,6 +154,8 @@ foreach(NEEDLE
     "mClient.listenSignal(\"valueChanged\", std::move(aCallback))"
     "mClient.listenSignal(\"legacyEvent\", std::move(aCallback))"
     "mClient.callAsync<bool>(\"asyncOnly\", std::move(aCallback), val)"
+    "mClient.callSync<Dbusxx::UnixFd>(\"echoFd\", handle)"
+    "mClient.listenSignal(\"onReceiveFd\", std::move(aCallback))"
     "mClient.getProperty<std::string>(\"version\")"
     "mClient.setProperty<std::int32_t>(\"counter\", counter)"
     "mClient.onPropertyChanged(\"counter\", std::move(aCallback))"
@@ -170,6 +186,12 @@ string(CONCAT BODY_SIGNAL_NO_ARG
     "Dbusxx::Status CalculatorServer::emitNoArgEvent() {\n"
     "    return this->emit(COM_EXAMPLE_CALC_PATH, COM_EXAMPLE_CALC_CALCULATOR_IFACE, "
     "\"noArgEvent\");\n}")
+#! The fd emit wrapper borrows the fd: the body forwards the const& unchanged
+string(CONCAT BODY_EMIT_FD
+    "Dbusxx::Status CalculatorServer::emitOnReceiveFd("
+    "const Dbusxx::UnixFd& testFd) {\n"
+    "    return this->emit(COM_EXAMPLE_CALC_PATH, COM_EXAMPLE_CALC_CALCULATOR_IFACE, "
+    "\"onReceiveFd\", testFd);\n}")
 #! Property accessors drop the Status on purpose (a local read/write cannot fail
 #! the way a remote one does), so bind the (void) cast to the member
 string(CONCAT BODY_SET_COUNTER
@@ -192,6 +214,7 @@ foreach(NEEDLE
     "${BODY_NOTIFY}"
     "${BODY_SIGNAL}"
     "${BODY_SIGNAL_NO_ARG}"
+    "${BODY_EMIT_FD}"
     "${BODY_SET_COUNTER}"
     "${BODY_ON_COUNTER_CHANGED}"
 )
